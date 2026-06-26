@@ -4,7 +4,7 @@
 // Bug context (2026-05-09 round-8 host.example.com):
 //   Title: "Pentest round-8 — full Sprint A+B+C+polish+gates validation on host.example.com"
 //   Config: { target: "https://host.example.com", target_url: "https://host.example.com" }
-//   Pre-fix: bare 'host.example.com' won from title, EKLAVYA crawled wrong URL.
+//   Pre-fix: bare 'host.example.com' won from title, TRACER crawled wrong URL.
 //   Post-fix: config.target_url MUST win over title-extracted bare domain.
 //
 // Priority order locked in here:
