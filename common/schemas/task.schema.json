@@ -1,0 +1,14 @@
+{
+  "$comment": "Autonomous Agent OS — task (derived at read-time from taskId + engagement record + dispatch; tasks.json is NOT migrated). validate.js subset only.",
+  "title": "task",
+  "type": "object",
+  "required": ["task_id", "engagement_id", "mode", "status", "schemaVersion"],
+  "properties": {
+    "task_id": { "type": "string", "minLength": 1 },
+    "engagement_id": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "enum": ["blackbox", "static", "whitebox", "hybrid"] },
+    "status": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "type": "string" }
+  },
+  "additionalProperties": true
+}

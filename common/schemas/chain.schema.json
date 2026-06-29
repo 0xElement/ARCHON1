@@ -1,0 +1,18 @@
+{
+  "$comment": "Autonomous Agent OS — typed attack-chain record. chain_id aliases chains[].id; finding_ids alias candidate_ids (minItems 1). current_confidence/missing_proof/next_validation_task are derived post-verification (NOT on the LLM CHAIN_OUTPUT_SCHEMA). validate.js subset only.",
+  "title": "chain",
+  "type": "object",
+  "required": ["chain_id", "name", "severity", "finding_ids", "steps"],
+  "properties": {
+    "chain_id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string" },
+    "severity": { "type": "string", "enum": ["Info", "Low", "Medium", "High", "Critical", "Unknown"] },
+    "finding_ids": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "steps": { "type": "array" },
+    "current_confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "missing_proof": { "type": "array", "items": { "type": "string" } },
+    "next_validation_task": { "type": "object" },
+    "schemaVersion": { "type": "string" }
+  },
+  "additionalProperties": true
+}

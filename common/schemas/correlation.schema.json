@@ -1,0 +1,16 @@
+{
+  "$comment": "Autonomous Agent OS — typed correlation record (Block F). correlation_id = CORR-<sha1(sorted linked candidate_ids)[:10]> (idempotent). confidence_delta is ADVISORY and never alters validation_status. validate.js subset only.",
+  "title": "correlation",
+  "type": "object",
+  "required": ["correlation_id", "linked_items", "correlation_type", "schemaVersion"],
+  "properties": {
+    "correlation_id": { "type": "string", "minLength": 1 },
+    "linked_items": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "correlation_type": { "type": "string", "enum": ["source_to_blackbox", "blackbox_to_source", "chain", "duplicate", "conflict"] },
+    "confidence_delta": { "type": "number" },
+    "summary": { "type": "string" },
+    "recommended_next_task": { "type": "object" },
+    "schemaVersion": { "type": "string" }
+  },
+  "additionalProperties": true
+}

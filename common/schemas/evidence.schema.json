@@ -1,0 +1,15 @@
+{
+  "$comment": "Autonomous Agent OS — addressable evidence record (derived from inline finding evidence + poc-evidence/<taskId>/<findingId>.json; not moved). validate.js subset only.",
+  "title": "evidence",
+  "type": "object",
+  "required": ["evidence_id", "candidate_id", "type", "quality_level", "schemaVersion"],
+  "properties": {
+    "evidence_id": { "type": "string", "minLength": 1 },
+    "candidate_id": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "quality_level": { "type": "string", "enum": ["L0", "L1", "L2", "L3", "L4"] },
+    "content_ref": { "type": "string" },
+    "schemaVersion": { "type": "string" }
+  },
+  "additionalProperties": true
+}

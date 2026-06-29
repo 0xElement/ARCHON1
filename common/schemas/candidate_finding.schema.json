@@ -1,0 +1,18 @@
+{
+  "$comment": "Autonomous Agent OS — candidate finding. SUPERSET of normalizeFinding() output (additionalProperties:true so every ARCHON field passes through). severity is ARCHON title-case (authoritative); spec lowercase is a derived label via mapping.js. validation_status is NEVER written by the mapping layer.",
+  "title": "candidate_finding",
+  "type": "object",
+  "required": ["candidate_id", "title", "severity", "schemaVersion", "auditor_status", "judge_status"],
+  "properties": {
+    "candidate_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "severity": { "type": "string", "enum": ["Info", "Low", "Medium", "High", "Critical"] },
+    "auditor_status": { "type": "string", "enum": ["validated", "needs_more_evidence", "rejected", "pending"] },
+    "judge_status": { "type": "string", "enum": ["accepted", "pending", "rejected"] },
+    "quality_level": { "type": "string", "enum": ["L0", "L1", "L2", "L3", "L4"] },
+    "source": { "type": "string" },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "schemaVersion": { "type": "string" }
+  },
+  "additionalProperties": true
+}

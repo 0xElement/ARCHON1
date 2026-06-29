@@ -1,0 +1,15 @@
+{
+  "$comment": "Autonomous Agent OS — source feature map entry (derived from feature-queue.json + features/<slug>.md). validate.js subset only.",
+  "title": "source_feature_map",
+  "type": "object",
+  "required": ["feature_id", "feature_name", "coverage_status", "schemaVersion"],
+  "properties": {
+    "feature_id": { "type": "string", "minLength": 1 },
+    "feature_name": { "type": "string", "minLength": 1 },
+    "coverage_status": { "type": "string", "enum": ["unmapped", "mapped", "partial", "reviewed"] },
+    "source_files": { "type": "array", "items": { "type": "string" } },
+    "keywords": { "type": "array", "items": { "type": "string" } },
+    "schemaVersion": { "type": "string" }
+  },
+  "additionalProperties": true
+}
