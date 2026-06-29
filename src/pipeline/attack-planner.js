@@ -20,7 +20,16 @@ const VULN_CLASSES = [
   'ssti', 'xxe', 'lfi', 'csrf', 'business-logic', 'api', 'deserialization', 'other',
 ]
 
-function buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData } = {}) {
+// White-box source guidance (Autonomous OS). Returns '' (byte-identical) when
+// absent, so a black-box plan is unchanged. See ULTRAPLAN §3.2.
+function _sourceGuidanceBlock(sg) {
+  if (!sg || !Array.isArray(sg.candidate_targets) || !sg.candidate_targets.length) return ''
+  const lines = sg.candidate_targets.slice(0, 25).map(c =>
+    `- [${c.vuln_class}] ${c.candidate_id} @ ${c.file || c.url || '?'}${c.line ? ':' + c.line : ''} — ${(c.suggested_blackbox_task && c.suggested_blackbox_task.objective) || 'live-confirm'}`).join('\n')
+  return `\n\n## SOURCE GUIDANCE (white-box — AIM the plan at these; each is a HYPOTHESIS to confirm LIVE, never a confirmed finding)\nPriority classes: ${(sg.priority_classes || []).join(', ')}\n${lines}`
+}
+
+function buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData, sourceGuidance } = {}) {
   const fp = fingerprint || {}
   const fpLine = [
     fp.product ? `Product: ${fp.product}${fp.version ? ' ' + fp.version : ''}` : '',
@@ -46,7 +55,7 @@ RECON / FINDINGS SO FAR:
 ${(reconDump || '(none)').slice(0, 6000)}
 
 ENDPOINTS / SURFACE:
-${(endpointData || '(none)').slice(0, 4000)}
+${(endpointData || '(none)').slice(0, 4000)}${_sourceGuidanceBlock(sourceGuidance)}
 
 Output ONE JSON array and NOTHING else (no prose, no code fence). Each element:
 {"endpoint":"<url or path>","params":["<param>",...],"vuln_class":"<one of: ${VULN_CLASSES.join('|')}>",

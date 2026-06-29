@@ -146,4 +146,34 @@ function maybeLaunchSourceGuidedPentest(crTaskId, deps = {}) {
   return { launched: true, pentestTaskId, guided: !!(meta.sourceGuidanceFile) }
 }
 
-module.exports = { buildSourceGuidance, buildRootCauseRequests, shadowRecommend, maybeLaunchSourceGuidedPentest }
+/**
+ * Recovery sweep (audit Issue 3 + ⚠️#6). Scans every engagement-*.json for an
+ * orphaned deferral (deferredPentestDispatch still present, iteration still
+ * pending-source-guidance) and launches it — covering the case where the
+ * code-review branch threw before the completion hook fired, or a flag/env skew
+ * prevented the normal launch. Driven by the persisted signal (no flag check).
+ * Returns the list of engagement ids it launched. Fail-soft.
+ */
+function sweepOrphanedDeferrals(deps = {}) {
+  const intelRoot = deps.intelRoot || agentPaths.INTEL_ROOT
+  const writeInbox = deps.writeInbox
+  if (!writeInbox) return []
+  const launched = []
+  let files = []
+  try { files = fs.readdirSync(intelRoot).filter(f => /^engagement-.*\.json$/.test(f)) } catch { return [] }
+  for (const f of files) {
+    try {
+      const eng = _readJson(path.join(intelRoot, f))
+      if (!eng || !eng.deferredPentestDispatch) continue
+      const it = (eng.iterations || []).find(i => i.kind === 'blackbox')
+      if (it && it.status && it.status !== 'pending-source-guidance') continue
+      const engId = eng.engagementId || f.replace(/^engagement-/, '').replace(/\.json$/, '')
+      const crIt = (eng.iterations || []).find(i => i.kind === 'whitebox')
+      const r = maybeLaunchSourceGuidedPentest(crIt ? crIt.taskId : '', { intelRoot, engagementId: engId, writeInbox })
+      if (r.launched) launched.push(engId)
+    } catch { /* fail-soft per engagement */ }
+  }
+  return launched
+}
+
+module.exports = { buildSourceGuidance, buildRootCauseRequests, shadowRecommend, maybeLaunchSourceGuidedPentest, sweepOrphanedDeferrals }

@@ -2883,7 +2883,15 @@ async function runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerpri
     let endpointData = ''
     try { if (fs.existsSync(endpointFile)) endpointData = fs.readFileSync(endpointFile, 'utf-8').slice(0, 4000) } catch {}
 
-    const prompt = planner.buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData })
+    // White-box source guidance (Autonomous OS, flag-gated). Absent / flag-off ⇒ undefined ⇒ byte-identical plan.
+    let __sourceGuidance = null
+    try {
+      if (agentPaths.flagEnabled && agentPaths.flagEnabled('SOURCE_GUIDED_PENTEST')) {
+        const __sg = `${agentPaths.INTEL_ROOT}/source-guidance-${taskId}.json`
+        if (fs.existsSync(__sg)) __sourceGuidance = JSON.parse(fs.readFileSync(__sg, 'utf8'))
+      }
+    } catch { /* fail-soft */ }
+    const prompt = planner.buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData, sourceGuidance: __sourceGuidance })
     // ATLAS = pentest orchestrator → Opus (was modelRouter.resolve, a non-existent method → errored)
     const _atlasRoute = modelRouter.getModelForAgent('atlas', { squad })
     const { text } = await runAgent({
@@ -3547,7 +3555,21 @@ function buildPentestSpecialistPrompt(agentName, taskTitle, taskId, projectId, s
   const scrubbedGoal = scrubBaselineFromGoal(goalContext)
   const goalLine = scrubbedGoal ? `Goal: ${scrubbedGoal}\n` : ''
   const techLine = techStack ? `Detected Tech Stack: ${techStack}. Prioritize payloads and techniques specific to this stack.\n` : ''
-  const feedbackCtx = getDisprovenContext(squad, targetUrl) + getSquadLessons(squad, targetUrl) + getFreshEyesNotice(targetUrl)
+  // White-box source guidance (Autonomous OS, flag-gated). Empty (byte-identical) when off / absent.
+  const __sgBlock = (() => {
+    try {
+      if (agentPaths.flagEnabled && agentPaths.flagEnabled('SOURCE_GUIDED_PENTEST')) {
+        const f = `${agentPaths.INTEL_ROOT}/source-guidance-${taskId}.json`
+        if (fs.existsSync(f)) {
+          const sg = JSON.parse(fs.readFileSync(f, 'utf8'))
+          const cands = (sg.candidate_targets || []).slice(0, 15)
+          if (cands.length) return `\n\n## SOURCE GUIDANCE (white-box) — confirm these source candidates LIVE (each is a HYPOTHESIS, never a finding):\n` + cands.map(c => `- [${c.vuln_class}] ${c.candidate_id} @ ${c.file || c.url || '?'} — ${(c.suggested_blackbox_task && c.suggested_blackbox_task.objective) || 'live-confirm'}`).join('\n')
+        }
+      }
+    } catch { /* fail-soft */ }
+    return ''
+  })()
+  const feedbackCtx = getDisprovenContext(squad, targetUrl) + getSquadLessons(squad, targetUrl) + getFreshEyesNotice(targetUrl) + __sgBlock
   // Target profile (2026-04-19) — soft-informs, never restricts. Always carries disclaimer.
   const profileFragment = (() => {
     try {
@@ -5953,6 +5975,28 @@ Be brief and specific. This is an adversarial check.`
     try {
       await runReplanLoop({ taskId, targetUrl, squad, projectId, fingerprint: envFingerprint, dispatch })
     } catch (replanErr) { log(`⚠️ Phase 3.087 wrapper error (non-fatal): ${replanErr.message}`) }
+
+    // ── PHASE 3.088 — LIVE→SOURCE root-cause (Autonomous OS white-box bidirectional) ──
+    // HARD-GUARDED (Issue 4): no-op unless this is a SOURCE-GUIDED white-box run with a
+    // code-review sibling — a black-box run can never reach a source spawn even with the
+    // flag globally on. flag + phaseEnabled('3.088') gated; fail-soft; never writes
+    // pentest live-findings (buildRootCauseRequests is read-only). Flag-off ⇒ skipped.
+    try {
+      const __isWb = !!(dispatch.meta && dispatch.meta.sourceGuided)
+      if (__isWb && agentPaths.flagMode && agentPaths.flagMode('SOURCE_GUIDED_PENTEST') !== 'off' && phaseEnabled('3.088', squad)) {
+        const __engId = (dispatch.meta && dispatch.meta.engagementId) || taskId
+        let __crTaskId = null
+        try {
+          const __eng = JSON.parse(fs.readFileSync(`${agentPaths.INTEL_ROOT}/engagement-${__engId}.json`, 'utf8'))
+          const __crIt = (__eng.iterations || []).find(i => i.kind === 'whitebox')
+          __crTaskId = __crIt && __crIt.taskId
+        } catch {}
+        if (__crTaskId) {
+          const __rc = require('./src/dispatch/whitebox-correlation').buildRootCauseRequests(taskId, __crTaskId, { intelRoot: agentPaths.INTEL_ROOT })
+          log(`🔗 Phase 3.088: live→source — ${__rc.matched.length} matched to source, ${__rc.unmatched.length} root-cause request(s)`)
+        }
+      }
+    } catch (rcErr) { log(`⚠️ Phase 3.088 (non-fatal): ${rcErr.message}`) }
 
     // ── PHASE 3.4: Build Attack Graph + Validate with AUDITOR results (Level 3) ──
     let graphContext = ''
@@ -8674,6 +8718,21 @@ async function dispatchToAgent(dispatch) {
       // White-box adapter: materialize VALIDATED-FINDINGS-<taskId>.jsonl so this
       // code-review iteration aggregates into the engagement + merged report. Fail-soft.
       await normalizeCodeReviewFindings(taskId, crResult && crResult.outputDir, (dispatch.meta && dispatch.meta.deployUrl) || '')
+      // White-box source-guided LAUNCH (Autonomous OS). Driven ENTIRELY by the
+      // PERSISTED deferral signal (engagement.deferredPentestDispatch +
+      // pending-source-guidance) — NOT a flag re-read (Issue 3), so a flag/env skew
+      // can never orphan the live side. No-op (byte-stable) when there is no
+      // deferral (the normal case / flag-off). Fail-soft.
+      try {
+        const __engId = (dispatch.meta && dispatch.meta.engagementId) || taskId
+        require('./src/dispatch/whitebox-correlation').maybeLaunchSourceGuidedPentest(taskId, {
+          intelRoot: agentPaths.INTEL_ROOT, engagementId: __engId,
+          writeInbox: (dir, body) => {
+            const ib = `${agentPaths.INTEL_ROOT}/inbox/task-actions`
+            try { fs.mkdirSync(ib, { recursive: true }); writeAtomic(`${ib}/sg-${body.taskId}.json`, JSON.stringify(body, null, 2)) } catch {}
+          },
+        })
+      } catch { /* fail-soft */ }
       try {
         const tasks = readJSON(TASKS_FILE)
         const task = tasks.find(t => String(t.id) === String(taskId))
@@ -10328,8 +10387,21 @@ function startWatcher() {
   }
 
   replayAndRecover()
+  // White-box recovery sweep (Autonomous OS, Issue 3): on boot, launch any orphaned
+  // source-guided deferral whose code-review completed but whose live side never
+  // fired (e.g. the daemon restarted, or the completion hook threw). Persisted-signal
+  // driven, fail-soft, no-op when there are no deferrals. See ULTRAPLAN §3.2.
+  try {
+    require('./src/dispatch/whitebox-correlation').sweepOrphanedDeferrals({
+      intelRoot: agentPaths.INTEL_ROOT,
+      writeInbox: (dir, body) => {
+        const ib = `${agentPaths.INTEL_ROOT}/inbox/task-actions`
+        try { fs.mkdirSync(ib, { recursive: true }); writeAtomic(`${ib}/sg-${body.taskId}.json`, JSON.stringify(body, null, 2)) } catch {}
+      },
+    })
+  } catch { /* fail-soft */ }
   processQueue()
-  
+
   let debounce = null
   fs.watch(DISPATCH_FILE, (eventType) => {
     if (eventType === 'change') {

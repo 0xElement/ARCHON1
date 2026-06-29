@@ -395,6 +395,24 @@ function createDispatch(body) {
     ...(body.model ? { model: String(body.model) } : {}),
     ...(meta ? { meta } : {}),
   }
+  // White-box source-guided deferral (Autonomous OS, flag-gated). ACTIVE + combined
+  // (pentest dispatch with a sourceDir) ⇒ DEFER the pentest dispatch: stamp it
+  // white-box + source-guided, stash it on the engagement, mark the iteration
+  // pending-source-guidance, and DON'T writeInbox it now — the code-review
+  // completion hook launches it source-guided. Flag-off / non-combined ⇒ the
+  // writeInbox below runs unchanged (byte-identical). See ULTRAPLAN §3.2.
+  const __sgMode = (squad === 'pentest' && typeof agentPaths.flagMode === 'function') ? agentPaths.flagMode('SOURCE_GUIDED_PENTEST') : 'off'
+  if (__sgMode === 'active' && body.meta && body.meta.sourceDir) {
+    req.meta = { ...(req.meta || {}), sourceGuided: true, engagementMode: 'whitebox' }
+    try {
+      const engFile = path.join(INTEL, `engagement-${taskId}.json`)
+      const eng = JSON.parse(fs.readFileSync(engFile, 'utf8'))
+      eng.deferredPentestDispatch = req
+      const it = (eng.iterations || []).find(i => i.kind === 'blackbox'); if (it) it.status = 'pending-source-guidance'
+      fs.writeFileSync(engFile, JSON.stringify(eng, null, 2))
+    } catch { /* fail-soft: fall through to a normal dispatch below */ }
+    return { taskId, assignee: req.assignee, squad: req.squad, deferred: true }
+  }
   writeInbox('inbox/task-actions', req)
   return { taskId, assignee: req.assignee, squad: req.squad }
 }
