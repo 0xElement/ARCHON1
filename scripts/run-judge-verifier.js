@@ -228,8 +228,26 @@ if (require.main === module) {
   })
 }
 
+// Block R (Autonomous OS): the report-quality pass (Phase 3.95) — a SECOND judge
+// IN ADDITION TO the Raptor exploitability judge (untouched). Annotates only;
+// never writes severity/validation_status; never-drop floor on CONFIRMED. Uses the
+// same OAuth subprocess pattern as runJudge. opts.callLLM injectable for tests.
+// See ULTRAPLAN §5.6.
+async function runReportQuality({ findings, callLLM, model } = {}) {
+  const jv = require('../agents/judge-verifier')
+  const run = typeof callLLM === 'function' ? callLLM : (prompt, o) => callRealLLM(prompt, { model, ...(o || {}) })
+  const out = []
+  for (const f of (findings || [])) {
+    let verdict
+    try { verdict = await jv.judgeReportQuality(f, { callLLM: run }) } catch { verdict = { verdict: 'needs_polish', note: 'judge error' } }
+    out.push(jv.applyReportQuality(f, verdict)) // never excludes a CONFIRMED finding (Issue 2)
+  }
+  return out
+}
+
 module.exports = {
   runJudge,
+  runReportQuality,
   findValidatedFile,
   readFindings,
   writeJudged,

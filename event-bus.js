@@ -6509,6 +6509,29 @@ The output MUST validate against the schema. You cannot emit prose — only the 
       }
     }
 
+    // ── PHASE 3.95 — Report-quality gate (Autonomous OS Block R) ──
+    // A SECOND judge pass (REPORT quality) IN ADDITION TO the Raptor exploitability
+    // judge (untouched). Annotates only — never writes severity/validation_status,
+    // never drops a CONFIRMED finding (Issue 2). Also writes evidence packages +
+    // a streaming-report shadow digest. flag + phaseEnabled('3.95') gated ⇒ flag-off
+    // is byte-stable. Fail-soft.
+    try {
+      if (agentPaths.flagMode && agentPaths.flagMode('STRICT_JUDGE_GATE') !== 'off' && phaseEnabled('3.95', squad)) {
+        const __jf = `${agentPaths.INTEL_ROOT}/JUDGED-FINDINGS-${taskId}.jsonl`
+        let __findings = []
+        try { if (fs.existsSync(__jf)) __findings = fs.readFileSync(__jf, 'utf8').trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean) } catch {}
+        if (__findings.length) {
+          const { runReportQuality } = freshRequire('./scripts/run-judge-verifier')
+          const __rqCall = (prompt, o) => { try { return require('./scripts/run-judge-verifier').callRealLLM(prompt, { model: 'claude-haiku-4-5', ...(o || {}) }) } catch { return '' } }
+          const __annotated = await runReportQuality({ findings: __findings, callLLM: __rqCall })
+          try { fs.writeFileSync(`${agentPaths.INTEL_ROOT}/REPORT-QUALITY-${taskId}.jsonl`, __annotated.map(f => JSON.stringify({ id: f.id, report_quality_verdict: f.report_quality_verdict, report_quality_note: f.report_quality_note })).join('\n') + '\n') } catch {}
+          try { const __poc = require('./agents/poc-evidence-capture'); for (const f of __annotated) if (String(f.validation_status || '').toUpperCase() === 'CONFIRMED') __poc.writeEvidencePackage({ taskId, finding: f }) } catch {}
+          try { const __eng = (dispatch.meta && dispatch.meta.engagementId) || taskId; const __rs = require('./src/pipeline/report-stream'); __rs.appendStream(__eng, 'report-quality', __rs.reportContentDigest(__annotated)) } catch {}
+          log(`📝 Phase 3.95: report-quality annotated ${__annotated.length} finding(s) (annotate-only; no CONFIRMED dropped)`)
+        }
+      }
+    } catch (rqErr) { log(`⚠️ Phase 3.95 (non-fatal): ${rqErr.message}`) }
+
     // ── TRIAGE GATE (2026-06-17) — stop before the report when meta.triageGate ──
     // Findings are produced (AUDITOR-validated, ARBITER-judged) but the report is
     // NOT auto-written. The operator triages findings in the Findings tab, then a

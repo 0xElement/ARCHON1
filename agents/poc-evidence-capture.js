@@ -226,10 +226,46 @@ function readCapturesForTask(taskId, { intelDir = INTEL_DIR } = {}) {
   return out
 }
 
+// Block R (Autonomous OS): repackage EXISTING flat captures + a finding's fields
+// into an addressable evidence/<candidate_id>/package.json tree (reproduction /
+// impact / auditor + judge verdicts / captures). NO new capture. Idempotent,
+// fail-soft. See ULTRAPLAN §5.6.
+function writeEvidencePackage({ taskId, finding, intelDir = INTEL_DIR }) {
+  if (!finding) return null
+  const candidateId = String(finding.candidate_id || finding.id || finding.findingId || 'unidentified').replace(/[^a-zA-Z0-9._-]/g, '_')
+  const dir = path.join(intelDir, 'evidence', candidateId)
+  fs.mkdirSync(dir, { recursive: true })
+  const captures = (readCapturesForTask(taskId, { intelDir }) || {})[finding.id || finding.findingId] || null
+  const pkg = {
+    schema_version: '1', candidate_id: candidateId, task_id: String(taskId),
+    title: finding.title || '', severity: finding.severity || '',
+    validation_status: finding.validation_status || '',
+    reproduction: finding.reproduction_method || finding.reproduction || (captures && captures.captures) || null,
+    impact: finding.impact || '',
+    auditor_verdict: finding.validation_status || '',
+    judge_verdict: finding.judge_verdict || finding.judge_status || '',
+    quality_level: finding.quality_level || '',
+    captures,
+  }
+  const out = path.join(dir, 'package.json')
+  const tmp = out + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(pkg, null, 2))
+  fs.renameSync(tmp, out)
+  return out
+}
+function readEvidencePackage(candidateId, { intelDir = INTEL_DIR } = {}) {
+  try {
+    const safe = String(candidateId).replace(/[^a-zA-Z0-9._-]/g, '_')
+    return JSON.parse(fs.readFileSync(path.join(intelDir, 'evidence', safe, 'package.json'), 'utf-8'))
+  } catch { return null }
+}
+
 module.exports = {
   captureUrl,
   captureForValidatedFindings,
   writeEvidenceFile,
+  writeEvidencePackage,
+  readEvidencePackage,
   readCapturesForTask,
   extractUrlsFromFinding,
   sanitizeHeaders,

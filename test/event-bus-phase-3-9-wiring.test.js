@@ -61,7 +61,10 @@ test('event-bus.js Phase 3.9 uses Critical/High severity filter (promotion mode)
   // Critical/High get standard judging, Medium gets the stricter promotion
   // rubric. The cost-optimization is in PROMOTION_CAP, not a hard severity
   // filter — the test now validates the promotion-gate wiring instead.
-  const phase39Region = EVENT_BUS.match(/PHASE 3\.9:[\s\S]{0,5000}?PHASE 4/i)?.[0] || ''
+  // Window widened 5000→10000 (2026-06-30): the optional Phase 3.95 report-quality
+  // gate (Autonomous OS Block R) now sits between Phase 3.9 and Phase 4. The
+  // promotionMode assertion below still pins the 3.9 judge wiring.
+  const phase39Region = EVENT_BUS.match(/PHASE 3\.9:[\s\S]{0,10000}?PHASE 4/i)?.[0] || ''
   assert.ok(phase39Region.length > 100, 'Phase 3.9: block not found')
   assert.match(phase39Region, /promotionMode|severityFilter|Critical.*High|High.*Critical/,
     'Phase 3.9 must filter via promotionMode or explicit severity filter')
