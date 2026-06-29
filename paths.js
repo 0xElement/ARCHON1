@@ -135,6 +135,34 @@ function sessionsDir(name) { return path.join(personaState(name), 'sessions') }
 // the top-level squads/ dir GATE-64 already asserts.
 function a2aCapsDir() { return path.join(AGENTS_ROOT, 'squads') }
 
+// ── Autonomous Agent OS feature flags (2026-06-30) ──
+// THE single resolver for the ARCHON_ENABLE_* family — no other module may read
+// process.env.ARCHON_ENABLE_* directly (grep-gate enforces this). Tri-state via an
+// ENABLE+DRIVE pair so a block can run in shadow (writes to var/intel/shadow only,
+// drives nothing) before it's allowed to drive execution. The master switch
+// ARCHON_ENABLE_AUTONOMOUS_OS gates every block — off ⇒ everything off (the
+// unbypassable kill-switch). Default (nothing set) ⇒ every flag 'off' ⇒ exact
+// current behavior. See docs/autonomous-agent-os-spec/ULTRAPLAN.md §4.
+const _TRUTHY = /^(1|true|enabled|on|yes)$/i
+function _flagTruthy(name) { return _TRUTHY.test(String(process.env[name] || '').trim()) }
+
+// flagMode(name) → 'off' | 'shadow' | 'active'.  name is the suffix after ARCHON_ENABLE_
+// (e.g. 'STRICT_SCHEMA', 'KNOWLEDGE_GRAPH'). 'active' requires the matching ARCHON_DRIVE_<name>.
+function flagMode(name) {
+  const masterOn = _flagTruthy('ARCHON_ENABLE_AUTONOMOUS_OS')
+  if (name === 'AUTONOMOUS_OS') return masterOn ? 'active' : 'off'
+  if (!masterOn) return 'off'                              // master kill-switch
+  if (!_flagTruthy('ARCHON_ENABLE_' + name)) return 'off'
+  return _flagTruthy('ARCHON_DRIVE_' + name) ? 'active' : 'shadow'
+}
+function flagEnabled(name) { return flagMode(name) !== 'off' }
+
+// Per-engagement shadow sink root. Never read by the legacy pipeline/dashboard/SCRIBE,
+// so shadow output can never affect a real report.
+function shadowDir(engagementId) {
+  return path.join(INTEL_ROOT, 'shadow', String(engagementId || 'unknown'))
+}
+
 module.exports = {
   AGENTS_ROOT,
   INTEL_ROOT,
@@ -146,5 +174,8 @@ module.exports = {
   lessonsPath,
   sessionsDir,
   a2aCapsDir,
+  flagMode,
+  flagEnabled,
+  shadowDir,
   _config: config, // exposed for gates/tests
 }
