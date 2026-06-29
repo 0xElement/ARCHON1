@@ -769,9 +769,56 @@ async function judgeFindingsWithConsensus(findings, opts = {}) {
   }
 }
 
+// ── Autonomous OS Block R: report-quality gate (Phase 3.95) ──
+// A SECOND judge pass, IN ADDITION TO the Raptor 4-stage exploitability judge
+// (which is completely untouched). It assesses REPORT QUALITY (clarity, evidence
+// presentation), never exploitability. It NEVER writes severity or
+// validation_status. Never-drop floor: an 'exclude' verdict on a CONFIRMED finding
+// is clamped to 'needs_polish' (audit Issue 2). See ULTRAPLAN.md §5.6.
+const REPORT_QUALITY_SCHEMA = Object.freeze({
+  type: 'object',
+  required: ['verdict'],
+  properties: {
+    verdict: { type: 'string', enum: ['ok', 'needs_polish', 'exclude'] },
+    note: { type: 'string' },
+  },
+})
+
+function buildReportQualityPrompt(finding) {
+  const f = finding || {}
+  return `You are a senior report editor. Assess ONLY the REPORTING QUALITY of this finding — clarity, evidence presentation, reproduction completeness, impact articulation. Do NOT re-judge whether it is exploitable (a separate gate owns that).\n\nFinding: ${f.title || f.id}\nSeverity: ${f.severity}\nValidation: ${f.validation_status}\nEvidence: ${(f.reproduction_method || '') + ' ' + (f.proof_of_execution ? JSON.stringify(f.proof_of_execution).slice(0, 400) : '')}\n\nReply JSON: {"verdict":"ok"|"needs_polish"|"exclude","note":"one line"}. Use "exclude" ONLY for non-substantive/test artifacts; a CONFIRMED finding is never excluded.`
+}
+
+// Run the report-quality LLM judge. deps.callLLM(prompt) → text. On ANY error ⇒ needs_polish.
+async function judgeReportQuality(finding, deps = {}) {
+  const callLLM = deps.callLLM
+  if (typeof callLLM !== 'function') return { verdict: 'needs_polish', note: 'no judge available' }
+  try {
+    const text = await callLLM(buildReportQualityPrompt(finding))
+    const m = String(text || '').match(/\{[\s\S]*\}/)
+    const parsed = m ? JSON.parse(m[0]) : null
+    const v = parsed && ['ok', 'needs_polish', 'exclude'].includes(parsed.verdict) ? parsed.verdict : 'needs_polish'
+    return { verdict: v, note: (parsed && parsed.note) || '' }
+  } catch { return { verdict: 'needs_polish', note: 'judge error' } }
+}
+
+// Annotate a finding with the report-quality verdict. NEVER touches severity or
+// validation_status. Never-drop floor: exclude on a CONFIRMED finding → needs_polish.
+function applyReportQuality(finding, verdict) {
+  const f = finding || {}
+  const vs = String(f.validation_status || '').toUpperCase()
+  let v = (verdict && verdict.verdict) || 'ok'
+  if (v === 'exclude' && vs === 'CONFIRMED') v = 'needs_polish' // never-drop floor (Issue 2)
+  return { ...f, report_quality_verdict: v, report_quality_note: (verdict && verdict.note) || '' }
+}
+
 module.exports = {
   STAGE_DOWNGRADE,
   SEVERITY_RANK,
+  REPORT_QUALITY_SCHEMA,
+  buildReportQualityPrompt,
+  judgeReportQuality,
+  applyReportQuality,
   PROMOTION_TIER_FILTER,
   STANDARD_TIER_FILTER,
   PROMOTION_CAP_DEFAULT,

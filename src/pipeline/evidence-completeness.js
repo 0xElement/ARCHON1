@@ -268,11 +268,43 @@ function composeAllCaps(claimed, evidenceCompleteness, threatModel, opts = {}) {
   }
 }
 
+// ── Autonomous OS Block R: report-inclusion gate (CATEGORICAL, audit Issue 2) ──
+// quality_level is a LABEL, never a gate: EVERY validation_status==='CONFIRMED'
+// finding is included in the main report regardless of quality_level (incl. L0/L1
+// source/scanner-only). quality_level only orders/labels, and gates NON-CONFIRMED
+// advisory items (appendix-eligible). See ULTRAPLAN.md §5.6.
+const QUALITY_LEVELS = Object.freeze(['L0', 'L1', 'L2', 'L3', 'L4'])
+
+// Local fallback used only when STRICT_SCHEMA is off (mirrors mapping.deriveQualityLevel).
+function deriveQualityLevelFallback(finding) {
+  const f = finding || {}
+  const poc = f.proof_of_execution
+  const chainBacked = !!(f.chain_verified || f.chain_id || f.part_of_chain)
+  const hasLive = !!(f.reproduction_result || (poc && (poc.confirmed || poc.output)) ||
+    (f.evidence_completeness && f.evidence_completeness !== 'local_only') || f.http_evidence)
+  const hasSource = (Array.isArray(f.source_files) && f.source_files.length > 0) || !!f.file
+  if (chainBacked && poc && poc.confirmed === true) return 'L4'
+  if (hasLive && hasSource) return 'L3'
+  if (hasLive) return 'L2'
+  if (hasSource || ['pattern', 'freehand', 'scanner', 'source'].includes(f.source)) return 'L1'
+  return 'L0'
+}
+
+function meetsReportInclusion(finding, opts = {}) {
+  const vs = String(finding && finding.validation_status || '').toUpperCase()
+  if (vs === 'CONFIRMED') return { include: true, reason: 'confirmed' } // never excluded, any quality_level
+  const ql = (finding && finding.quality_level) || deriveQualityLevelFallback(finding)
+  return { include: false, reason: 'not-confirmed', quality_level: ql, appendixEligible: ql !== 'L0' }
+}
+
 module.exports = {
   VALID_EC_VALUES,
   VALID_SEVERITIES,
   PIPELINE_MIN_LAYERS,
   SEVERITY_CAPS,
+  QUALITY_LEVELS,
+  meetsReportInclusion,
+  deriveQualityLevelFallback,
   validateCandidateSchema,
   capSeverity,
   downgradeReason,
