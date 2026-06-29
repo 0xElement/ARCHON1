@@ -6185,6 +6185,16 @@ The output MUST validate against the schema. You cannot emit prose — only the 
             stepResults: r.stepResults || [],
           }))
 
+          // Block F (Autonomous OS, flag-gated, shadow-only): typed chain records.
+          // flag-off ⇒ no require, no write ⇒ byte-stable.
+          if (agentPaths.flagEnabled && agentPaths.flagEnabled('CORRELATION_ENGINE')) {
+            try {
+              const crecs = require('./src/pipeline/correlation-records').buildChainRecords(chainResults)
+              const sink = require('./src/shadow/shadow-sink')
+              for (const r of crecs) sink.append(taskId, 'chain-records.jsonl', r)
+            } catch { /* fail-soft */ }
+          }
+
           for (const chain of chainResults) {
             logActivity(leaderAgentId.toUpperCase(),
               `⛓️ ${chain.verified ? '✅' : '❌'} Chain ${chain.verified ? 'VERIFIED' : 'UNVERIFIED'}: ${chain.name} [${chain.severity}]`, {
@@ -8305,6 +8315,15 @@ async function generateReportForTask(taskId) {
       // merge ONLY within those scripted groupings (no free-form correlation).
       let _corr = null
       try { _corr = buildCorrelationMap(taskId, iters, { intelRoot: agentPaths.INTEL_ROOT, log }) } catch (e) { log(`⚠️ correlation map failed (non-fatal): ${e.message}`) }
+      // Block F (Autonomous OS, flag-gated, shadow-only): typed correlation records.
+      // flag-off ⇒ no require, no write ⇒ byte-stable. Advisory; never alters validation_status.
+      if (_corr && agentPaths.flagEnabled && agentPaths.flagEnabled('CORRELATION_ENGINE')) {
+        try {
+          const recs = require('./src/pipeline/correlation-records').buildCorrelationRecords(_corr)
+          const sink = require('./src/shadow/shadow-sink')
+          for (const r of recs) sink.append(taskId, 'correlation-records.jsonl', r)
+        } catch { /* fail-soft */ }
+      }
       prompt += `\n\n## CROSS-VIEW CORRELATION + DE-DUPLICATION (AUTHORITATIVE)\nThis engagement tested ONE system two ways — WHITE-BOX (source, file:line evidence) and BLACK-BOX (live, HTTP/URL evidence). Many findings are the SAME vulnerability from both sides. Correlate by root cause (same code path / endpoint / parameter / vuln class):\n- A vulnerability reported white-box AND black-box is ONE finding, NOT two — merge into a single entry carrying BOTH evidences (source file:line + fix from white-box, raw HTTP/curl/PROBER repro from black-box), label it "Confirmed white-box + black-box", and use the WORSE severity/CVSS.\n- White-box-only → label "Source-confirmed (white-box)". Black-box-only → label "Runtime-confirmed (black-box)".\n- Emit a CORRELATION TABLE (finding | white-box evidence | black-box evidence | merged severity) BEFORE the detailed findings.\n- All executive summary counts MUST reflect the DE-DUPLICATED finding set, not the raw per-iteration totals.`
       if (_corr) {
         prompt += `\n\n## DETERMINISTIC CORRELATION SPINE (read FIRST — authoritative)\nA scripted pass already grouped the findings → read ${agentPaths.INTEL_ROOT}/correlation-${taskId}.json and use it as the backbone of the de-dup:\n- "exact_duplicate_groups": findings that share {view, vuln-class, locus, param} — emit each group as exactly ONE finding (keep the listed "keep" id, drop the "dropped" ids).\n- "cross_view_candidates": per vuln-class, the white-box vs black-box findings that may be the SAME root cause. Confirm by reading each one's evidence, then merge true matches into one "Confirmed white-box + black-box" entry (worst severity). Findings NOT grouped here stay separate — do NOT invent correlations beyond these candidates.\nYour CORRELATION TABLE + executive counts MUST be consistent with this de-duplicated set.`
