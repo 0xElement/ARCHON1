@@ -1,0 +1,228 @@
+{
+  "vuln_class": "logging-audit",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "LOG-001",
+      "vuln_class": "logging-audit",
+      "what_to_look_for": "Cleartext credentials, tokens, session IDs, or PII (PAN/CVV/SSN/email) written into application or access logs because whole request/response objects, headers, or auth payloads are serialized without redaction.",
+      "source_indicators": [
+        "logger.info(req.body) / console.log(password) / log.debug('user=' + user) dumping credential or PII fields",
+        "Logging full headers incl Authorization/Cookie: logger.info(JSON.stringify(req.headers))",
+        "Morgan/Winston/log4j/Serilog printing raw bodies; Rails filter_parameters or Django logging redaction not configured",
+        "Variables named card_number, cvv, ssn, access_token, refresh_token, set-cookie passed to a log sink",
+        "Exception loggers dumping context objects: logger.error(e, { user, request })"
+      ],
+      "blackbox_indicators": [
+        "Secrets/session tokens in URLs or query strings that land in access logs: ?token=, ?reset_token=, ?api_key=",
+        "Verbose error responses echoing request body alongside a log/correlation id",
+        "Reachable log artifacts: /logs/, app.log, debug.log, *.log returning 200 or directory listing",
+        "Stack-trace pages that include the submitted credential or token value"
+      ],
+      "evidence_required": [
+        "Log line or artifact showing the cleartext secret/PII",
+        "The source statement that emits it or a retrievable log file proving emission",
+        "Mapping of the leaked field to its sensitive class (credential / PII / PAN)"
+      ],
+      "false_positive_checks": [
+        "A redaction/scrubbing filter is applied (***, [FILTERED], filter_parameters, log masker)",
+        "Field is hashed/tokenized rather than raw",
+        "The 'token' is a non-sensitive correlation/trace id, not an auth secret",
+        "Sink is access-controlled with short retention (note but downgrade severity)"
+      ],
+      "suggested_validation_task": "Send a request carrying a uniquely-tagged dummy credential/token, then check any reachable log endpoint or error response for that exact marker string.",
+      "reporting_guidance": "Report as sensitive-data exposure: cite the exact field and log line, identify who can read the sink, and scale severity by secret type and log accessibility.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "LOG-002",
+      "vuln_class": "logging-audit",
+      "what_to_look_for": "Untrusted input (username, User-Agent, headers, path) concatenated into log lines without CRLF stripping or encoding, enabling forged log entries and SIEM/log-parser poisoning (log injection).",
+      "source_indicators": [
+        "User input interpolated into a log string: logger.info('login failed for ' + username) / log.warn(f'path={request.path}')",
+        "Logging raw User-Agent, Referer, or X-Forwarded-For values verbatim",
+        "No \\n / \\r stripping or escaping before the log write",
+        "Concatenated string passed to a structured logger instead of parameterized fields",
+        "Downstream ELK/log4j/Splunk ingest that treats each newline as a new event"
+      ],
+      "blackbox_indicators": [
+        "Reflected-input fields (login name, header) that also surface in an admin activity/audit view",
+        "Inputs containing %0d%0a or literal newlines accepted in username/header/query without rejection",
+        "Admin 'activity log' UI that renders raw user-controlled strings"
+      ],
+      "evidence_required": [
+        "An injected newline produces a second/forged log line or breaks log parsing",
+        "The raw, un-encoded sink (file, UI, or SIEM) showing the line split",
+        "Source statement with the unsanitized concatenation"
+      ],
+      "false_positive_checks": [
+        "Logger JSON-encodes/escapes control chars (structured logging with field params)",
+        "Input length/charset validation strips CR/LF before logging",
+        "Sink stores raw but always renders escaped and is not consumed by another parser"
+      ],
+      "suggested_validation_task": "Submit a benign value with an encoded newline plus a marker token in a logged field and check whether a reachable log or audit view shows a split or forged second line.",
+      "reporting_guidance": "Report as log injection/forgery: show the forged line and a downstream consumer (SIEM/audit UI) to establish impact beyond cosmetic noise.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "LOG-003",
+      "vuln_class": "logging-audit",
+      "what_to_look_for": "Security-relevant events (login success/failure, MFA, password/email change, role or permission grant, data export, impersonation, admin/config change, deletion) with no audit-log write, leaving no forensic trail.",
+      "source_indicators": [
+        "Sensitive controllers/services with no audit / auditLog / logSecurityEvent call",
+        "Auth, role-change, or permission-toggle handlers lacking any logging",
+        "delete / export / impersonate endpoints that are silent",
+        "An audit helper exists in the codebase but is not invoked on the sensitive path",
+        "Email/2FA change handlers with no history-record write"
+      ],
+      "blackbox_indicators": [
+        "Account security/activity page shows no entry after a sensitive action",
+        "No email or notification sent on password or MFA change",
+        "Bulk export/download leaves no visible record",
+        "Account-takeover-relevant changes (email, 2FA) without any history entry"
+      ],
+      "evidence_required": [
+        "Perform the sensitive action and demonstrate absence of a corresponding audit entry",
+        "Name the security/compliance event class left uncovered",
+        "Source path showing the missing audit call"
+      ],
+      "false_positive_checks": [
+        "Logging happens async via middleware/event bus (verify before claiming a gap)",
+        "A separate audit service/DB captures it out-of-band",
+        "Event is recorded under a different name or category than expected"
+      ],
+      "suggested_validation_task": "With test accounts, perform a sensitive action (e.g. change email or role) and check the account's own security/activity log for a corresponding entry.",
+      "reporting_guidance": "Report missing audit coverage tied to a named event class and its detection/forensics impact; map to SOC2/PCI/HIPAA obligations where relevant.",
+      "output_states": [
+        "matched_candidate",
+        "needs_source_root_cause",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "LOG-004",
+      "vuln_class": "logging-audit",
+      "what_to_look_for": "Audit/security logs that authenticated or low-privilege users can read, modify, delete, or that are not append-only, undermining non-repudiation and incident response.",
+      "source_indicators": [
+        "Audit records in a user-writable table where UPDATE/DELETE are allowed (no append-only/WORM)",
+        "Audit/log endpoints (/api/audit, /admin/logs) missing an authorization check",
+        "Log files written world-writable or inside the web root",
+        "A 'clear log' / 'purge history' action reachable by non-admin roles",
+        "No integrity protection (signing/hash-chain) where non-repudiation is required"
+      ],
+      "blackbox_indicators": [
+        "Log/audit endpoints return 200 to a normal user or unauthenticated request",
+        "Log files browsable/downloadable via web (*.log 200, directory listing)",
+        "Ability for a user to delete their own activity entries",
+        "IDOR on audit records: /audit?user_id= returns other users' entries"
+      ],
+      "evidence_required": [
+        "Unauthorized read/edit/delete of an audit record (low-priv or two-account proof)",
+        "Or a reachable log file retrieved via path",
+        "Source/route showing the missing authZ or the destructive operation"
+      ],
+      "false_positive_checks": [
+        "Endpoint enforces admin role server-side (verify, don't assume the UI hides it)",
+        "Logs are mirrored append-only to an external SIEM (tampering is local-only)",
+        "'Delete' only soft-hides while the original record is retained"
+      ],
+      "suggested_validation_task": "As a normal non-admin test user, request the audit/log endpoint and common *.log paths and confirm whether records are readable or modifiable.",
+      "reporting_guidance": "Report as audit-integrity / broken access control on logs: emphasize non-repudiation and IR impact and state exactly who can tamper.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "LOG-005",
+      "vuln_class": "logging-audit",
+      "what_to_look_for": "Debug/verbose logging left enabled in production emitting stack traces, SQL, env vars, connection strings, or tokens to HTTP responses, consoles, or shared log sinks.",
+      "source_indicators": [
+        "DEBUG=true / app.debug=True / logging level=DEBUG in production config",
+        "console.log / print of config, env, DB DSN, or secret values",
+        "ORM SQL echo enabled (echo=True, log_statements=all)",
+        "Error handler returning the stack trace to the client",
+        "Third-party SDK debug logging that dumps full request bodies"
+      ],
+      "blackbox_indicators": [
+        "Error pages exposing stack traces, file paths, and framework versions",
+        "Debug panels reachable: ?debug=1, _profiler, Werkzeug interactive console",
+        "Verbose 500 responses exposing the query or DSN",
+        "Source maps or debug endpoints reachable in production"
+      ],
+      "evidence_required": [
+        "Response or log artifact containing the leaked secret/internal detail",
+        "Confirmation the host is production, not staging",
+        "The config flag or log level enabling verbose mode"
+      ],
+      "false_positive_checks": [
+        "Debug enabled only on a staging/non-prod host",
+        "Traces are logged server-side to a restricted sink, not returned to the client",
+        "Leaked value is a non-sensitive placeholder/sample"
+      ],
+      "suggested_validation_task": "Trigger a benign error (malformed param) and inspect the HTTP response body and headers for stack traces, DSNs, or interactive debug panels.",
+      "reporting_guidance": "Report as information exposure via debug/verbose logging: cite the exact leaked artifact, confirm prod, and recommend disabling debug plus scrubbing.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "not_applicable",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "LOG-006",
+      "vuln_class": "logging-audit",
+      "what_to_look_for": "Tokens, session IDs, PII, or full payloads forwarded to external monitoring/analytics (Sentry, Datadog, LogRocket, FullStory, GA) or captured in URLs that land in access/CDN/proxy logs.",
+      "source_indicators": [
+        "Error trackers capturing request body/headers without scrubbing (Sentry.init with no beforeSend or sendDefaultPii: true)",
+        "Session-replay SDK (LogRocket/FullStory) with no input masking configured",
+        "Secrets passed in query strings to endpoints whose URLs are access-logged",
+        "Analytics events that include email, token, or PAN fields",
+        "Access-log format string capturing the full URL including the query"
+      ],
+      "blackbox_indicators": [
+        "Third-party telemetry/replay scripts loaded (sentry, logrocket, datadog, fullstory)",
+        "Sensitive values in URLs (?token=, ?email=, ?sig=) routed through CDN/proxy logs",
+        "Bearer tokens leaking cross-origin via the Referer header",
+        "Unmasked form inputs visible in session-replay capture"
+      ],
+      "evidence_required": [
+        "Outbound telemetry payload containing the sensitive field (devtools network capture)",
+        "Or a sensitive value present in a URL known to be access-logged",
+        "Config showing no scrubbing/masking applied before transmission"
+      ],
+      "false_positive_checks": [
+        "beforeSend / denyUrls / PII scrubbing or input masking is configured",
+        "Values are tokenized before transmission",
+        "Telemetry disabled in production or gated behind consent"
+      ],
+      "suggested_validation_task": "With devtools network capture open, perform an auth or PII action and inspect outbound requests to telemetry hosts for unmasked secrets or PII.",
+      "reporting_guidance": "Report as sensitive-data exposure to third parties: name the vendor host and leaked field, and reference data-handling/consent obligations.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    }
+  ]
+}

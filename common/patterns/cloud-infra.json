@@ -1,0 +1,245 @@
+{
+  "vuln_class": "cloud-infra",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "CLOUD-001",
+      "vuln_class": "cloud-infra",
+      "what_to_look_for": "Object storage (S3 bucket, GCS bucket, Azure blob container) configured for public/anonymous read or list, exposing data the app references via direct or signed URLs. Look for bucket hostnames in HTML/JS/API responses and test anonymous access plus directory listing.",
+      "source_indicators": [
+        "S3 bucket policy with Principal: \"*\" and s3:GetObject / s3:ListBucket",
+        "aws_s3_bucket_acl acl = \"public-read\" or block_public_acls = false in Terraform",
+        "AllUsers / AllAuthenticatedUsers granted on GCS objectAdmin or legacyObjectReader",
+        "Azure container with publicAccess: Blob or Container",
+        "CDN/origin config pointing at *.s3.amazonaws.com / storage.googleapis.com with no signing"
+      ],
+      "blackbox_indicators": [
+        "Asset URLs like https://<bucket>.s3.amazonaws.com/ or storage.googleapis.com/<bucket>/ in page source",
+        "Anonymous GET on bucket root returns ListBucketResult XML with <Key> entries",
+        "200 OK on objects without any AWS Signature / X-Amz-* params or SAS token",
+        "S3 error AccessDenied vs NoSuchBucket distinguishing existence",
+        "Predictable object keys (uploads/<id>.pdf) enumerable without auth"
+      ],
+      "evidence_required": [
+        "HTTP request/response showing anonymous 200 on a non-public object containing user/business data",
+        "ListBucketResult XML proving anonymous listing, or proof keys are guessable",
+        "The exact bucket name + region + object key retrieved",
+        "Classification of leaked data (PII, backups, internal docs)"
+      ],
+      "false_positive_checks": [
+        "Confirm object is genuinely sensitive, not an intentionally public static asset (logo, css, marketing image)",
+        "Verify access is truly anonymous (drop all auth headers/cookies/signed params and re-request)",
+        "Distinguish CloudFront/OAC-fronted public delivery from raw open bucket",
+        "Check bucket actually belongs to target org, not a shared third-party CDN"
+      ],
+      "suggested_validation_task": "Send an unauthenticated GET to the bucket root and one referenced object URL with all credentials stripped, recording status and whether listing/content returns.",
+      "reporting_guidance": "Report as data exposure: name the bucket, sample sensitive keys retrieved anonymously, and the exact misconfigured policy/ACL to fix.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "CLOUD-002",
+      "vuln_class": "cloud-infra",
+      "what_to_look_for": "Cloud metadata endpoints (169.254.169.254, metadata.google.internal, Azure IMDS) reachable through an SSRF-capable feature (URL fetcher, webhook, image/PDF proxy, importer) allowing theft of instance IAM/STS credentials.",
+      "source_indicators": [
+        "Server-side fetch of user-supplied URL (axios/requests/curl) without host allowlist or IP-range deny",
+        "No block of link-local 169.254.0.0/16 / fd00:ec2::254 in URL validation",
+        "Webhook/callback URL, RSS importer, SVG/PDF renderer, or avatar-by-URL feature",
+        "IMDSv1 in use (no metadata hop-limit / token requirement) in instance/launch-template config",
+        "Redirect-following enabled on outbound fetch (maxRedirects > 0) without re-validating target"
+      ],
+      "blackbox_indicators": [
+        "A parameter that accepts a URL and the server fetches it (out-of-band callback observed)",
+        "Differential responses/timing when pointing fetch at 169.254.169.254 vs a dead IP",
+        "Ability to coerce request to http://169.254.169.254/latest/meta-data/ and see directory listing reflected",
+        "GCP metadata reachable only with Metadata-Flavor: Google header injectable via fetch",
+        "DNS-rebinding or redirect (302 to 169.254.169.254) honored by the fetcher"
+      ],
+      "evidence_required": [
+        "Response proving metadata reached: meta-data listing, or iam/security-credentials/<role> JSON",
+        "For confirmed impact: a retrieved AccessKeyId/SecretAccessKey/Token (redacted in report) or its presence",
+        "The exact SSRF request (parameter + payload URL) and the relayed metadata content",
+        "IMDS version indicator (v1 unauthenticated success vs v2 token required)"
+      ],
+      "false_positive_checks": [
+        "Confirm fetch is server-side, not browser-side (response actually returned/observed by server)",
+        "Rule out a mock/stub metadata service in non-cloud or local dev environment",
+        "Verify 169.254 is not blocked at egress (response may be a generic error, not real metadata)",
+        "Check whether IMDSv2 hop-limit blocks the proxy path (token retrieval may fail)"
+      ],
+      "suggested_validation_task": "Point the URL-fetch feature at http://169.254.169.254/latest/meta-data/ (and iam/security-credentials/) and capture whether the listing returns, without using any retrieved credential.",
+      "reporting_guidance": "Report SSRF-to-metadata as critical: show the metadata listing reached and credential path exposed; recommend IMDSv2-enforce + egress block of link-local ranges.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "CLOUD-003",
+      "vuln_class": "cloud-infra",
+      "what_to_look_for": "Over-permissive IAM role / service account attached to the running workload or handed to clients: wildcard actions/resources, AdministratorAccess, or privilege-escalation-enabling permissions (iam:PassRole, iam:CreatePolicyVersion, sts:AssumeRole *).",
+      "source_indicators": [
+        "IAM policy with Action: \"*\" or service:* and Resource: \"*\"",
+        "Attached AWS managed policy AdministratorAccess / PowerUserAccess on app role",
+        "iam:PassRole + lambda/ec2/glue create permissions enabling escalation",
+        "GCP roles/owner or roles/editor bound to a service account, or roles/iam.serviceAccountTokenCreator broadly",
+        "Trust policy Principal: \"*\" with sts:AssumeRole and no external-id/condition",
+        "Long-lived static access keys checked into config / IaC instead of role assumption"
+      ],
+      "blackbox_indicators": [
+        "Leaked/recovered credentials (from CLOUD-002, JS, or git) that authenticate to cloud APIs",
+        "sts get-caller-identity succeeds and role name implies broad scope",
+        "API responses or signed URLs revealing the workload can act outside its function (e.g., read unrelated buckets)",
+        "Client-delivered temporary credentials (Cognito/STS) with scope broader than the feature needs"
+      ],
+      "evidence_required": [
+        "The attached policy document or enumerated effective permissions",
+        "Benign proof of over-permission: a read-only API call succeeding that the role should not have (e.g., list unrelated resource)",
+        "Caller identity (ARN / service account email) tying permissions to the app",
+        "A concrete escalation or blast-radius path described (which permission grants what)"
+      ],
+      "false_positive_checks": [
+        "Confirm permissions are actually broader than the function requires, not justified by the workload",
+        "Check for restricting Conditions (aws:SourceIp, aws:PrincipalTag, resource tags) that narrow the wildcard",
+        "Verify Service Control Policies / permission boundaries don't already cap the effective grant",
+        "Ensure recovered credentials are live, not expired/rotated test keys"
+      ],
+      "suggested_validation_task": "With any recovered workload credentials, run only a read-only identity/listing call (e.g., sts:GetCallerIdentity, iam:GetPolicy, list a bucket) to demonstrate scope without modifying anything.",
+      "reporting_guidance": "Report as excessive privilege: show effective permissions, a benign over-reach call, and the least-privilege policy that replaces the wildcard.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "CLOUD-004",
+      "vuln_class": "cloud-infra",
+      "what_to_look_for": "Cloud/secret material hardcoded in source, config, client bundles, or env exposure: AWS keys, GCP service-account JSON, connection strings, or an exposed environment dump endpoint.",
+      "source_indicators": [
+        "Strings matching AKIA[0-9A-Z]{16} / ASIA... with adjacent 40-char secret",
+        "GCP service account JSON with \"private_key\": \"-----BEGIN PRIVATE KEY-----\" committed",
+        "Connection strings with embedded password (postgres://user:pass@host, mongodb+srv://...)",
+        ".env / config.yaml / appsettings.json with live secrets tracked in git",
+        "Secrets baked into client JS bundle, Dockerfile ENV, or Terraform default variable"
+      ],
+      "blackbox_indicators": [
+        "Secrets visible in served JS source maps / webpack bundles (grep for AKIA, apikey, secret)",
+        "Exposed /actuator/env, /debug, /info, phpinfo(), or Next.js __NEXT_DATA__ leaking env vars",
+        "Verbose error/stack trace echoing DB connection string or token",
+        "Publicly readable .git/config or .env via path traversal / open dir"
+      ],
+      "evidence_required": [
+        "Exact location (file:line, URL, or bundle path) and redacted snippet of the secret",
+        "Proof of validity: a benign auth check confirming the credential is live (without using its powers)",
+        "Scope of what the secret unlocks (which service/account)",
+        "Confirmation the secret is exposed to an untrusted party (public URL / shipped bundle / public repo)"
+      ],
+      "false_positive_checks": [
+        "Distinguish real secrets from placeholders/examples (AKIAIOSFODNN7EXAMPLE, dummy, changeme, test)",
+        "Verify the credential is not already revoked/rotated (validity check returns unauthorized)",
+        "Confirm it is a backend secret, not a publishable key intended to be public (e.g., Stripe pk_, Firebase web config)",
+        "Check exposure surface is truly untrusted, not an internal-only build artifact"
+      ],
+      "suggested_validation_task": "Run a single non-mutating validity probe for the credential type (e.g., sts:GetCallerIdentity for AWS, tokeninfo for GCP) to confirm it is live, then stop.",
+      "reporting_guidance": "Report as secret exposure: cite location, prove validity with one read-only check, and require immediate rotation + removal from history/bundle.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "duplicate",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "CLOUD-005",
+      "vuln_class": "cloud-infra",
+      "what_to_look_for": "Infrastructure/admin/debug services bound to a public interface without auth: Kubernetes API/kubelet, etcd, Docker API, Redis/Mongo/Elasticsearch, or management dashboards (Kibana, Consul, Spark, Jenkins, Grafana, Prometheus, Actuator).",
+      "source_indicators": [
+        "Service bind address 0.0.0.0 for a backing store (redis bind 0.0.0.0, mongod bindIp 0.0.0.0) with no auth",
+        "Docker daemon -H tcp://0.0.0.0:2375 (unauthenticated remote API)",
+        "Kubernetes --anonymous-auth=true / --insecure-port set, or kubelet --authorization-mode=AlwaysAllow",
+        "Ingress/Service of type LoadBalancer exposing admin port (9200, 8500, 2379, 10250, 6443)",
+        "Spring management.endpoints.web.exposure.include=* without securing /actuator"
+      ],
+      "blackbox_indicators": [
+        "Open admin ports: 2375/2376 (Docker), 6443/10250 (k8s), 2379 (etcd), 9200 (ES), 8500 (Consul), 6379 (Redis)",
+        "Unauthenticated GET /version, /api/v1/namespaces (k8s), /_cat/indices (ES), /v1/agent/members (Consul) returns 200",
+        "Redis responds to PING/INFO without AUTH; Mongo allows isMaster without creds",
+        "/actuator, /actuator/heapdump, Jenkins /script, Kibana, Grafana login-bypass dashboards reachable publicly"
+      ],
+      "evidence_required": [
+        "HTTP/protocol response from the admin service proving unauthenticated access (version/listing banner)",
+        "The exposed host:port and service identification",
+        "A benign read demonstrating data/control reach (e.g., list namespaces, INFO, _cat/indices)",
+        "Confirmation it is reachable from outside the trust boundary (public IP / internet egress)"
+      ],
+      "false_positive_checks": [
+        "Confirm the port is reachable externally, not just on localhost/private subnet from the scan host",
+        "Verify no auth is required (some return a banner but reject commands without creds)",
+        "Distinguish a honeypot/decoy or read-only health proxy from the real service",
+        "Check whether mTLS/network policy actually gates it despite the open port appearing"
+      ],
+      "suggested_validation_task": "Send one unauthenticated read-only request to the exposed admin port (e.g., Docker GET /version, k8s GET /version, Redis INFO) and capture the banner/response without issuing any state-changing command.",
+      "reporting_guidance": "Report as exposed infrastructure service: name host:port, show the unauthenticated banner/listing, and recommend auth + network restriction (no 0.0.0.0 bind).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "CLOUD-006",
+      "vuln_class": "cloud-infra",
+      "what_to_look_for": "Insecure container/Kubernetes runtime configuration that escalates a foothold to host/cluster: privileged containers, hostPath/hostNetwork/hostPID mounts, overly broad RBAC, or default service-account token auto-mounted with cluster-wide rights.",
+      "source_indicators": [
+        "Pod spec securityContext.privileged: true or allowPrivilegeEscalation: true / runAsUser: 0",
+        "hostPath volume mounting / or /var/run/docker.sock, or hostNetwork/hostPID/hostIPC: true",
+        "RBAC ClusterRole with verbs [\"*\"] resources [\"*\"], or binding system:anonymous / default SA to cluster-admin",
+        "automountServiceAccountToken not disabled and SA bound to broad roles",
+        "Missing capabilities drop / no seccomp/AppArmor (securityContext lacks readOnlyRootFilesystem, capabilities.drop)"
+      ],
+      "blackbox_indicators": [
+        "From a compromised pod: /var/run/secrets/kubernetes.io/serviceaccount/token present and accepted by API",
+        "kubectl auth can-i --list (via API) shows broad verbs for the mounted SA",
+        "Container can see host filesystem (/host mount) or docker.sock, or is uid 0 with full caps",
+        "Exposed kubelet (10250) /pods or /exec reachable enabling container command run"
+      ],
+      "evidence_required": [
+        "The pod/RBAC manifest fragment showing the dangerous setting",
+        "Benign proof: API call with the mounted SA token succeeding (e.g., self subject-access-review or list pods)",
+        "Demonstrated reach (host mount visible, or SA can read secrets in other namespaces) without altering state",
+        "Identification of the cluster/namespace and the escalation path"
+      ],
+      "false_positive_checks": [
+        "Confirm the privileged/hostPath setting is on a real workload, not a one-off admin/CNI/CSI system pod expected to have it",
+        "Verify the SA token actually grants broad access (run a can-i check), not a narrowly-scoped role",
+        "Check PodSecurity admission / OPA-Gatekeeper isn't already blocking the manifest at deploy time",
+        "Distinguish a lab/dev cluster from the in-scope production cluster"
+      ],
+      "suggested_validation_task": "Using the in-pod service-account token, issue a single read-only SelfSubjectAccessReview or 'list pods' API call to enumerate granted scope, taking no mutating cluster action.",
+      "reporting_guidance": "Report as container-escape/RBAC risk: show the insecure manifest setting and the benign access proof, and recommend dropping privilege, PodSecurity enforcement, and least-privilege RBAC.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable",
+        "reviewed_no_issue"
+      ]
+    }
+  ]
+}

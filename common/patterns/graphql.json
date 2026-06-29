@@ -1,0 +1,216 @@
+{
+  "vuln_class": "graphql",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "GQL-001",
+      "vuln_class": "graphql",
+      "what_to_look_for": "Introspection (__schema/__type) enabled on a production or otherwise sensitive endpoint, leaking the full type system, hidden mutations, and internal field names that should not be discoverable by unauthenticated clients.",
+      "source_indicators": [
+        "ApolloServer({ introspection: true }) or introspection left default-on in prod config",
+        "graphql-yoga / express-graphql with graphiql: true or no NODE_ENV gate around introspection",
+        "Missing NoSchemaIntrospectionCustomRule / validationRules in schema setup",
+        "Hasura/PostGraphile defaults with no introspection lockdown env var set"
+      ],
+      "blackbox_indicators": [
+        "POST {\"query\":\"{__schema{types{name}}}\"} returns 200 with a populated types array",
+        "query on __type(name:...) returns field definitions including @deprecated/internal fields",
+        "Error messages suggest fields via 'Did you mean ...' even when introspection appears off",
+        "GraphiQL/Apollo Sandbox HTML served at the GraphQL path"
+      ],
+      "evidence_required": [
+        "Full request/response for the __schema introspection query showing returned type/field names",
+        "Endpoint URL and environment classification (prod vs staging)",
+        "Auth context of the requester (unauthenticated vs low-priv)"
+      ],
+      "false_positive_checks": [
+        "Confirm the endpoint is production/sensitive, not an intentionally-open staging/docs sandbox",
+        "Check whether a WAF/edge gates introspection by IP/header before flagging",
+        "Distinguish full introspection from a curated public schema (federated gateway) that is intended"
+      ],
+      "suggested_validation_task": "Send a single POST with query {__schema{queryType{name} types{name}}} and record whether type names are returned.",
+      "reporting_guidance": "Report as info-disclosure enabler; rate higher when introspection reveals admin-only mutations or PII-bearing types, and pair with any downstream authz finding it unlocked.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "GQL-002",
+      "vuln_class": "graphql",
+      "what_to_look_for": "A resolver that returns data without checking the caller's identity/role, relying on the GraphQL layer being 'internal' or on the client to not call it — broken object-/operation-level authorization at the resolver boundary.",
+      "source_indicators": [
+        "Resolver function bodies that call the data layer (db.user.find, prisma.x.findMany) with no context.user / ctx.auth check",
+        "Authorization only enforced in REST controllers but the GraphQL resolver hits the same model directly",
+        "@authenticated/@hasRole directive defined but not applied to sensitive Query/Mutation fields",
+        "context builder that never populates user identity, or resolvers ignoring context entirely"
+      ],
+      "blackbox_indicators": [
+        "Sensitive query (e.g. users, invoices, apiKeys) returns data with no/low-priv token",
+        "Same query returns 200 with data for user A's resources when only user B is authenticated",
+        "No 'not authorized' error path observed across privileged fields"
+      ],
+      "evidence_required": [
+        "Request with attacker auth context returning another principal's or admin-only data",
+        "Identification of the resolver/field and confirmation no authz check exists in its path",
+        "A baseline request showing the intended authorized response for contrast"
+      ],
+      "false_positive_checks": [
+        "Verify authz is not enforced one layer down (data-loader/service guard, RLS in DB)",
+        "Confirm the returned data is actually sensitive and not intentionally public",
+        "Check a global middleware/plugin isn't already rejecting before resolver runs"
+      ],
+      "suggested_validation_task": "With a low-privilege token, request one sensitive field and compare the returned scope against that account's entitlements.",
+      "reporting_guidance": "Report as broken authorization with the specific field path; severity scales with data sensitivity and whether it crosses tenant/user boundaries.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "GQL-003",
+      "vuln_class": "graphql",
+      "what_to_look_for": "Object-level access works but a specific sensitive FIELD on an otherwise-authorized type is not protected — e.g. you may read your own User node but the resolver also exposes ssn/passwordHash/role on any User you can reference.",
+      "source_indicators": [
+        "Type-level guard present but individual field resolvers (User.email, User.role, User.internalNotes) have no per-field check",
+        "Field returned straight from the ORM row spread (return {...user}) exposing all columns",
+        "Sensitive fields lack a @auth/field-level directive while the parent type has one",
+        "GraphQL schema marks a field non-null/queryable that maps to a privileged DB column"
+      ],
+      "blackbox_indicators": [
+        "Selecting a sensitive subfield (e.g. { user(id:X){ role internalNotes } }) returns it for non-owned/non-admin context",
+        "Field returns real value for low-priv user where it should be null/redacted",
+        "Differential: object returns 200 but only the sensitive field is over-exposed"
+      ],
+      "evidence_required": [
+        "Query selecting the specific sensitive field and the response containing its value",
+        "Field path and the resolver/column it maps to",
+        "Caller authorization level showing they should not see that field"
+      ],
+      "false_positive_checks": [
+        "Confirm the field value is real, not a placeholder/masked stub",
+        "Verify the field isn't legitimately public for that role",
+        "Rule out the value being the caller's own (owner-readable) data"
+      ],
+      "suggested_validation_task": "Query an authorized object but add one sensitive subfield and check whether its value is returned for the current role.",
+      "reporting_guidance": "Report as field-level authorization gap naming the exact field; emphasize that object-level checks pass so it evades coarse access reviews.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "GQL-004",
+      "vuln_class": "graphql",
+      "what_to_look_for": "Query batching and/or field aliasing let a single HTTP request multiply work — used to bypass per-request rate limits, brute force (login/OTP/coupon) via aliased mutations, or amplify cost.",
+      "source_indicators": [
+        "Server accepts JSON-array batched operations (graphql-express/apollo batch=true) with no per-operation throttle",
+        "Rate limiting applied per HTTP request, not per GraphQL operation/field",
+        "No alias-count or duplicate-field limit; no graphql-no-alias / cost plugin",
+        "Login/verify/redeem mutation reachable repeatedly without lockout state keyed server-side"
+      ],
+      "blackbox_indicators": [
+        "POST of a JSON array of operations returns an array of results (batching enabled)",
+        "Single request with 100+ aliased copies of the same mutation each execute (e.g. login_1..login_100)",
+        "Rate-limit/lockout counters do not increment per aliased attempt",
+        "Response time/size scales linearly with alias count"
+      ],
+      "evidence_required": [
+        "Request containing N aliased operations and a response showing N independent results",
+        "Proof a protection (rate limit/lockout/OTP attempt counter) was bypassed across the aliases",
+        "Count of operations executed in the single request"
+      ],
+      "false_positive_checks": [
+        "Confirm aliases actually execute independently rather than being deduped/short-circuited",
+        "Check a cost/depth/alias-limit plugin doesn't reject above a threshold",
+        "Ensure the targeted mutation has security-relevant per-attempt state (else it is only cost amplification)"
+      ],
+      "suggested_validation_task": "Send one request with ~20 harmlessly-aliased copies of a benign query and confirm all aliases resolve independently.",
+      "reporting_guidance": "Report as rate-limit/brute-force bypass when a security counter is defeated; otherwise as DoS-amplification. Cite the alias/batch count achieved.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "GQL-005",
+      "vuln_class": "graphql",
+      "what_to_look_for": "No query depth or complexity limit, so a deeply nested/cyclic query (via reciprocal relations like author->posts->author) or a high-multiplier query can exhaust CPU/DB and cause denial of service.",
+      "source_indicators": [
+        "Schema with bidirectional relations and no graphql-depth-limit / graphql-query-complexity / costAnalysis plugin",
+        "validationRules array missing depthLimit/complexity rules",
+        "Per-field DB calls (N+1) with no DataLoader and no complexity cap",
+        "No timeout/pagination cap on list resolvers (first/limit unbounded)"
+      ],
+      "blackbox_indicators": [
+        "Deeply nested cyclic query returns 200 instead of a 'query exceeds maximum depth' error",
+        "Response latency grows sharply with nesting depth or requested list size",
+        "No complexity/cost error returned for an obviously expensive query",
+        "Unbounded first:/last: pagination accepted"
+      ],
+      "evidence_required": [
+        "A nested/cyclic query and the server response (success + measured latency, or absence of a depth error)",
+        "Evidence of resource impact (response-time delta vs baseline) without taking the service down",
+        "Schema relations enabling the cycle"
+      ],
+      "false_positive_checks": [
+        "Confirm no depth/complexity/timeout guard rejects beyond a threshold (test increasing depths)",
+        "Distinguish real backend cost from a cheap cached/short-circuited path",
+        "Stop at benign latency demonstration — do not actually exhaust the target"
+      ],
+      "suggested_validation_task": "Submit a moderately nested cyclic query (e.g. depth ~10) and record whether a depth/complexity limit error is returned vs a 200.",
+      "reporting_guidance": "Report as DoS-via-query-complexity; quantify with a benign latency-scaling curve and recommend depth+complexity limits, never demonstrate an actual outage.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "GQL-007",
+      "vuln_class": "graphql",
+      "what_to_look_for": "Relay-style global node(id:) lookup or any id-argument resolver that decodes an opaque/base64 global ID and fetches by primary key without an ownership/tenant check — classic IDOR through the GraphQL node interface or mutation inputs.",
+      "source_indicators": [
+        "node(id) resolver / fromGlobalId(id) that does db.findByPk(decodedId) with no caller-scope filter",
+        "Mutation inputs taking a raw id (deletePost(id), updateOrder(id)) resolving without verifying ownership",
+        "Sequential/base64-of-'Type:123' IDs decoded then trusted",
+        "Authorization keyed on the id argument value rather than on context.user owning the object"
+      ],
+      "blackbox_indicators": [
+        "node(id:\"<base64 Type:OTHER_ID>\") returns another tenant's/user's object",
+        "Incrementing or re-encoding a global ID yields objects the caller does not own",
+        "Mutation referencing a non-owned id succeeds (200, no authz error)",
+        "IDs are predictable base64 of 'Type:<int>'"
+      ],
+      "evidence_required": [
+        "Request with a global ID for a non-owned object and a response returning that object's data (or a successful mutation)",
+        "Decoding of the global ID showing it maps to a foreign primary key/tenant",
+        "Caller auth context proving lack of entitlement to that object"
+      ],
+      "false_positive_checks": [
+        "Verify the object is genuinely owned by a different principal/tenant, not shared/public",
+        "Confirm no row-level-security or post-fetch ownership filter silently scopes results",
+        "Ensure the returned id isn't the attacker's own re-encoded id"
+      ],
+      "suggested_validation_task": "Decode your own global node id, re-encode it for an adjacent id, and read-only query node(id) to check if a foreign object is returned.",
+      "reporting_guidance": "Report as IDOR/BOLA via global node id; show the decode->cross-object read and note it generalizes to every id-taking mutation lacking ownership checks.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "duplicate"
+      ]
+    }
+  ]
+}

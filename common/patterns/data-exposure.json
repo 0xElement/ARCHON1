@@ -1,0 +1,234 @@
+{
+  "vuln_class": "data-exposure",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "DATA-001",
+      "vuln_class": "data-exposure",
+      "what_to_look_for": "API/serializer returns the full ORM entity instead of a vetted field allowlist, leaking internal/sensitive columns (password_hash, mfa_secret, is_admin, internal_notes, other users' emails) the UI never displays.",
+      "source_indicators": [
+        "res.json(entity) or returning ORM object directly (.lean(), .toObject(), Model.findById)",
+        "DRF serializer with fields = '__all__' or no Meta.fields allowlist",
+        "Jackson/Gson serializing a whole JPA entity without @JsonIgnore on sensitive fields",
+        "GraphQL type/resolver exposing hashedPassword/secret/internal fields of the row",
+        "SELECT * feeding the response body; no Prisma/Sequelize select/attributes projection"
+      ],
+      "blackbox_indicators": [
+        "JSON carries fields absent from the rendered UI (passwordHash, ssn, isAdmin, createdByIp, internalNotes)",
+        "diff between mobile/API JSON and the web page reveals extra PII",
+        "nested objects include full related-user records",
+        "framework leftovers present (__v, _id, deletedAt, role flags)"
+      ],
+      "evidence_required": [
+        "raw HTTP response showing the sensitive fields",
+        "the request (method/path/auth context) that returned them",
+        "mapping showing the fields are not used/rendered by the client",
+        "classification of each leaked field (PII / secret / authz-relevant)"
+      ],
+      "false_positive_checks": [
+        "field is encrypted/tokenized rather than plaintext",
+        "field is the caller's own data, not another user's",
+        "response is post-filtered by a gateway/BFF before the client",
+        "value is a non-reversible hash with no auth value"
+      ],
+      "suggested_validation_task": "Authenticated GET the object/list endpoint and grep the JSON for fields not shown in the UI (password, secret, ssn, is_admin, other users' email).",
+      "reporting_guidance": "Report as Excessive Data Exposure (OWASP API3): list the exact leaked fields, whose data they are, and the response that returned them.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "DATA-002",
+      "vuln_class": "data-exposure",
+      "what_to_look_for": "Sensitive data (passwords, tokens, session IDs, card/SSN, full request bodies, Authorization/Cookie headers) written to application logs, log aggregation, or third-party telemetry without scrubbing.",
+      "source_indicators": [
+        "logger.info/debug(req.body) or logging the whole request/response object",
+        "console.log(user) or logging Authorization / Cookie / Set-Cookie headers",
+        "logging full SQL with bound parameters, or exceptions that include the input payload",
+        "Sentry/Datadog/analytics capture with no body/header scrubbing",
+        "morgan/access-log format that includes query strings carrying tokens"
+      ],
+      "blackbox_indicators": [
+        "tokens/session IDs/PII appear in URL query strings (they land in access logs)",
+        "error responses echo the same data that would be logged",
+        "debug/request-id headers reflect submitted input"
+      ],
+      "evidence_required": [
+        "a log line or telemetry event containing the sensitive value",
+        "source location of the log statement",
+        "classification of the data plus who can read that log sink"
+      ],
+      "false_positive_checks": [
+        "value already masked/redacted (****1234, [REDACTED])",
+        "log statement only fires at a debug level disabled in prod (confirm prod config)",
+        "sink is access-controlled with short retention (still report, lower severity)",
+        "value is a public identifier, not a secret/PII"
+      ],
+      "suggested_validation_task": "If log/telemetry access exists, grep for known secret/PII test values submitted in a prior request; otherwise confirm the log statement and prod log level in source.",
+      "reporting_guidance": "Report as PII/secret in logs: cite the log statement, the sink, its access/retention, and a masked sample of the leaked line.",
+      "output_states": [
+        "matched_candidate",
+        "needs_source_root_cause",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "DATA-003",
+      "vuln_class": "data-exposure",
+      "what_to_look_for": "Error responses leak stack traces, SQL/exception messages, framework versions, file paths, env vars, or echoed input, exposing internals and sometimes other users' data.",
+      "source_indicators": [
+        "Express error handler returning err.stack / err.message to the client",
+        "Django DEBUG=True, Flask debug=True, Rails consider_all_requests_local=true",
+        "ASP.NET customErrors=Off / detailed errors enabled",
+        "raw DB driver error returned in the response (err.detail, ORA-, PG/MySQL error)",
+        "no try/catch around handlers so the default 500 dumps a trace"
+      ],
+      "blackbox_indicators": [
+        "500 body contains a stack trace, file paths, or line numbers",
+        "SQL error reveals table and column names",
+        "framework debug page (Werkzeug, Whoops, Symfony profiler)",
+        "exception message echoes submitted input; verbose Server/X-Powered-By headers"
+      ],
+      "evidence_required": [
+        "HTTP response showing the leaked internals",
+        "the request (often malformed/edge input) that triggered it",
+        "what was disclosed (paths, schema, versions, secrets, other-user data)"
+      ],
+      "false_positive_checks": [
+        "generic error page with no internal detail (only a request ID)",
+        "stack present only in a non-prod environment",
+        "disclosed paths/versions are already public knowledge"
+      ],
+      "suggested_validation_task": "Send benign malformed input (bad type, oversized field, broken JSON) to a few endpoints and inspect 4xx/5xx bodies for stack traces or DB errors.",
+      "reporting_guidance": "Report as Verbose Error / Information Disclosure: include the trigger request and the exact internals disclosed; flag if any other-user data leaked.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "not_applicable",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "DATA-004",
+      "vuln_class": "data-exposure",
+      "what_to_look_for": "List, search, autocomplete, export, or relation-include endpoints return records or fields belonging to other users/tenants because the query isn't scoped to the caller, even when the single-object endpoint is properly guarded.",
+      "source_indicators": [
+        "Model.findAll/findMany on a list route with no where userId/tenantId/orgId filter",
+        "search/autocomplete querying all rows and returning name/email/phone",
+        "ORM include/populate/with of a sensitive relation without scoping",
+        "GraphQL nested resolver fetching related entities without per-field authz",
+        "report/export builder whose query ignores caller scope; ?include=/?expand=/?fields= expanding into other-owner data"
+      ],
+      "blackbox_indicators": [
+        "search/autocomplete returns other users' emails or phones",
+        "list endpoint returns more rows than the UI shows for this account",
+        "adding ?include=owner / ?expand=user reveals other-user PII",
+        "total/count in the response exceeds the caller's own data; GraphQL nesting surfaces foreign records"
+      ],
+      "evidence_required": [
+        "two-account proof: account A's response containing account B's data",
+        "the exact request and the leaked foreign-owned fields",
+        "confirmation the data is not an intentional public directory"
+      ],
+      "false_positive_checks": [
+        "data is an intentional public directory/social graph",
+        "results are de-identified (opaque IDs only, no PII)",
+        "scoping happens in a downstream BFF/gateway not in the reviewed service",
+        "the 'foreign' record is actually shared with the caller via membership"
+      ],
+      "suggested_validation_task": "From a low-privilege account hit list/search/export endpoints (and add ?include=/?expand=) and check whether any returned record or field belongs to another account.",
+      "reporting_guidance": "Report as IDOR-adjacent excessive exposure: show A seeing B's data via the collection/relation path, even when single-object GET is secured.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "DATA-005",
+      "vuln_class": "data-exposure",
+      "what_to_look_for": "Secrets or PII placed in URL query strings (reset/API tokens, session IDs, emails) or authenticated PII responses served as cacheable, leaking via browser cache, shared proxies, Referer headers, and access logs.",
+      "source_indicators": [
+        "redirect/link building a token or session into a query string (?token=, ?sid=, ?api_key=)",
+        "GET routes accepting password/token/PII as query parameters",
+        "auth'd PII endpoint returning Cache-Control: public / max-age, or missing no-store",
+        "missing Referrer-Policy on pages that link off-site while holding a token in the URL",
+        "password-reset/magic-link delivered as a long-lived, non-one-time GET token"
+      ],
+      "blackbox_indicators": [
+        "tokens/session IDs/emails visible in the URL query string",
+        "Cache-Control: public or no Cache-Control: no-store on authenticated PII responses",
+        "no Referrer-Policy header on token-bearing pages",
+        "ETag/Last-Modified caching on per-user PII; third-party scripts loaded on a token-bearing URL"
+      ],
+      "evidence_required": [
+        "the URL or response headers showing the secret/PII or the cacheable directive",
+        "demonstration of a leak vector (Referer sent off-site, or a cached copy retrievable)",
+        "classification of what is exposed plus its lifetime/reuse"
+      ],
+      "false_positive_checks": [
+        "token is single-use and invalidated immediately (lower impact)",
+        "response actually carries no-store/private despite a nearby public asset",
+        "value in the URL is a non-sensitive public ID",
+        "page makes no cross-origin requests, so the Referer leak is moot"
+      ],
+      "suggested_validation_task": "Inspect token-bearing URLs and an authenticated PII page's response headers for missing Cache-Control: no-store / Referrer-Policy; check if back-button or a logged-out replay serves cached PII.",
+      "reporting_guidance": "Report as Sensitive Data in URL/Cache: name the secret/PII, the leak channel (logs/Referer/cache), and the missing header.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "DATA-006",
+      "vuln_class": "data-exposure",
+      "what_to_look_for": "Server embeds more data than the user needs into HTML/JS, inline JSON state, hidden form fields, HTML comments, or deployed source maps, leaking other users' records, secrets, or internal fields to view-source.",
+      "source_indicators": [
+        "SSR dumping a full store/entity into window.__INITIAL_STATE__ / __NEXT_DATA__ / __APOLLO_STATE__",
+        "templates rendering admin/other-user fields into hidden inputs or data-* attributes",
+        "source maps (*.js.map) emitted to the production build/CDN",
+        "secrets/PII hardcoded or inlined into the client bundle/config",
+        "GraphQL/REST response with extra fields cached into client state"
+      ],
+      "blackbox_indicators": [
+        "view-source reveals inline JSON with foreign-user records, emails, or secret flags",
+        "*.js.map fetchable from the asset host (reveals source and comments)",
+        "hidden inputs / data-* attributes containing PII or authz flags",
+        "HTML comments with internal info (paths, names, TODO creds); __NEXT_DATA__/__INITIAL_STATE__ wider than the current user's scope"
+      ],
+      "evidence_required": [
+        "the page source or .map URL showing the embedded sensitive data",
+        "identification of whose data or which secret is exposed",
+        "confirmation it reaches the browser without authorization to that data"
+      ],
+      "false_positive_checks": [
+        "embedded data is the current user's own, intended for hydration",
+        ".map returns 404 or is access-restricted",
+        "values are public config (publishable keys), not secrets",
+        "hidden field is an opaque CSRF/nonce token, not PII"
+      ],
+      "suggested_validation_task": "View page source and fetch the matching *.js.map for inline JSON state, hidden fields, or comments containing other-user PII or secrets.",
+      "reporting_guidance": "Report as Client-Side Data Exposure: quote the inline state/map/hidden field and identify the foreign data or secret leaked to the browser.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    }
+  ]
+}

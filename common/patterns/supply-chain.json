@@ -1,0 +1,221 @@
+{
+  "vuln_class": "supply-chain",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "SUPPLY-001",
+      "vuln_class": "supply-chain",
+      "what_to_look_for": "A direct or transitive dependency pinned in a lockfile/manifest to a version that falls within a published advisory range (CVE/GHSA), where the vulnerable code path actually ships to and is invoked by the running app.",
+      "source_indicators": [
+        "package-lock.json / yarn.lock / pnpm-lock.yaml entry at a version inside a known GHSA range (e.g. lodash <4.17.21, minimist <1.2.6)",
+        "requirements.txt / poetry.lock / Pipfile.lock pin like 'urllib3==1.25.8' or 'Pillow<8.3.2'",
+        "pom.xml / build.gradle 'log4j-core' 2.x <2.17.1, 'jackson-databind' <2.13.x, 'spring-core' affected ranges",
+        "go.sum / go.mod module at a version listed in an OSV advisory",
+        "Gemfile.lock / composer.lock entry at an advisory-affected version",
+        "npm audit / pip-audit / osv-scanner / dependabot already flagging the entry"
+      ],
+      "blackbox_indicators": [
+        "JS bundle comment or banner leaking lib version (e.g. '/*! jQuery v1.8.3 */', window.React.version, webpack chunk paths)",
+        "Server / X-Powered-By / X-AspNet-Version header revealing framework version with known CVEs",
+        "Verbose error/stack page disclosing a vulnerable framework version (e.g. Struts, Spring)",
+        "Static asset path or /VERSION endpoint returning a fingerprintable build identifier"
+      ],
+      "evidence_required": [
+        "Exact package name + installed version + the lockfile path/line",
+        "Advisory identifier (CVE-XXXX-XXXX or GHSA-xxxx) and the fixed version",
+        "Proof the vulnerable module is imported/reachable (call site or runtime version banner), not dead/dev-only"
+      ],
+      "false_positive_checks": [
+        "Confirm the vulnerable function is actually called (advisory may affect an unused API)",
+        "Check for an override/resolutions/replace pin or distro-backported fix that neutralizes it",
+        "Confirm it is a production dependency, not devDependencies/test-only and stripped from the shipped artifact",
+        "Confirm advisory applies to this ecosystem variant (not a same-named package in another registry)"
+      ],
+      "suggested_validation_task": "Run osv-scanner / `npm audit --production --json` / `pip-audit -r requirements.txt` against the committed lockfile and confirm the advisory ID and affected version (read-only, no install).",
+      "reporting_guidance": "Report package@version, advisory ID, fixed version, and whether the vulnerable API is reachable; severity follows reachability, not just presence.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "SUPPLY-002",
+      "vuln_class": "supply-chain",
+      "what_to_look_for": "An internal/private package name referenced by the build that is unclaimed on the public registry, with resolver config that would fetch the public registry over the private one (dependency confusion / namespace-claim hijack).",
+      "source_indicators": [
+        "package.json depends on an unscoped internal name (e.g. 'company-auth-utils') with no private-registry pin",
+        "Missing '@scope:registry=' mapping in .npmrc while @scope packages are internal",
+        "pip 'extra-index-url' pointing at an internal index alongside public PyPI (PEP-injection ordering risk)",
+        "Lockfile shows an internal package name resolving to the public registry.npmjs.org / pypi.org URL",
+        "package.json lacking '\"private\": true' for a non-published internal app"
+      ],
+      "blackbox_indicators": [
+        "Internal package names leaked in shipped JS bundles, sourcemaps, or webpack chunk paths (node_modules/@company/internal-ui)",
+        "Stack traces or error pages referencing internal module names",
+        "Exposed SBOM / dependency manifest endpoint listing internal package names"
+      ],
+      "evidence_required": [
+        "The internal package name as referenced in the manifest/lockfile",
+        "Proof the name is unclaimed/available on the public registry (registry 404 or 'available')",
+        "Resolver config showing public registry would win resolution (no scope pin / index ordering)"
+      ],
+      "false_positive_checks": [
+        "Confirm the name is genuinely unregistered publicly (org may already hold a placeholder)",
+        "Check .npmrc/scoped registry actually pins resolution to the private index",
+        "Confirm install-time resolution order and that --index-url overrides extra-index-url",
+        "Verify the internal name is not also a legitimate public package owned by the org"
+      ],
+      "suggested_validation_task": "Query the public registry for the internal name (`npm view @company/pkg` / `pip index versions pkg`) and confirm it returns 404/unclaimed — do NOT publish a placeholder.",
+      "reporting_guidance": "Report the unclaimed internal name plus the resolver misconfiguration; recommend scope-pinning to the private registry and reserving the name. Never publish a squat to prove it.",
+      "output_states": [
+        "matched_candidate",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "SUPPLY-003",
+      "vuln_class": "supply-chain",
+      "what_to_look_for": "A dependency whose name is a near-miss (typo, hyphen/underscore swap, scope omission, char transposition) of a popular package, or a newly-added low-reputation package, indicating a typosquat may be installed.",
+      "source_indicators": [
+        "Manifest entries like 'crossenv', 'loadsh', 'python3-dateutil', 'requesocks', 'colorsama', 'electorn'",
+        "A dependency added in a recent commit whose name is 1-2 edits from a canonical popular package",
+        "Suspicious package declares preinstall/postinstall lifecycle scripts",
+        "Lockfile resolves the lookalike name to a recently-published, low-download registry entry"
+      ],
+      "blackbox_indicators": [
+        "Shipped bundle contains code/strings matching a known-malicious typosquat package",
+        "CI/build artifact shows outbound beacon to an unexpected domain during install"
+      ],
+      "evidence_required": [
+        "The suspicious package name + the canonical popular package it mimics (with edit distance)",
+        "Registry metadata: first-publish date, weekly downloads, maintainer identity",
+        "Confirmation the lookalike (not the canonical) is what the lockfile resolves"
+      ],
+      "false_positive_checks": [
+        "Confirm it is not a legitimately-named fork/mirror or scoped variant the team chose deliberately",
+        "Verify intended package per project docs/README",
+        "Some near-names are independent legitimate packages — check maintainer reputation and history",
+        "Check the canonical package isn't itself a rename/deprecation pointing here"
+      ],
+      "suggested_validation_task": "Pull registry metadata (`npm view <pkg> maintainers time downloads`) and compare the name's edit distance to the popular package (read-only).",
+      "reporting_guidance": "Report the installed name, the canonical target, and maintainer/age/download signals; recommend pinning the correct package and removing the lookalike.",
+      "output_states": [
+        "matched_candidate",
+        "needs_source_root_cause",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "SUPPLY-004",
+      "vuln_class": "supply-chain",
+      "what_to_look_for": "Install-time / build-time lifecycle scripts (project or dependency) that execute arbitrary code, fetch remote scripts over the network, or run unverified binaries with CI privileges and secrets in scope.",
+      "source_indicators": [
+        "package.json scripts.postinstall/preinstall/prepare running 'curl ... | sh' or 'node download.js'",
+        "setup.py / setup cmdclass using os.system/exec to fetch+run a remote script",
+        "Dockerfile / Makefile 'RUN curl http(s)://... | bash' with no checksum",
+        "Native-binding deps (node-gyp, prebuild-install) pulling binaries from an unpinned URL",
+        "Gradle 'apply from:' a remote URL, or Maven plugin downloading at build time"
+      ],
+      "blackbox_indicators": [
+        "CI build logs showing network egress to unexpected hosts during 'npm install' / 'pip install'",
+        "Produced artifact contains unexpected binaries or files not in source"
+      ],
+      "evidence_required": [
+        "The lifecycle script body and the exact remote URL it fetches",
+        "Whether integrity is verified (SRI hash / checksum / pinned digest) — and that it is absent",
+        "Execution context: runs in CI with repository secrets / write tokens available"
+      ],
+      "false_positive_checks": [
+        "Confirm the fetched resource is pinned to a commit/digest and checksum-verified",
+        "Check whether 'npm install --ignore-scripts' (or equivalent) is already enforced in CI",
+        "Benign prebuilt-binary download with a verified checksum is not exploitable",
+        "Confirm the URL is HTTPS to a trusted, org-controlled host"
+      ],
+      "suggested_validation_task": "Run `npm install --ignore-scripts --dry-run` and grep the lockfile for packages declaring lifecycle scripts; read the script bodies (no execution).",
+      "reporting_guidance": "Report the package + script + remote fetch + missing integrity; recommend --ignore-scripts allowlisting and checksum/digest-pinned fetches.",
+      "output_states": [
+        "matched_candidate",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "SUPPLY-005",
+      "vuln_class": "supply-chain",
+      "what_to_look_for": "Dependencies (or base images / CI actions) referenced by mutable, floating constraints with no committed lockfile or digest pin, making builds non-reproducible and exposing them to malicious version pushes.",
+      "source_indicators": [
+        "package.json ranges '^1.x' / '~1.x' / '*' / 'latest' with no committed lockfile (or lockfile gitignored)",
+        "requirements.txt without '==' pins and without --require-hashes",
+        "Dockerfile 'FROM node:latest' / unpinned base image (no @sha256 digest)",
+        "GitHub Actions 'uses: actions/checkout@v4' (mutable tag, not full commit SHA)",
+        "go.mod 'replace' pointing at a branch, or git dependency without a pinned commit"
+      ],
+      "blackbox_indicators": [
+        "Served asset/bundle hash drifts between deploys without a corresponding source change",
+        "Framework version banner changes across deploys, indicating unpinned upstream"
+      ],
+      "evidence_required": [
+        "The manifest/workflow line carrying the floating constraint or mutable tag",
+        "Absence of a committed lockfile, --require-hashes, or @sha256/@<commit> digest pin"
+      ],
+      "false_positive_checks": [
+        "Confirm a committed lockfile or hash file actually pins the resolved versions",
+        "Check Renovate/Dependabot config that pins and digest-locks updates",
+        "Internal immutable mirror or proxy may make 'latest' deterministic",
+        "Range may be tightly bounded enough that exploit window is negligible"
+      ],
+      "suggested_validation_task": "Grep manifests/Dockerfiles/workflows for floating ranges and mutable tags, then confirm whether a committed lockfile or SHA/digest pin exists (read-only).",
+      "reporting_guidance": "Report the unpinned entries; recommend committing a lockfile and pinning base images to @sha256 and actions to full commit SHA.",
+      "output_states": [
+        "matched_candidate",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "SUPPLY-006",
+      "vuln_class": "supply-chain",
+      "what_to_look_for": "CI/CD pipeline that executes attacker-controlled input or pulls dependencies insecurely — script injection from event context, pull_request_target running fork code, plaintext-HTTP registries, or secrets exposed to unpinned third-party actions (build injection).",
+      "source_indicators": [
+        "GitHub Actions 'on: pull_request_target' that checks out PR head and runs build/test steps",
+        "Untrusted '${{ github.event.* }}' (PR title/branch/body) interpolated directly into a 'run:' script",
+        ".npmrc / pip.conf with 'http://' registry or '--trusted-host' disabling TLS verification",
+        "Third-party action pinned to a mutable ref ('uses: foo/bar@master') while secrets are in scope",
+        "Self-hosted runner enabled on a public repo, or 'curl http://...' in a build step"
+      ],
+      "blackbox_indicators": [
+        "Release assets/artifacts lack signatures or provenance (no SLSA/sigstore attestation)",
+        "Package downloaded over plaintext HTTP observable via MITM during build",
+        "Published artifact built from a fork or from an untrusted ref"
+      ],
+      "evidence_required": [
+        "The workflow file + the injectable expression or insecure registry URL",
+        "The trust boundary crossed: fork PR executing, or external action with access to secrets",
+        "Confirmation the step runs with secrets / write tokens available"
+      ],
+      "false_positive_checks": [
+        "Confirm pull_request_target does NOT check out or execute untrusted PR code",
+        "Expressions passed via 'env:' and quoted (not inlined into shell) are not injectable",
+        "Registry URL is HTTPS with a pinned trusted host",
+        "Third-party action pinned to a full commit SHA, and secrets are not exposed to forks"
+      ],
+      "suggested_validation_task": "Statically review workflow YAML for 'pull_request_target' + untrusted checkout and for '${{ }}' inside 'run:'; confirm all registry URLs are HTTPS (read-only).",
+      "reporting_guidance": "Report the workflow file + injection vector + secret exposure; recommend SHA-pinning actions, passing inputs via env, and removing fork access to secrets.",
+      "output_states": [
+        "matched_candidate",
+        "needs_source_root_cause",
+        "false_positive",
+        "duplicate"
+      ]
+    }
+  ]
+}

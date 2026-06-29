@@ -7,6 +7,23 @@
     "sqli": "sqli.json",
     "ssrf": "ssrf.json",
     "rce": "rce.json",
-    "account-takeover": "account-takeover.json"
+    "account-takeover": "account-takeover.json",
+    "authentication-session": "authentication-session.json",
+    "injection": "injection.json",
+    "file-handling": "file-handling.json",
+    "api-security": "api-security.json",
+    "graphql": "graphql.json",
+    "business-logic": "business-logic.json",
+    "data-exposure": "data-exposure.json",
+    "cryptography-secrets": "cryptography-secrets.json",
+    "deserialization": "deserialization.json",
+    "path-traversal": "path-traversal.json",
+    "race-conditions": "race-conditions.json",
+    "webhooks": "webhooks.json",
+    "cloud-infra": "cloud-infra.json",
+    "supply-chain": "supply-chain.json",
+    "logging-audit": "logging-audit.json",
+    "multi-tenant": "multi-tenant.json",
+    "admin-privileged": "admin-privileged.json"
   }
 }

@@ -1,0 +1,241 @@
+{
+  "vuln_class": "admin-privileged",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "ADMIN-001",
+      "vuln_class": "admin-privileged",
+      "what_to_look_for": "Admin/management routes mounted under predictable prefixes (/admin, /administrator, /manage, /console, /wp-admin, Django /admin/, mount Sidekiq::Web, Bull-Board) whose only protection is not being linked in the UI: no auth middleware/guard wraps the route group, or auth is applied per-action and missed on some endpoints.",
+      "source_indicators": [
+        "app.use('/admin', adminRouter) / mount Sidekiq::Web with no surrounding auth middleware",
+        "Admin controller lacking class-level [Authorize(Roles=\"Admin\")] / @login_required while siblings have it",
+        "Route marked 'internal only' in a comment with no enforcement",
+        "Mounted dashboard (Bull-Board, Flower, Django admin) registered before/outside the auth chain",
+        "expose_admin / debug admin flag wired true in non-dev config"
+      ],
+      "blackbox_indicators": [
+        "GET /admin, /administrator, /manage, /wp-admin returns 200 admin UI instead of 302/401/403",
+        "Framework default admin (Django /admin/, /sidekiq, Bull-Board) reachable with anonymous session",
+        "Route brute-force reveals admin paths serving content to an unauthenticated client",
+        "Admin path returns 200 while the app UI never links it"
+      ],
+      "evidence_required": [
+        "Exact admin URL + raw request issued with no/low-priv session",
+        "Response showing privileged content or an available privileged control",
+        "Demonstration that no auth redirect/401/403 occurs",
+        "White-box: route registration line missing an auth guard"
+      ],
+      "false_positive_checks": [
+        "Confirm the 200 response isn't a login page served inline",
+        "Check for upstream proxy auth (mTLS, basic auth, IP allowlist) not visible in app code",
+        "Confirm a privileged action actually executes, not just a shell that 403s on submit",
+        "Rule out a honeypot/decoy admin path"
+      ],
+      "suggested_validation_task": "Send an unauthenticated GET to the discovered admin path and record the status code plus whether a privileged control renders.",
+      "reporting_guidance": "Report as broken access control on the admin route; include the exact path, the anonymous request, and the privileged element exposed.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "ADMIN-002",
+      "vuln_class": "admin-privileged",
+      "what_to_look_for": "Debug/profiler/diagnostic surfaces left enabled in production: Spring Boot Actuator (/actuator/env, /heapdump, /threaddump, /mappings), Django DEBUG=True + Werkzeug console, Symfony /_profiler & /_fragment, Laravel Telescope/Ignition, Rails /rails/info, phpinfo(), Go /debug/pprof, or GraphQL introspection/playground in prod.",
+      "source_indicators": [
+        "DEBUG = True / APP_DEBUG=true / app.debug=True in committed or prod config",
+        "management.endpoints.web.exposure.include=* without spring-security on actuator",
+        "Telescope/Debugbar/Ignition listed under require (not require-dev) in composer.json",
+        "import _ \"net/http/pprof\" / app.use('/debug', ...) / registered /__debug__",
+        "GraphQL introspection:true or playground enabled unconditionally"
+      ],
+      "blackbox_indicators": [
+        "/actuator, /actuator/env, /actuator/heapdump returns JSON config or a binary dump",
+        "Verbose stack-trace page with an interactive console (Werkzeug PIN, Symfony profiler)",
+        "/_profiler, /telescope, /rails/info/routes, or phpinfo() output reachable anonymously",
+        "GraphQL __schema introspection succeeds or /graphiql / playground loads in prod"
+      ],
+      "evidence_required": [
+        "URL + response proving the debug surface (env vars, stack trace, heap dump, schema)",
+        "Sensitive data or actionable capability shown (secrets, tokens, code-exec console)",
+        "Note whether the surface requires any authentication"
+      ],
+      "false_positive_checks": [
+        "Confirm the endpoint is on the public host, not an internal mgmt port behind a firewall",
+        "Check actuator value sanitization (env masked as ******) before rating severity",
+        "Verify the host is production, not a staging/dev environment",
+        "Confirm GraphQL introspection isn't intentionally public for a documented public API"
+      ],
+      "suggested_validation_task": "Request the debug/actuator/profiler URL anonymously and capture whether sensitive internals or an interactive console render.",
+      "reporting_guidance": "Report as debug-endpoint exposure; quantify the leaked data and flag any code-exec console (Werkzeug/Spring) as critical.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "ADMIN-003",
+      "vuln_class": "admin-privileged",
+      "what_to_look_for": "Privileged operations gated only by the frontend hiding the control: the backend REST endpoint or GraphQL mutation performs the admin action without re-checking role/permission server-side. Classic vertical privilege escalation via forced browsing to the admin API.",
+      "source_indicators": [
+        "Admin API handler with no requireRole('admin')/policy call, relying on a separate admin SPA",
+        "Authorization done only in the view ({isAdmin && <Button/>}) with no matching server guard",
+        "Permission check present on the GET (render) but absent on the mutating POST/PUT/DELETE",
+        "Shared service method invoked by both admin and user controllers without its own authz",
+        "Endpoint like POST /api/admin/users/{id}/role lacking a role assertion"
+      ],
+      "blackbox_indicators": [
+        "Low-priv session calling an admin-only endpoint returns 200 and performs the action",
+        "Admin endpoints present in the JS bundle / OpenAPI / GraphQL schema but absent from low-priv UI",
+        "Same payload succeeds with a normal user's token as with an admin's token",
+        "403 on UI navigation but 200 on the direct API call"
+      ],
+      "evidence_required": [
+        "Two-account proof: a low-priv token successfully invokes the admin action",
+        "Request/response showing the state change or privileged data returned",
+        "White-box: source location of the unguarded handler"
+      ],
+      "false_positive_checks": [
+        "Confirm the action truly executed (re-read state) vs a 200 with silent server-side deny",
+        "Verify the 'low-priv' account wasn't accidentally granted the role",
+        "Check for an object/row-level filter that limits real impact",
+        "Rule out an idempotent no-op endpoint"
+      ],
+      "suggested_validation_task": "Replay the admin endpoint with a freshly created low-privilege account's token and verify the privileged effect actually occurred.",
+      "reporting_guidance": "Report as vertical privilege escalation; lead with the two-account proof and the missing server-side role check.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "ADMIN-004",
+      "vuln_class": "admin-privileged",
+      "what_to_look_for": "Privilege or admin status decided from a client-controllable signal: a request header (X-Admin, X-Internal, trusted X-Forwarded-For), a body/query param (isAdmin, role, admin=1), an editable cookie, an unverified/mass-assignable JWT or profile claim, or an internal-only route gated solely by a spoofable header.",
+      "source_indicators": [
+        "if request.headers['X-Admin'] / X-Internal-Request used for authorization",
+        "role/permission read from req.body/query/cookie instead of the server session",
+        "Mass assignment of is_admin/role/is_staff from a user-update payload with no allowlist",
+        "JWT custom claim role/admin trusted without verifying it was server-issued (or alg=none accepted)",
+        "Internal route gated by 'if ip in INTERNAL_CIDR' while behind a proxy that forwards client headers"
+      ],
+      "blackbox_indicators": [
+        "Adding X-Admin:true or X-Forwarded-For:127.0.0.1 unlocks an admin response",
+        "Sending isAdmin=true / role=admin in update or registration grants elevated access",
+        "Tampering a base64/JWT claim and replaying still authorizes the request",
+        "Internal/admin route returns 200 only when a spoofed internal header is supplied"
+      ],
+      "evidence_required": [
+        "Baseline (denied) vs modified (granted) request diff isolating the single client-controlled field",
+        "Proof the elevated state persists or the privileged action runs",
+        "White-box: source line trusting the client value"
+      ],
+      "false_positive_checks": [
+        "Confirm the header isn't stripped/overwritten by the real edge proxy (test through prod edge, not origin)",
+        "Verify the JWT signature is genuinely unverified vs server re-signs/validates",
+        "Check the mass-assigned field is actually honored by authz, not merely stored",
+        "Ensure the change isn't reverted by a later authoritative server-side read"
+      ],
+      "suggested_validation_task": "Resend the request with the suspected client-controlled privilege field/header toggled and compare the authorization outcome.",
+      "reporting_guidance": "Report as authorization based on untrusted client input; name the exact field/header and show the before/after access diff.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "ADMIN-005",
+      "vuln_class": "admin-privileged",
+      "what_to_look_for": "Built-in superuser bypasses: still-active default credentials (admin/admin), hardcoded backdoor accounts or tokens, a magic header/param that skips auth, a dev impersonation / 'login as user' feature reachable in prod, or a seeded admin with a known password.",
+      "source_indicators": [
+        "Hardcoded credentials/tokens in the auth path (if user=='support' && pass=='...')",
+        "if token == 'BACKDOOR' / MASTER_KEY env compared to grant access",
+        "Seed or migration creating an admin with a static password",
+        "Impersonation endpoint (/impersonate, login_as, become) without a strict guard or audit",
+        "Feature flag ALLOW_SUPERUSER / GOD_MODE evaluated outside a dev-only guard"
+      ],
+      "blackbox_indicators": [
+        "Vendor default creds (admin/admin, root/root) successfully log in",
+        "A magic value/header grants access matching a known CVE backdoor for the product/version",
+        "Impersonation / login-as URL works for a non-admin or without re-authentication",
+        "A documented default API key/token is still valid"
+      ],
+      "evidence_required": [
+        "Successful authentication/session via the default or backdoor path",
+        "Identification of the static credential/token/flag (source or known CVE)",
+        "Proof of a privileged capability exercised with that access"
+      ],
+      "false_positive_checks": [
+        "Confirm default creds weren't rotated (attempt login only, stop before any destructive action)",
+        "Verify the backdoor branch is reachable in the prod build, not dev-only / compiled out",
+        "Check the impersonation feature actually requires an existing admin (then it's intended)",
+        "Rule out a honeytoken/canary account"
+      ],
+      "suggested_validation_task": "Attempt a single login with the documented default credential and stop immediately at the authenticated landing page.",
+      "reporting_guidance": "Report as backdoor/default-credential access; cite the static secret location or CVE and the privileged session obtained.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "ADMIN-006",
+      "vuln_class": "admin-privileged",
+      "what_to_look_for": "A privileged operation enforced on the primary path but exposed unguarded on an alternate channel: a management/actuator port on a separate listener, internal RPC/gRPC/queue worker callable directly, a legacy /v1 or mobile API missing the web's admin middleware, or JMX/metrics consoles reachable publicly.",
+      "source_indicators": [
+        "Admin authz in web middleware but absent on the API/GraphQL/gRPC handler of the same action",
+        "Separate management server (management.server.port, JMX, debug listener) without auth",
+        "Legacy /v1 or mobile controller duplicating admin logic without the newer guard",
+        "Background/queue consumer or internal RPC performing privileged ops on implicit trust",
+        "Admin route registered before/outside the auth middleware chain"
+      ],
+      "blackbox_indicators": [
+        "Admin action blocked on the web UI but succeeds via /api, /graphql, or /v1 equivalent",
+        "Management/metrics/JMX port (e.g. 8081, 9990, actuator on an alt port) reachable from internet",
+        "Mobile/legacy endpoint performs the privileged op without the newer authorization",
+        "Different status (403 vs 200) for the same operation across channels"
+      ],
+      "evidence_required": [
+        "Request proving the privileged op succeeds on the alternate channel while denied on the primary",
+        "Mapping of the two channels to the same underlying privileged action",
+        "White-box: config/source showing the guard exists on one path only"
+      ],
+      "false_positive_checks": [
+        "Confirm both channels truly hit the same privileged operation, not a read-only twin",
+        "Verify the alternate port isn't firewalled at the network edge",
+        "Check the alternate channel isn't enforcing authz at a different layer (gateway/mTLS)",
+        "Ensure the legacy endpoint isn't deprecated/disabled in production"
+      ],
+      "suggested_validation_task": "Invoke the privileged action through the alternate channel (API/GraphQL/legacy/mgmt port) with the same low-priv identity and compare to the primary path's denial.",
+      "reporting_guidance": "Report as inconsistent authorization across channels for a privileged operation; show the allow-vs-deny diff and name both paths.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    }
+  ]
+}

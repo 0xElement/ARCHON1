@@ -1,0 +1,228 @@
+{
+  "vuln_class": "multi-tenant",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "TENANT-001",
+      "vuln_class": "multi-tenant",
+      "what_to_look_for": "Endpoints that resolve the tenant/org/workspace/account id from request-controlled input (X-Tenant-Id header, body/query field, path segment, or an unverified JWT claim) and feed it straight into queries, instead of deriving tenant from the authenticated session and checking membership.",
+      "source_indicators": [
+        "req.headers['x-tenant-id'] / request.headers.get('X-Org-Id') used in a query",
+        "tenantId = req.body.tenantId or params[:account_id] passed to .where(tenant_id: ...)",
+        "JWT 'tenant'/'org' claim decoded and trusted without re-checking user membership",
+        "WHERE tenant_id = $tenantFromRequest with no membership join",
+        "tenant id read from a client cookie/localStorage and echoed into the data query"
+      ],
+      "blackbox_indicators": [
+        "Changing X-Tenant-Id / org_id body field returns another tenant's data with 200",
+        "Tenant id embedded in JWT or cookie is editable and still honored",
+        "Object ids are global and swapping tenant context yields 200 instead of 403"
+      ],
+      "evidence_required": [
+        "Two-account proof: account A reads account B's record by altering the tenant identifier",
+        "Request/response pair showing the client-supplied tenant id is honored",
+        "Confirmation the id is never cross-checked against session membership"
+      ],
+      "false_positive_checks": [
+        "Send a mismatched tenant id with A's session: a 403 means server re-derives from session",
+        "A scoped query / policy / RLS actually filters by the session tenant",
+        "Returned record belongs to the caller's own tenant (same id, no cross-access)"
+      ],
+      "suggested_validation_task": "With two test tenants, send tenant A's session but tenant B's id in the header/body on a read-only GET and check whether B's record is returned.",
+      "reporting_guidance": "Report as cross-tenant broken object-level authorization (IDOR); attach the two-account read and the unenforced client-supplied tenant id.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "TENANT-002",
+      "vuln_class": "multi-tenant",
+      "what_to_look_for": "Data-access paths (raw SQL, ORM find-by-primary-key, joins, reports/exports, admin tools) that omit the tenant_id predicate and rely on a global scope or middleware that does not cover every path; or Postgres RLS that is disabled or bypassed because the app connects as the table owner / a BYPASSRLS role.",
+      "source_indicators": [
+        "Model.findByPk(id) / Model.objects.get(pk=id) with no tenant filter",
+        "raw query SELECT * FROM invoices WHERE id = ? with no tenant_id",
+        "global/default scope defined but .unscoped / withoutGlobalScope / .raw() used on this path",
+        "RLS policy exists but ALTER TABLE ... DISABLE ROW LEVEL SECURITY, or app role is table owner / has BYPASSRLS",
+        "new endpoint or background path that does not pass through tenant-scoping middleware"
+      ],
+      "blackbox_indicators": [
+        "Sequential/guessable primary keys return records regardless of caller's tenant",
+        "Endpoint returns objects whose tenant differs from the authenticated caller",
+        "Search/report/export endpoint includes rows from other tenants"
+      ],
+      "evidence_required": [
+        "A record fetched by id that belongs to a different tenant than the authenticated caller",
+        "Query trace/log showing no tenant predicate on the executed statement",
+        "For RLS: proof the app's actual DB role bypasses or has RLS disabled"
+      ],
+      "false_positive_checks": [
+        "A default/global scope is applied and provably covers this exact path",
+        "DB enforces RLS using the app's real (non-owner, non-superuser) role",
+        "All returned ids fall within the caller's tenant"
+      ],
+      "suggested_validation_task": "As tenant A, request a known tenant-B object id through the endpoint (read-only) and confirm whether the record is returned.",
+      "reporting_guidance": "Report as broken tenant isolation at the data layer; cite the unscoped query/path (or RLS bypass) and the cross-tenant read.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "TENANT-003",
+      "vuln_class": "multi-tenant",
+      "what_to_look_for": "Cache keys (Redis/Memcached, in-process memo, HTTP/CDN edge cache) constructed without a tenant component, so one tenant's cached entry or response is served to another; or tenant-specific HTTP responses marked publicly cacheable without Vary on the tenant discriminator.",
+      "source_indicators": [
+        "cache.set('user:' + id, ...) or `profile:${userId}` keyed by a global id, no tenant namespace",
+        "process-level singleton/memo populated by the first tenant's request and reused",
+        "Cache-Control: public on tenant-specific responses with no Vary on tenant cookie/header",
+        "CDN/edge cache keyed on path only while the tenant lives in a header/cookie",
+        "shared cache namespace across tenants (no tenant prefix in key builder)"
+      ],
+      "blackbox_indicators": [
+        "Priming an endpoint as tenant A then requesting it as tenant B returns A's data with a cache HIT",
+        "Same URL returns different tenants' content depending on which warmed the cache",
+        "Cache-Control: public / non-zero Age headers on personalized or tenant-scoped data"
+      ],
+      "evidence_required": [
+        "Demonstration that tenant B receives tenant A's cached response (X-Cache HIT)",
+        "Cache key construction showing no tenant scoping",
+        "Response headers permitting shared caching of tenant-specific data"
+      ],
+      "false_positive_checks": [
+        "Full cache key/namespace includes the tenant id (inspect the actual key, not the prefix)",
+        "Vary or private/no-store directives are present and honored by CDN/proxy",
+        "Cached data is non-tenant public/reference data"
+      ],
+      "suggested_validation_task": "Prime an endpoint as tenant A, then request the same path as tenant B (read-only) and check for a cache HIT serving A's data.",
+      "reporting_guidance": "Report as cross-tenant data leakage via shared cache; show the un-namespaced key or cacheable tenant response and the cross-served HIT.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "TENANT-004",
+      "vuln_class": "multi-tenant",
+      "what_to_look_for": "A single signing/encryption secret shared across all tenants combined with a tenant id carried inside the token/signed artifact, so a token minted for tenant A is accepted for tenant B; or predictable/sequential tenant ids; or per-tenant API keys validated without binding the key to the resource's tenant.",
+      "source_indicators": [
+        "JWT signed with one global secret and the tenant_id claim trusted without re-binding to the principal",
+        "API-key lookup returns the key row but never compares its tenant to the requested resource's tenant",
+        "tenant ids are auto-increment integers / short sequential values",
+        "shared HMAC secret used for signed URLs across all tenants",
+        "encryption/data key not derived per tenant (same KMS key for every tenant)"
+      ],
+      "blackbox_indicators": [
+        "Editing the tenant id inside a JWT or signed URL and reusing the same signature is accepted",
+        "Tenant ids appearing in URLs are small sequential integers",
+        "An API key issued to tenant A authorizes actions against tenant B resources"
+      ],
+      "evidence_required": [
+        "A token/signed artifact issued for one tenant being accepted for another",
+        "Proof the tenant id is predictable or enumerable",
+        "Showing the auth check validates the key/signature but not the tenant binding"
+      ],
+      "false_positive_checks": [
+        "Token tenant claim is re-validated against the authenticated principal's membership",
+        "Per-tenant keys are actually in use (a cross-tenant signature fails verification)",
+        "Tenant ids are random UUIDs and the binding is enforced server-side"
+      ],
+      "suggested_validation_task": "Replay a request with another tenant's id substituted into the token/signed URL (signature unchanged) and observe accept vs reject (read-only).",
+      "reporting_guidance": "Report as cross-tenant authentication bypass via shared/forgeable keys; include the cross-tenant token acceptance.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "TENANT-005",
+      "vuln_class": "multi-tenant",
+      "what_to_look_for": "Tenant resolved from the Host header / subdomain / a routing header and used to select the database, schema, connection, or data partition, trusting a spoofable header as the security boundary, with no cross-check that the authenticated user belongs to the host-resolved tenant.",
+      "source_indicators": [
+        "tenant = req.hostname.split('.')[0] used to pick a schema/connection",
+        "SET search_path = $subdomain or USE `${tenant}_db` driven by the host",
+        "connection pool / datasource keyed by the Host header value",
+        "tenant taken from X-Forwarded-Host or another proxy header and trusted",
+        "no check that the session's tenant equals the host-resolved tenant"
+      ],
+      "blackbox_indicators": [
+        "Overriding Host / X-Forwarded-Host changes which tenant's data is returned",
+        "Changing the subdomain accesses another tenant while the same session token still works",
+        "Errors leak schema/db names that match tenant slugs"
+      ],
+      "evidence_required": [
+        "A request with a spoofed Host/subdomain returning a different tenant's data",
+        "Source/trace showing the partition is selected from the host/header",
+        "Confirmation that a session-tenant != host-tenant mismatch is not rejected"
+      ],
+      "false_positive_checks": [
+        "Host is validated against an allowlist and matched to the session tenant",
+        "Routing tenant is cross-checked with the auth tenant (mismatch returns 403)",
+        "Partition selection ignores the client host and uses the session tenant"
+      ],
+      "suggested_validation_task": "Send your authenticated session with another tenant's subdomain/Host header on a read-only GET and check whether that tenant's data is served.",
+      "reporting_guidance": "Report as tenant isolation bypass via untrusted host-based partition routing; show the spoofed-Host cross-tenant read.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "TENANT-006",
+      "vuln_class": "multi-tenant",
+      "what_to_look_for": "Background jobs, queue consumers, scheduled tasks, bulk exports, or webhook handlers that do not carry/restore tenant context and fall back to a default/global connection or a stale request-scoped tenant, causing cross-tenant reads or writes in the async path.",
+      "source_indicators": [
+        "job enqueued without a tenant_id; the worker runs under the default scope/connection",
+        "request-scoped thread-local / async-local tenant not propagated into the job or promise",
+        "Current.tenant (request-scoped) read inside a worker where it is nil or stale",
+        "export/report builder iterates rows with no tenant filter",
+        "webhook handler resolves tenant from the payload without verifying signature/ownership"
+      ],
+      "blackbox_indicators": [
+        "An exported file/report contains rows belonging to other tenants",
+        "An async-generated artifact (PDF/email) references another tenant's data",
+        "Replaying a webhook with an altered tenant id processes it for the wrong tenant"
+      ],
+      "evidence_required": [
+        "Job/export output containing cross-tenant data",
+        "Code/trace showing tenant context is missing or defaulted in the async path",
+        "Repro tying the async trigger to the leaked tenant"
+      ],
+      "false_positive_checks": [
+        "tenant_id is serialized into the job payload and re-scoped in the worker",
+        "Export/report query is provably tenant-filtered",
+        "Webhook tenant is verified via signature plus ownership check"
+      ],
+      "suggested_validation_task": "Trigger a benign export/report as tenant A and inspect whether any returned rows belong to other tenants (read-only inspection).",
+      "reporting_guidance": "Report as tenant isolation failure in async/background processing; include the cross-tenant rows present in the generated artifact.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    }
+  ]
+}

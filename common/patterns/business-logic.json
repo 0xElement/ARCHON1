@@ -1,0 +1,216 @@
+{
+  "vuln_class": "business-logic",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "BIZ-001",
+      "vuln_class": "business-logic",
+      "what_to_look_for": "Server trusts price, amount, total, currency, or quantity supplied by the client at checkout/charge time instead of recomputing the order total from authoritative server-side catalog and cart records.",
+      "source_indicators": [
+        "Charge/total built from request body, e.g. order.total = req.body.total or stripe.charge(amount=params[:amount])",
+        "Unit price / discount / final price read from hidden form field, cookie, or client-supplied JWT and used directly",
+        "No server-side price lookup by product_id before charging; cart serialized to client and trusted on return",
+        "Quantity/amount used in math without sign or range check (no qty < 0 or amount <= 0 guard)",
+        "Mass-assignable total_cents / discount_pct on the order model"
+      ],
+      "blackbox_indicators": [
+        "Editing price/amount/total in checkout or cart-update POST changes the server-confirmed total",
+        "Negative or zero quantity yields a zero or credited total",
+        "Hidden form field / JS variable holds the unit price and tampering is reflected in the order summary",
+        "Currency field accepted unvalidated (e.g. USD swapped for a weaker currency at same numeric value)"
+      ],
+      "evidence_required": [
+        "Baseline vs tampered request pair showing a different server-confirmed total or charge amount",
+        "Order summary / quote / receipt endpoint echoing the manipulated amount as accepted",
+        "Confirmation the tampered field drives the actual charge, not just display"
+      ],
+      "false_positive_checks": [
+        "Verify payment capture or a later step does not recompute the total from the catalog and reject the tamper",
+        "Confirm the changed field actually flows to the charge and is not a display-only echo",
+        "Rule out a legitimately entitled discount/coupon being mistaken for tampering"
+      ],
+      "suggested_validation_task": "On a test cart, re-POST the checkout/quote request with price or quantity lowered by one unit and read the order-summary/quote endpoint to see if the server-confirmed total reflects the tampered value (stop before payment capture).",
+      "reporting_guidance": "Report as client-trusted price/quantity tampering; quantify max financial loss per order and confirm whether the manipulated amount reaches payment capture.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "BIZ-002",
+      "vuln_class": "business-logic",
+      "what_to_look_for": "A multi-step workflow (cart -> shipping -> payment -> confirm, KYC, onboarding, password reset) where the server does not enforce that prior mandatory steps completed, letting a client jump straight to a later step or set a privileged object state directly.",
+      "source_indicators": [
+        "Object state set from request, e.g. order.status = req.body.status, with no guard on the current state",
+        "Finalize/confirm handler keyed only by object id, missing a check like if (order.status !== 'PAYMENT_PENDING') reject",
+        "verified / paid / approved flag set before the OTP, email, or payment step is confirmed",
+        "No server-tracked currentStep; step is read from a client step/stage parameter",
+        "Reset or verification token reusable across steps"
+      ],
+      "blackbox_indicators": [
+        "POSTing the confirm/finalize endpoint without completing payment yields a completed order",
+        "Manipulating a step/status/stage parameter advances the flow",
+        "Skipping the OTP/2FA/KYC step still returns the post-step page (200, not a redirect back)",
+        "Object reachable in an impossible state (e.g. shipped without paid)"
+      ],
+      "evidence_required": [
+        "Request sequence showing a later-step call succeeding with no prior-step call",
+        "Status endpoint dump confirming the object reached the privileged/final state",
+        "Absence of the error/redirect that the normal flow produces for that skip"
+      ],
+      "false_positive_checks": [
+        "Confirm the later step does not independently re-validate prerequisites server-side",
+        "Confirm the skipped step is not optional by design (guest checkout, zero-cost order)",
+        "Distinguish a UI-only step from a server-enforced control"
+      ],
+      "suggested_validation_task": "On a test account, call the final confirm/finalize step endpoint directly without completing the payment/verification step and read the object status endpoint to see whether it reports completed.",
+      "reporting_guidance": "Report which mandatory control was bypassed and the resulting unauthorized state; tie it to revenue or trust impact.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "BIZ-003",
+      "vuln_class": "business-logic",
+      "what_to_look_for": "Check-then-act on a shared mutable counter (wallet balance, coupon redemptions, inventory stock, invite seats, withdrawal limit) without atomic decrement or row lock, so concurrent requests each pass the check before any commits (TOCTOU / double-spend).",
+      "source_indicators": [
+        "Read balance -> if sufficient -> subtract -> save, with no SELECT ... FOR UPDATE, transaction, or atomic UPDATE ... WHERE balance >= x",
+        "Coupon used flag checked then set in separate statements",
+        "No unique constraint or idempotency key on redemption/withdrawal rows",
+        "In-memory counter decremented then ORM save() with no DB-level atomicity"
+      ],
+      "blackbox_indicators": [
+        "Firing many parallel identical requests (redeem coupon, withdraw, apply credit) succeeds more than once",
+        "Final balance or stock goes negative, or a coupon is applied beyond its limit",
+        "No Idempotency-Key header honored; duplicate concurrent submits both return 200"
+      ],
+      "evidence_required": [
+        "Concurrency burst log showing multiple 200 responses for an action meant to be single-use",
+        "Post-state showing over-consumption (negative balance, stock < 0, coupon count over limit)",
+        "Sequential control showing the second attempt is correctly rejected"
+      ],
+      "false_positive_checks": [
+        "Confirm duplicates are not later reconciled or reversed by a settlement job",
+        "Rule out the endpoint being naturally idempotent (same logical effect, no extra debit)",
+        "Ensure observed multiplicity is real effect, not retried responses of one effect"
+      ],
+      "suggested_validation_task": "On a test account holding one single-use coupon/credit, send ~20 concurrent identical redeem requests and count successes and whether the balance/coupon counter exceeds the intended single use.",
+      "reporting_guidance": "Report as a race/TOCTOU; state the limited resource over-consumed and per-attack gain, and recommend atomic conditional update or a unique constraint.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "BIZ-004",
+      "vuln_class": "business-logic",
+      "what_to_look_for": "Reversible money/credit operations (refund, cancel, chargeback, store-credit, loyalty points) that can be triggered more than once, run against already-refunded or unpaid orders, accept an attacker-influenced amount, or accept negative quantities that produce credit.",
+      "source_indicators": [
+        "Refund handler does not check order.refunded / remaining refundable_amount before issuing",
+        "Refund amount taken from request rather than from the captured payment record",
+        "Negative quantity/amount not rejected on returns/exchanges",
+        "Cancel restores stock/credit without verifying it was consumed; no idempotency on refund"
+      ],
+      "blackbox_indicators": [
+        "Replaying the refund/cancel request credits the balance again",
+        "Refunding more than was paid, or refunding a $0 or already-refunded order, succeeds",
+        "Negative return quantity yields a positive credit",
+        "Loyalty points granted at order time are retained after cancellation"
+      ],
+      "evidence_required": [
+        "Two refund/cancel calls on one order both succeeding (balance credited twice)",
+        "Ledger/receipt showing refund greater than the original charge or on an unpaid order",
+        "Account balance/points delta exceeding the entitled amount"
+      ],
+      "false_positive_checks": [
+        "Confirm a back-office settlement does not claw back the duplicate credit",
+        "Verify the order was actually paid (refund of an unpaid order may be a no-op)",
+        "Distinguish an authorized partial-refund policy from abuse"
+      ],
+      "suggested_validation_task": "On a test order, submit the cancel/refund request twice (or with a negative return quantity) and read the account balance/ledger endpoint to see if credit exceeds the amount paid.",
+      "reporting_guidance": "Report as refund/credit abuse; show net positive balance gain and whether it is withdrawable or spendable.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "BIZ-005",
+      "vuln_class": "business-logic",
+      "what_to_look_for": "Approval / four-eyes controls (expense approval, payout release, role grant, publish/merge, refund authorization) where the requester can also approve, because the server checks the approve permission but never that approver != requester.",
+      "source_indicators": [
+        "Approve handler checks role/permission but not approver_id != record.created_by",
+        "if user.can('approve') with no comparison to the requesting identity",
+        "Maker-checker enforced only in the UI (approve button hidden) and not server-side",
+        "Self-grant of role/status via the same admin endpoint that created the request"
+      ],
+      "blackbox_indicators": [
+        "The user who created a request can call the approve endpoint on it and it succeeds",
+        "Submitting and approving an expense/payout in one session completes the payout",
+        "Granting yourself a higher role via the request + approve endpoints succeeds"
+      ],
+      "evidence_required": [
+        "Same authenticated identity on both the create and approve requests, with approve returning success",
+        "Object record reaching APPROVED/PAID/PUBLISHED with requester == approver",
+        "The resulting privileged effect (payout released, role elevated)"
+      ],
+      "false_positive_checks": [
+        "Confirm policy truly requires separation (low-value items may auto-approve by design)",
+        "Verify the approver is the same principal, not a shared service/automation account",
+        "Check no secondary out-of-band approval is still required before the effect lands"
+      ],
+      "suggested_validation_task": "With one test user, create an approval-requiring item (expense or role request) then call the approve endpoint on it as the same user and read the item status to see if it transitions to approved.",
+      "reporting_guidance": "Report as broken segregation of duties; identify the bypassed control and the financial or privilege impact of self-approval.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "BIZ-006",
+      "vuln_class": "business-logic",
+      "what_to_look_for": "Free-trial, usage quota, one-per-customer promo, or seat/invite limit enforced by a weak or resettable key (un-normalized email, client cookie/localStorage, device id, or a count not held server-side) that can be reset or aliased to gain unlimited entitlement.",
+      "source_indicators": [
+        "Trial/promo eligibility keyed on a raw email with no plus-alias/dot normalization, or on a client cookie",
+        "Quota counter stored client-side or decremented only in the UI",
+        "first-order / one-per-user check without normalizing identity or device",
+        "Seat/invite limit not re-checked server-side on the accept path; team count trusted from client"
+      ],
+      "blackbox_indicators": [
+        "Re-registering with user+1@, dotted, or disposable email re-grants the trial/discount",
+        "Clearing cookies/localStorage resets a 'used' limit",
+        "Inviting past the plan seat cap still onboards extra members",
+        "A quota header or parameter is editable to raise the cap"
+      ],
+      "evidence_required": [
+        "Two trial/promo grants traceable to the same underlying identity via alias or reset",
+        "Usage exceeding the documented cap with the server confirming the extra entitlement",
+        "Seat count above plan limit reflected in the team/billing endpoint"
+      ],
+      "false_positive_checks": [
+        "Confirm the second grant is not later flagged or reversed by a fraud/dedup batch",
+        "Verify the limit is a real entitlement boundary, not a soft UI nudge",
+        "Ensure alias emails are genuinely treated as one customer under policy"
+      ],
+      "suggested_validation_task": "Sign up a test account and consume the trial/one-per-customer promo, then sign up a second account using a plus-alias of the same email and check whether the promo/trial is granted again.",
+      "reporting_guidance": "Report as limit/trial bypass; quantify the unlimited entitlement gained and recommend server-side identity-normalized counting.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "not_applicable"
+      ]
+    }
+  ]
+}

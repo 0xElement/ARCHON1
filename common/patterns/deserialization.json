@@ -1,0 +1,246 @@
+{
+  "vuln_class": "deserialization",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "DESER-001",
+      "vuln_class": "deserialization",
+      "what_to_look_for": "Untrusted bytes (request body, cookie, header, RMI/JMX/JMS/LDAP payload) flowing into Java ObjectInputStream.readObject()/readUnshared() with no JEP-290 look-ahead allow-list, enabling gadget-chain RCE.",
+      "source_indicators": [
+        "new ObjectInputStream(req.getInputStream()).readObject() / readUnshared()",
+        "No ObjectInputFilter / setObjectInputFilter / commons-io ValidatingObjectInputStream allow-list",
+        "Vulnerable gadgets on classpath: commons-collections 3.1/4.0, commons-beanutils, spring-core, groovy, rome, c3p0, hibernate",
+        "readObject in custom RMI/JMX/JMS handler, readExternal(), or XStream/SnakeYAML/Kryo with default typing",
+        "Class implements Serializable + dangerous readObject()/readResolve() side effects"
+      ],
+      "blackbox_indicators": [
+        "Base64 starting rO0AB or raw hex AC ED 00 05 in cookie/param/ViewState/multipart field",
+        "Content-Type: application/x-java-serialized-object",
+        "Measurable response delay on a ysoserial sleep gadget vs baseline",
+        "Leaked java.io.StreamCorruptedException / ClassNotFoundException / InvalidClassException in 500 body"
+      ],
+      "evidence_required": [
+        "Source-to-sink path from attacker input to readObject/readUnshared",
+        "Absence of an allow-list ObjectInputFilter at the sink",
+        "An exploitable gadget chain present on the classpath",
+        "Safe proof: out-of-band DNS/HTTP callback (URLDNS) or reproducible sleep-gadget timing delta"
+      ],
+      "false_positive_checks": [
+        "Input is HMAC-signed or encrypted before deserialization",
+        "A JEP-290 ObjectInputFilter / ValidatingObjectInputStream rejects unknown classes",
+        "Stream is internal/trusted only and not attacker-reachable",
+        "No usable gadget chain on the classpath"
+      ],
+      "suggested_validation_task": "Send a ysoserial URLDNS payload and confirm an out-of-band DNS lookup to a controlled collaborator host (no command execution).",
+      "reporting_guidance": "Report Critical RCE; include the source-to-readObject path, the classpath gadget, and the OOB DNS proof. Do not fire destructive command gadgets.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "DESER-002",
+      "vuln_class": "deserialization",
+      "what_to_look_for": "User-controlled string passed to PHP unserialize() (or a Phar:// stream wrapper on a user path) where in-scope classes expose magic methods (__wakeup/__destruct/__toString/__call) that chain into a POP-gadget RCE/file/SSRF.",
+      "source_indicators": [
+        "unserialize($_GET/$_POST/$_COOKIE/$_REQUEST/...) without ['allowed_classes'=>false]",
+        "Magic methods __wakeup/__destruct/__toString/__call performing file, DB, eval, or system operations",
+        "Phar-triggering file ops on user paths (file_exists/fopen/getimagesize with phar://)",
+        "Framework POP gadgets present: Laravel/Symfony/Monolog/Guzzle/Yii (PHPGGC-known chains)",
+        "Session/cache layer that unserialize()s untrusted serialized blobs"
+      ],
+      "blackbox_indicators": [
+        "Serialized markers reflected in cookies/params/responses: O:8:\"stdClass\":, a:2:{, s:5:",
+        "Error: 'unserialize(): Error at offset' or __PHP_Incomplete_Class warnings",
+        "File-upload endpoint followed by a later file-path operation (Phar vector)",
+        "Cookie value that is base64 of an O:/a:/s: serialized structure"
+      ],
+      "evidence_required": [
+        "Source-to-unserialize sink path with attacker-controlled input",
+        "A reachable POP gadget chain whose magic method has an observable side effect",
+        "Missing allowed_classes=>false restriction at the sink",
+        "Safe proof: benign controlled side effect (e.g. __toString output) or OOB HTTP/DNS callback"
+      ],
+      "false_positive_checks": [
+        "unserialize(..., ['allowed_classes'=>false]) or JSON used instead",
+        "Input is HMAC-signed before unserialize and key is not leaked",
+        "No in-scope class with an exploitable magic method",
+        "Value is hardcoded/internal, not attacker-controlled"
+      ],
+      "suggested_validation_task": "Submit a benign PHPGGC chain that triggers an out-of-band HTTP/DNS callback (e.g. Guzzle/Monolog SSRF-to-collaborator), not a command-exec gadget.",
+      "reporting_guidance": "Report High/Critical object injection; cite the unserialize sink, the magic-method gadget, and the missing allowed_classes guard.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "DESER-003",
+      "vuln_class": "deserialization",
+      "what_to_look_for": "Untrusted data deserialized by Python pickle/cPickle, yaml.load without SafeLoader, jsonpickle, dill, or numpy.load(allow_pickle=True) — any path where __reduce__ executes attacker code.",
+      "source_indicators": [
+        "pickle.loads(/pickle.load(/cPickle.loads( on request data, cache, or session bytes",
+        "yaml.load(data) without Loader=yaml.SafeLoader (default unsafe before PyYAML 5.1)",
+        "jsonpickle.decode, dill.loads, pandas.read_pickle, numpy.load(..., allow_pickle=True)",
+        "Session/queue backends using pickle (Django PickleSerializer, Celery/Redis pickled tasks)",
+        "Class defining __reduce__/__reduce_ex__ returning a callable"
+      ],
+      "blackbox_indicators": [
+        "Base64 cookie/param starting gAS/gAJ/gAR or raw bytes 80 04/80 02 (pickle protocol 2-5)",
+        "YAML body accepted containing !!python/object/apply: tags",
+        "Content-Type application/python-pickle or msgpack/pickle session cookie",
+        "Timing delta or OOB callback when a reduce/apply payload is submitted"
+      ],
+      "evidence_required": [
+        "Source-to-loads/yaml.load sink path",
+        "Loader is unsafe (no SafeLoader / allow_pickle=True)",
+        "Attacker controls the serialized bytes reaching the sink",
+        "Safe proof: OOB DNS/HTTP from a benign __reduce__ or reproducible sleep timing"
+      ],
+      "false_positive_checks": [
+        "yaml.safe_load / Loader=SafeLoader used",
+        "Pickle data is signed (itsdangerous/HMAC) before load and key not leaked",
+        "Data originates from a trusted internal source only",
+        "numpy.load(allow_pickle=False) or JSON used instead"
+      ],
+      "suggested_validation_task": "Send a pickle or YAML payload whose __reduce__ performs a DNS resolution of a controlled collaborator domain; confirm the lookup, execute nothing destructive.",
+      "reporting_guidance": "Report Critical RCE; show the loads/yaml.load sink, the unsafe loader, and the OOB DNS/HTTP proof.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "DESER-004",
+      "vuln_class": "deserialization",
+      "what_to_look_for": ".NET untrusted input into BinaryFormatter/SoapFormatter/NetDataContractSerializer/LosFormatter/ObjectStateFormatter, Json.NET with TypeNameHandling != None, or ASP.NET ViewState without a MAC/with a leaked machineKey.",
+      "source_indicators": [
+        "BinaryFormatter().Deserialize(, SoapFormatter, NetDataContractSerializer, LosFormatter, ObjectStateFormatter",
+        "JsonConvert.DeserializeObject(..., TypeNameHandling.All/Auto/Objects) or $type honored without a SerializationBinder",
+        "enableViewStateMac=\"false\", null/default/leaked machineKey, or custom ViewState handling",
+        "XmlSerializer/DataContractSerializer driven by an attacker-controlled type name; fastJSON object mode",
+        "BinaryFormatter over session, cache, or MSMQ messages"
+      ],
+      "blackbox_indicators": [
+        "__VIEWSTATE param present with ViewState MAC disabled, or a known/leaked machineKey",
+        "JSON body with \"$type\":\"System...\" accepted and deserialized",
+        "Base64 starting AAEAAAD/////  (BinaryFormatter header) in param/cookie",
+        ".NET stack trace: System.Runtime.Serialization / SerializationException"
+      ],
+      "evidence_required": [
+        "Source-to-formatter sink path with attacker-controlled payload",
+        "Unrestricted type binding (TypeNameHandling, no SerializationBinder, or no ViewState MAC)",
+        "Attacker controls the serialized blob",
+        "Safe proof: ysoserial.net OOB (DNS/HTTP) gadget callback or sleep timing delta"
+      ],
+      "false_positive_checks": [
+        "ViewState MAC enabled with a strong, non-default, non-leaked machineKey",
+        "TypeNameHandling.None or a strict SerializationBinder allow-list in place",
+        "Json.NET without $type, or DataContractJsonSerializer used",
+        "Input signed/encrypted and source is internal only"
+      ],
+      "suggested_validation_task": "Send a ysoserial.net TypeConfuseDelegate/ActivitySurrogate payload that triggers an OOB DNS/HTTP callback to a controlled host; avoid command execution.",
+      "reporting_guidance": "Report Critical RCE; identify the formatter/TypeNameHandling/ViewState weakness and include the OOB callback proof.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "DESER-005",
+      "vuln_class": "deserialization",
+      "what_to_look_for": "Node.js untrusted input into node-serialize/funcster/cryo unserialize (function eval via _$$ND_FUNC$$_), or recursive merge/clone enabling __proto__/constructor.prototype pollution leading to RCE, DoS, or auth bypass.",
+      "source_indicators": [
+        "require('node-serialize').unserialize(, funcster, cryo, serialize-to-js on request data",
+        "Unsafe recursive merge over JSON.parse(req.body): lodash.merge/defaultsDeep, custom extend/deepAssign without __proto__ filtering",
+        "JSON.parse followed by eval/Function/vm.runInContext on user-controlled values",
+        "Query-string/body parsers that retain __proto__/constructor keys (old qs/express, hoek)",
+        "Payload strings containing _$$ND_FUNC$$_ or an IIFE function body"
+      ],
+      "blackbox_indicators": [
+        "JSON body with __proto__/constructor/prototype keys accepted and later behavior changes app-wide",
+        "Payload {\"x\":\"_$$ND_FUNC$$_function(){...}()\"} triggers an OOB callback",
+        "Global state flips after pollution (e.g. isAdmin/status defaults change for other requests)",
+        "evalmachine / SyntaxError errors from an injected function body"
+      ],
+      "evidence_required": [
+        "Source-to-unserialize/merge sink path with attacker-controlled keys/values",
+        "No __proto__ key filtering / no safe parser at the sink",
+        "Attacker controls the data reaching the sink",
+        "Safe proof: OOB callback (node-serialize) or an observable polluted-property effect"
+      ],
+      "false_positive_checks": [
+        "JSON.parse only, with no later eval or untrusted-key merge",
+        "Merge library patched, or Object.create(null)/Map used, or __proto__ keys stripped",
+        "node-serialize input is trusted/internal only",
+        "Schema validation rejects unexpected keys before the sink"
+      ],
+      "suggested_validation_task": "POST a node-serialize IIFE payload that performs a DNS/HTTP callback to a collaborator, or set a benign prototype flag and confirm it reflects in an unrelated request.",
+      "reporting_guidance": "Report High/Critical; distinguish RCE (node-serialize) from prototype-pollution impact (DoS/auth-bypass/RCE-gadget) and include the corresponding proof.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "DESER-006",
+      "vuln_class": "deserialization",
+      "what_to_look_for": "Ruby untrusted input into Marshal.load, YAML.load/Psych.load (unsafe), or Oj.load default mode, or a Rails session/cookie deserialized with a leaked/null secret_key_base — any path reaching a universal-type loader with gadget gems available.",
+      "source_indicators": [
+        "Marshal.load(/Marshal.restore on request, cookie, or cache data",
+        "YAML.load( (not safe_load), Psych.load, or Oj.load(x) without mode: :strict",
+        "ActiveSupport::MessageVerifier/MessageEncryptor with a leaked/null secret_key_base (Rails cookie deserialization)",
+        "Gem gadget chains reachable (Rails 5/6 deserialization gadget, Gem::Requirement)",
+        "Ox.parse_obj / Oj object mode on user data"
+      ],
+      "blackbox_indicators": [
+        "Rails _session cookie with a known/leaked secret_key_base",
+        "Base64 Marshal blob starting BAh (bytes 04 08) in a cookie/param",
+        "YAML body with !ruby/object: or !ruby/hash: tags accepted",
+        "500 with Psych::DisallowedClass or 'TypeError: incompatible marshal file format'"
+      ],
+      "evidence_required": [
+        "Source-to-Marshal/YAML.load/Oj.load sink path",
+        "Unsafe loader (no safe_load / no strict mode)",
+        "Attacker-controlled bytes (plus valid signing key if signed)",
+        "Safe proof: OOB DNS/HTTP callback via a benign gadget or reproducible timing"
+      ],
+      "false_positive_checks": [
+        "YAML.safe_load with a permitted_classes allow-list, or Oj strict mode",
+        "Marshal data is HMAC-signed and the key is not leaked",
+        "Input is trusted/internal only",
+        "Rails secret_key_base is strong and not exposed"
+      ],
+      "suggested_validation_task": "Submit a YAML !ruby/object or Marshal gadget that triggers an OOB DNS/HTTP callback to a controlled host; run nothing destructive.",
+      "reporting_guidance": "Report Critical RCE; cite the loader, the gadget/leaked key, and the OOB callback proof.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    }
+  ]
+}

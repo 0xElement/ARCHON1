@@ -1,0 +1,230 @@
+{
+  "vuln_class": "file-handling",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "FILE-001",
+      "vuln_class": "file-handling",
+      "what_to_look_for": "Upload handler that decides the stored filename/extension/MIME from client-supplied data and writes into a web-served directory, allowing an executable (.php/.jsp/.aspx/.phtml) or double-extension file to be uploaded and then requested back as code.",
+      "source_indicators": [
+        "filename taken from req.file.originalname / part.filename without rename",
+        "extension allowlist checked via endsWith() or regex that misses .phtml/.php5/.pht/double-ext",
+        "validation on Content-Type header only (file.mimetype) not magic bytes",
+        "destination dir inside webroot/static (e.g. public/uploads, multer dest: 'public/')",
+        "os.path.join(UPLOAD_DIR, filename) / move_uploaded_file($_FILES['f']['name'])",
+        "no execution disable (.htaccess, php_admin_value engine off) on upload dir"
+      ],
+      "blackbox_indicators": [
+        "upload response returns a fetchable URL under same app origin/webroot",
+        "shell.php.jpg, shell.phtml, shell%00.jpg, or trailing-dot/space filenames accepted",
+        "Content-Type: image/jpeg spoof accepted for a non-image body",
+        "GET of uploaded path returns it executed (X-Powered-By/interpreter behavior) not as text/plain"
+      ],
+      "evidence_required": [
+        "request showing the malicious filename/Content-Type accepted (2xx + stored URL)",
+        "GET of stored file proving server-side execution of a benign unique marker (e.g. echo of a nonce)",
+        "stored path is within an interpreter-enabled, web-served directory"
+      ],
+      "false_positive_checks": [
+        "file is re-named to a random UUID and extension is forced server-side",
+        "stored outside webroot or on object storage with no interpreter",
+        "served only with Content-Disposition: attachment + X-Content-Type-Options: nosniff",
+        "magic-byte/content sniffing validation rejects the spoofed payload"
+      ],
+      "suggested_validation_task": "Upload a benign file named probe.<nonce>.phtml (or double-ext like .php.jpg) whose body echoes a unique marker, then GET the returned URL and check whether the marker is interpreted vs served verbatim.",
+      "reporting_guidance": "Report as RCE/webshell (Critical) only if execution of the benign marker is proven; if accepted but served inert, report as unrestricted-upload misconfiguration (Medium).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "FILE-002",
+      "vuln_class": "file-handling",
+      "what_to_look_for": "User-uploaded active-content files (SVG, HTML, XML, MHTML) served inline from the application's own origin with a renderable Content-Type and no CSP/sandbox, yielding stored XSS in the authenticated origin.",
+      "source_indicators": [
+        "image upload allowlist includes svg/svg+xml or html/xhtml",
+        "files served with res.type from stored extension and disposition 'inline'",
+        "no Content-Security-Policy header on the file-serving route",
+        "avatar/attachment served from main app domain not a sandboxed/cookieless host",
+        "no SVG sanitization (DOMPurify/svg-sanitizer) before store"
+      ],
+      "blackbox_indicators": [
+        "uploaded .svg returned with Content-Type: image/svg+xml and Content-Disposition: inline",
+        "SVG containing <script>/onload executes when the file URL is opened directly",
+        "files served from app origin sharing session cookies, no sandbox/CSP",
+        "HTML upload rendered as text/html rather than downloaded"
+      ],
+      "evidence_required": [
+        "uploaded SVG/HTML with a benign DOM marker (e.g. sets document.title to a nonce)",
+        "headless/browser load of the file URL showing the script ran in the app's origin",
+        "response headers proving inline rendering on a cookie-bearing origin"
+      ],
+      "false_positive_checks": [
+        "served from a separate sandbox domain (usercontent.*) with no app cookies",
+        "Content-Disposition: attachment forces download instead of render",
+        "CSP script-src 'none'/'self' nonce blocks inline/embedded script",
+        "SVG/HTML sanitized or rasterized to PNG on upload"
+      ],
+      "suggested_validation_task": "Upload an SVG/HTML containing a benign script that writes a unique nonce into the DOM (no exfil), open its served URL in a headless browser, and confirm the nonce executed under the app origin.",
+      "reporting_guidance": "Report as stored XSS scoped to the serving origin; severity rises if that origin holds the session/auth cookies (account takeover reachable).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "FILE-003",
+      "vuln_class": "file-handling",
+      "what_to_look_for": "Server-side archive extraction (zip/tar/jar/gzip) that writes entries using the archive-supplied entry name without canonicalizing/confining the output path, enabling Zip-Slip path traversal (or zip-bomb resource exhaustion).",
+      "source_indicators": [
+        "ZipInputStream/zipfile.extractall/tarfile.extractall(path) over whole archive",
+        "new File(destDir, entry.getName()) / os.path.join(dest, member.name) without normalize+startsWith check",
+        "entry name not validated for ../ or absolute/drive-letter prefixes",
+        "no per-entry size/total-size/entry-count limit before extraction",
+        "symlink entries in tar followed during extraction"
+      ],
+      "blackbox_indicators": [
+        "feature ingests user archives (import, theme/plugin upload, bulk import, restore)",
+        "archive with an entry named ../../<file> is accepted without error",
+        "extraction time/size grows disproportionately for a tiny crafted archive (bomb)"
+      ],
+      "evidence_required": [
+        "crafted archive with a single benign entry named ../<nonce>.txt",
+        "read-back showing the marker file landed outside the intended extraction dir",
+        "source path showing entry name joined to dest without confinement"
+      ],
+      "false_positive_checks": [
+        "extractor normalizes path and rejects entries escaping the target root",
+        "uses safe API (e.g. Commons-Compress with canonical check, Python 3.12 tarfile filter='data')",
+        "entry count/size caps enforced before write",
+        "extraction sandboxed to a temp dir later validated, never the live tree"
+      ],
+      "suggested_validation_task": "Upload an archive containing one benign entry named ../zipslip-<nonce>.txt and a normal file, then check (via a known read path or error/log) whether the marker escaped the extraction directory.",
+      "reporting_guidance": "Report as arbitrary file write / path traversal (High-Critical) when escape is confirmed; note overwrite-of-critical-file or webshell-drop chaining potential.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "FILE-004",
+      "vuln_class": "file-handling",
+      "what_to_look_for": "Download/export/preview endpoint that builds a filesystem path or storage key from a user-controlled parameter (file=, path=, name=, id=, key=) and reads it back without canonicalization or tenant scoping, giving path traversal or cross-tenant file read.",
+      "source_indicators": [
+        "res.sendFile(req.query.file) / open(BASE + request.args['name']) / readFile(path.join(dir, userInput))",
+        "decodeURIComponent applied then path joined, no realpath+startsWith confinement",
+        "storage key built from raw param (s3.getObject({Key: userKey})) with no owner check",
+        "sequential/numeric document id used to fetch file with no authorization filter"
+      ],
+      "blackbox_indicators": [
+        "download?file=../../../../etc/passwd or url-encoded %2e%2e%2f returns file contents",
+        "absolute path or UNC/drive-letter accepted (file=/etc/hostname, file=C:\\)",
+        "incrementing/guessing a document id returns another account's file",
+        "nested/double encoding (..%252f) bypasses a naive filter"
+      ],
+      "evidence_required": [
+        "request with traversal/alternate id and the returned out-of-scope file body",
+        "for IDOR: two accounts proving account B reads account A's file",
+        "source path showing user input reaching the read sink uncanonicalized/unscoped"
+      ],
+      "false_positive_checks": [
+        "path canonicalized (realpath) and asserted to stay under the allowed root",
+        "param is an opaque indirect id mapped server-side, not a path",
+        "ownership/tenant predicate applied to the file lookup",
+        "access via signed, scoped, expiring URLs only"
+      ],
+      "suggested_validation_task": "Request the download endpoint with ../ and url-encoded traversal toward a known benign in-app file (e.g. package.json or /etc/hostname), and separately fetch a neighboring document id as a second account, observing whether out-of-scope content returns.",
+      "reporting_guidance": "Report as path traversal / arbitrary file read or BOLA on stored files; rate by sensitivity of reachable content (secrets, other tenants' documents).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "FILE-005",
+      "vuln_class": "file-handling",
+      "what_to_look_for": "Server-side parser invoked on uploaded files (XML/Office OOXML/SVG/SVGZ/PDF/image via ImageMagick/ffmpeg) with insecure defaults, enabling XXE (file read/SSRF/OOB) or library command-injection during parse.",
+      "source_indicators": [
+        "DocumentBuilderFactory/SAXParser/XMLReader without disabling DOCTYPE/external entities",
+        "lxml etree with resolve_entities=True / no_network not set; Python xml without defusedxml",
+        "ImageMagick `convert`/`mogrify` or ffmpeg shelled out on raw upload (ImageTragick, MSL/HTTPS coders)",
+        "office/spreadsheet (POI, openpyxl, docx) parsing untrusted docs with entity expansion on",
+        "EXIF/metadata extraction via exiftool/exec on filename"
+      ],
+      "blackbox_indicators": [
+        "DOCX/XLSX/SVG/XML upload with an external entity triggers an OOB DNS/HTTP callback to a collaborator host",
+        "parsed-document response or error reflects local file content (/etc/passwd) via XXE",
+        "delay/SSRF when entity points at an internal URL or cloud metadata IP",
+        "billion-laughs style entity expansion spikes CPU/memory on parse"
+      ],
+      "evidence_required": [
+        "uploaded document carrying an external entity pointing to a controlled OAST/collaborator host",
+        "out-of-band interaction (DNS/HTTP) logged, or local-file content reflected in output",
+        "source confirming the parser runs with DTD/external entities or unsafe coder enabled"
+      ],
+      "false_positive_checks": [
+        "parser hardened: FEATURE_SECURE_PROCESSING / disallow-doctype-decl / external entities disabled, or defusedvxml",
+        "ImageMagick policy.xml disables vulnerable coders / network",
+        "parsing sandboxed (no egress, no fs) and resource-capped",
+        "no OOB callback and no file reflection on a hardened build"
+      ],
+      "suggested_validation_task": "Upload an XLSX/SVG/XML containing an external entity referencing a unique controlled OAST hostname and watch the collaborator for an OOB DNS/HTTP hit (no local-file exfil needed to confirm).",
+      "reporting_guidance": "Report XXE as file-read/SSRF/OOB (High-Critical by reachable internal surface); report parser command-injection as RCE; cite the specific parser/library and unsafe setting.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "FILE-006",
+      "vuln_class": "file-handling",
+      "what_to_look_for": "Stored uploads (avatars, invoices, ID docs, exports) served from a predictable/sequential/enumerable path with no per-request authorization check, so any user or anonymous client can read or overwrite other users' files.",
+      "source_indicators": [
+        "static-file middleware mounted directly on the upload dir (app.use('/uploads', static(dir)))",
+        "stored filename = original name, sequential counter, or md5(email) — predictable",
+        "serving route lacks the auth/ownership middleware applied elsewhere",
+        "writes use a fixed/predictable destination key allowing overwrite of an existing object",
+        "no signed-URL / expiry on object-storage access"
+      ],
+      "blackbox_indicators": [
+        "/uploads/<n>.pdf or /files/<incrementing-id> returns another user's document",
+        "files reachable unauthenticated (no cookie) on direct URL",
+        "low-entropy/guessable names; switching ?user= or sequential ids leaks content",
+        "re-upload with a known key replaces/overwrites an existing stored file"
+      ],
+      "evidence_required": [
+        "as a low-priv/anonymous client, request another account's predictable file URL and receive its content",
+        "demonstration of enumeration (sequential ids) or overwrite of a known key",
+        "source/headers showing the serving route has no ownership check"
+      ],
+      "false_positive_checks": [
+        "filenames are high-entropy random UUIDs and URLs are signed + short-lived",
+        "serving route enforces an ownership/tenant predicate before streaming",
+        "writes use unique non-colliding keys (no overwrite)",
+        "files require an authenticated, scoped session that 403s cross-account"
+      ],
+      "suggested_validation_task": "As an anonymous or second low-priv account, request a predictable/neighboring stored-file URL (sequential id or guessable name) and confirm whether content for an account you don't own is returned.",
+      "reporting_guidance": "Report as broken access control on stored files (BOLA / unauth file disclosure), or file-overwrite when a predictable key is writable; severity by data sensitivity.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive",
+        "duplicate",
+        "reviewed_no_issue"
+      ]
+    }
+  ]
+}

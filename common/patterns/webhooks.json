@@ -1,0 +1,215 @@
+{
+  "vuln_class": "webhooks",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "HOOK-001",
+      "vuln_class": "webhooks",
+      "what_to_look_for": "Inbound webhook endpoint (Stripe, GitHub, Twilio, Slack, GitLab, etc.) that parses the event body and performs privileged side effects (mark order paid, grant entitlement, change account state) WITHOUT verifying the provider's HMAC signature header.",
+      "source_indicators": [
+        "Webhook route never reads signature header (Stripe-Signature, X-Hub-Signature-256, X-Slack-Signature, X-Twilio-Signature)",
+        "Handler does JSON.parse(req.body) then branches on event.type with no verify call",
+        "stripe.webhooks.constructEvent / crypto.createHmac absent in handler",
+        "endpointSecret / signing secret is '' or unset / env-gated (if (VERIFY_WEBHOOK))",
+        "Verification commented out or wrapped in try{}catch{} that continues"
+      ],
+      "blackbox_indicators": [
+        "Forged provider-shaped JSON POSTed to /webhooks/* returns 2xx and mutates state",
+        "Omitting or garbling the signature header still yields 200, no 400/401",
+        "Arbitrary event.type / amount / status accepted and side effect observed"
+      ],
+      "evidence_required": [
+        "Request with bogus/absent signature accepted (2xx) plus observed server-side state change",
+        "Forged event id/type mapped to a concrete privileged action that fired"
+      ],
+      "false_positive_checks": [
+        "Confirm signature isn't enforced by a gateway/middleware before the handler",
+        "Confirm 2xx isn't a generic ack with real processing gated elsewhere (queue consumer verifies)",
+        "Check handler isn't a no-op for unknown/unsigned events"
+      ],
+      "suggested_validation_task": "Send a minimal provider-shaped JSON event to the webhook path with no/invalid signature header and observe whether it returns 2xx and acks as processed.",
+      "reporting_guidance": "Report as forged-event ingestion / auth bypass; severity tracks the privileged action the forged event triggers (payment, role grant, provisioning).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "HOOK-002",
+      "vuln_class": "webhooks",
+      "what_to_look_for": "User/tenant-registered outbound webhook (callback/notify) URL that the server later fetches/POSTs to with no host or resolved-IP allowlisting, allowing delivery to cloud metadata, localhost, or RFC1918 internal services.",
+      "source_indicators": [
+        "Field like webhook_url / callback_url / notify_url persisted from user input",
+        "Outbound axios.post(user.webhook_url) / requests.post(url) / fetch(url) with no SSRF guard",
+        "No is_private / RFC1918 / link-local block and no allowlist before delivery",
+        "URL scheme not restricted to https (allows http://internal, file://, gopher://)"
+      ],
+      "blackbox_indicators": [
+        "Webhook URL set to an OOB collaborator host yields an inbound hit from server egress IP",
+        "URL set to http://169.254.169.254/latest/meta-data/ surfaces metadata in retry body/error/logs",
+        "Callback arrives with server-specific User-Agent or cloud egress IP range"
+      ],
+      "evidence_required": [
+        "OOB DNS+HTTP interaction from server infra after registering attacker URL and triggering delivery",
+        "Response/error/log reflecting internal resource content (metadata creds, internal 200/redirect)"
+      ],
+      "false_positive_checks": [
+        "Confirm delivery originates from server infra, not the client's browser",
+        "Confirm no egress proxy / firewall actually blocks internal ranges",
+        "Rule out a sandboxed delivery worker with no internal network reach"
+      ],
+      "suggested_validation_task": "Register a webhook URL pointing at a unique OOB collaborator host, trigger one delivery, and confirm an inbound DNS/HTTP hit from the server's egress.",
+      "reporting_guidance": "Report as SSRF via webhook destination; escalate severity when cloud metadata or internal services are reachable.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "HOOK-003",
+      "vuln_class": "webhooks",
+      "what_to_look_for": "Inbound webhook verifies the signature but enforces no freshness/uniqueness (no timestamp max-age, no nonce/event-id dedupe), so a captured valid signed delivery can be replayed to repeat a side effect (double credit, repeated provisioning).",
+      "source_indicators": [
+        "HMAC verified over body only; timestamp (Stripe t=, X-Slack-Request-Timestamp) never compared to now",
+        "No persistence/dedupe of provider event.id / delivery id before processing",
+        "constructEvent called without tolerance, or custom verify ignores the timestamp",
+        "Idempotency key generated per-receive server-side instead of from provider event id"
+      ],
+      "blackbox_indicators": [
+        "Replaying a previously-accepted valid signed request re-triggers the side effect",
+        "Signed request with an old/stale timestamp accepted as fresh (no 400)",
+        "Same event id processed twice with cumulative effect"
+      ],
+      "evidence_required": [
+        "Two identical captured valid deliveries causing the effect to apply twice (state delta x2)",
+        "Stale-timestamp signed delivery accepted and processed"
+      ],
+      "false_positive_checks": [
+        "Confirm the downstream action isn't naturally idempotent (upsert keyed on event id)",
+        "Confirm dedupe isn't enforced by a DB unique constraint / queue dedupe",
+        "Ensure the doubled effect isn't a normal retry the system later reconciles"
+      ],
+      "suggested_validation_task": "Re-send one previously-accepted valid signed webhook delivery and check whether the side effect is applied a second time.",
+      "reporting_guidance": "Report as missing replay protection; impact is the repeatable side effect (double-spend, repeated provisioning).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "HOOK-004",
+      "vuln_class": "webhooks",
+      "what_to_look_for": "Signature check exists but is broken: non-constant-time string compare, verification skipped on absent/empty header, or HMAC computed over the re-serialized parsed body instead of the raw request bytes (raw-vs-parsed mismatch).",
+      "source_indicators": [
+        "sig === expected / hmac == signature instead of crypto.timingSafeEqual / hmac.compare_digest",
+        "if (!signature) return next() or verify inside try{} that swallows error and continues",
+        "HMAC over JSON.stringify(req.body) (parsed) rather than captured rawBody",
+        "express.json() consumes body before raw is captured; no rawBody buffer",
+        "Algorithm/length not pinned; legacy sha1 accepted alongside sha256"
+      ],
+      "blackbox_indicators": [
+        "Empty or missing signature header still yields 200 + processing",
+        "Truncated or wrong-length signature accepted",
+        "Whitespace-altered or key-reordered JSON variant accepted (raw vs parsed mismatch)"
+      ],
+      "evidence_required": [
+        "Request with absent/empty/malformed signature accepted and processed",
+        "Parsed-vs-raw mismatch demonstrated: a body signed differently than the provider yet accepted"
+      ],
+      "false_positive_checks": [
+        "Confirm constant-time compare isn't done inside the provider SDK under the hood",
+        "Confirm the missing-header path truly processes, not just acks",
+        "Verify raw-body capture isn't handled by middleware not seen in the snippet"
+      ],
+      "suggested_validation_task": "Replay a valid event with the signature header emptied, then with one char truncated, and observe whether either is still accepted.",
+      "reporting_guidance": "Report as signature verification bypass; chain with HOOK-001 forged-event impact for severity.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue"
+      ]
+    },
+    {
+      "pattern_id": "HOOK-005",
+      "vuln_class": "webhooks",
+      "what_to_look_for": "Outbound webhook validates the destination host at registration time but follows redirects or re-resolves DNS at delivery, letting an allowed public host 30x-redirect to internal or DNS-rebind between validation and fetch (TOCTOU SSRF allowlist bypass).",
+      "source_indicators": [
+        "URL validated on save but delivery client has follow_redirects=True / maxRedirects>0 with no re-check of redirect target",
+        "DNS resolved for validation, then fetch re-resolves; validated IP not pinned",
+        "Allowlist checks hostname string, not the resolved IP; no private-range block on Location follow",
+        "No scheme/host re-validation on each redirect hop"
+      ],
+      "blackbox_indicators": [
+        "Webhook to attacker host that 302-redirects to 169.254.169.254 / localhost results in internal fetch",
+        "Low-TTL host flipping public->private gets delivered to the private IP",
+        "Internal content/latency signature on delivery despite a public-looking configured URL"
+      ],
+      "evidence_required": [
+        "Delivery follows attacker redirect to an internal target (OOB hit or reflected internal content)",
+        "DNS-rebinding delivery hitting an internal IP captured server-side"
+      ],
+      "false_positive_checks": [
+        "Confirm redirects aren't disabled at delivery",
+        "Confirm the validated IP isn't pinned and reused for the actual connection",
+        "Ensure an egress proxy doesn't independently block internal ranges"
+      ],
+      "suggested_validation_task": "Register an allowed public webhook host that issues a 302 to a unique internal/OOB target and trigger one delivery to see if the redirect is followed.",
+      "reporting_guidance": "Report as SSRF allowlist bypass (redirect/DNS-rebinding); same impact class as HOOK-002 but defeats a present control.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "HOOK-006",
+      "vuln_class": "webhooks",
+      "what_to_look_for": "Webhook HMAC signing secret is hardcoded, shared across all tenants, predictable, or leaked (client bundle, repo, query string), so an attacker can compute valid signatures and forge events.",
+      "source_indicators": [
+        "Hardcoded signing secret in source / committed .env / shipped client bundle",
+        "Single global WEBHOOK_SECRET reused for every tenant's inbound verification",
+        "Secret passed in URL query (?secret= / ?token=) instead of a header",
+        "Default/sample secret (whsec_test..., changeme) present in prod config",
+        "Secret derived from a guessable value (tenant id, app name)"
+      ],
+      "blackbox_indicators": [
+        "Webhook URL contains a token/secret query param visible in referer/logs",
+        "Same secret validates across multiple tenant endpoints",
+        "Event forged with a recovered/guessed secret is accepted"
+      ],
+      "evidence_required": [
+        "Located secret (repo/bundle/URL) plus a forged event signed with it accepted by the server",
+        "Cross-tenant: secret from tenant A validates a forged event delivered to tenant B"
+      ],
+      "false_positive_checks": [
+        "Confirm the located string is the real signing key, not a public key / opaque id",
+        "Confirm the secret isn't rotated / per-tenant in prod despite a source default",
+        "Verify the query-string token is the verification secret, not a routing identifier"
+      ],
+      "suggested_validation_task": "Using a secret recovered from the client bundle/repo/URL, sign one benign provider-shaped event and check whether the endpoint accepts it.",
+      "reporting_guidance": "Report as broken webhook authentication (secret exposure/reuse); severity tracks forgeable privileged actions and tenant blast radius.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "reviewed_no_issue",
+        "duplicate"
+      ]
+    }
+  ]
+}

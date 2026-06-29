@@ -1,0 +1,238 @@
+{
+  "vuln_class": "race-conditions",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "RACE-001",
+      "vuln_class": "race-conditions",
+      "what_to_look_for": "TOCTOU double-spend on a balance/credit/quota: code reads a balance, compares it in application memory, then writes a deduction in a separate step with no row lock or atomic decrement, so concurrent requests each pass the check before any commits.",
+      "source_indicators": [
+        "if (account.balance >= amount) { account.balance -= amount; account.save() }",
+        "SELECT balance ... then later UPDATE balance, outside one transaction",
+        "ORM read-modify-write without select_for_update() / SELECT ... FOR UPDATE",
+        "No atomic UPDATE ... SET balance = balance - :amt WHERE balance >= :amt",
+        "Missing @Version / optimistic-lock column on wallet or credits model",
+        "Redis balance via GET then SET instead of DECR/INCRBY or Lua"
+      ],
+      "blackbox_indicators": [
+        "N parallel purchase/withdraw requests yield more than one success on a balance that allows one",
+        "Final balance goes negative or below intended floor",
+        "More credits/items granted than were paid for",
+        "Two 200 OKs with identical 'transaction succeeded' for a single-funds action"
+      ],
+      "evidence_required": [
+        "Pre-state balance snapshot",
+        "Burst of K concurrent identical requests (same auth) sent with single-packet/last-byte timing",
+        "Per-response status and transaction IDs showing >1 debit accepted",
+        "Post-state balance proving the balance>=0 invariant was violated"
+      ],
+      "false_positive_checks": [
+        "Atomic conditional UPDATE ... WHERE balance >= amount with rows-affected checked",
+        "SELECT ... FOR UPDATE inside an explicit transaction",
+        "Distributed lock or unique idempotency key dedupes the second request",
+        "One request returns 200, the rest 409/422 insufficient-funds (server serializes)",
+        "Async reconciliation rejects and reverses the over-debit"
+      ],
+      "suggested_validation_task": "On a funded test account, fire ~20 identical small-purchase requests with HTTP/2 single-packet timing and compare successes against the allowed balance.",
+      "reporting_guidance": "Report as financial double-spend; quantify the over-debit (one balance spent N times) and attach pre/post balance plus the concurrent response transaction IDs.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "RACE-002",
+      "vuln_class": "race-conditions",
+      "what_to_look_for": "One-time code / coupon / gift-card / referral redemption-limit bypass: a flow that checks a used flag or redeemed_count < limit, then marks it used in a separate step with no atomic update or unique (code,user) constraint, letting parallel redemptions each see it as unused.",
+      "source_indicators": [
+        "if (!coupon.used) { applyDiscount(); coupon.used = true; coupon.save() }",
+        "if (redemptions < maxRedemptions) then increment as a separate statement",
+        "No unique constraint on (code, account_id) in the redemptions table",
+        "Non-atomic Redis GET+SET for redeemed_count instead of INCR/Lua",
+        "Gift-card balance applied via read-modify-write without a lock"
+      ],
+      "blackbox_indicators": [
+        "Same coupon/gift code applied successfully across multiple parallel carts/orders",
+        "Referral or signup credit granted multiple times for one code",
+        "'Max uses: 1' yet two parallel requests both return discount applied",
+        "Total discount or credit redeemed exceeds the code's face value/cap"
+      ],
+      "evidence_required": [
+        "The code's stated limit from UI/API (e.g., single-use)",
+        "Concurrent burst of identical redeem requests",
+        "Multiple success responses each confirming applied discount/credit",
+        "Resulting orders/account state showing the limit exceeded"
+      ],
+      "false_positive_checks": [
+        "DB unique constraint on redemption rejects the duplicate (one 200, rest 409)",
+        "Atomic UPDATE ... WHERE used=false (or compare-and-swap) guards the mark",
+        "Single success then 'already redeemed' for the remaining requests",
+        "Pessimistic lock or per-code queue serializes redemptions"
+      ],
+      "suggested_validation_task": "Issue a single-use test coupon, then submit it on ~15 test carts in parallel and count how many discounts actually apply.",
+      "reporting_guidance": "Report as redemption/limit bypass; show the code's stated cap versus observed redemptions and include the duplicate success responses.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "RACE-003",
+      "vuln_class": "race-conditions",
+      "what_to_look_for": "TOCTOU on uniqueness/first-time provisioning: a 'does X exist? no -> create X' path (signup, username/slug claim, default-workspace, first-admin bootstrap) where the existence check and insert are not atomic and no DB unique constraint backs them, so concurrent requests create duplicates or both become 'first'.",
+      "source_indicators": [
+        "if not User.objects.filter(email=...).exists(): User.objects.create(...)",
+        "findOne()/count() then create()/insert() with no unique index",
+        "if (orgs.count == 0) makeOwner(user) bootstrap path",
+        "get_or_create / firstOrCreate without a DB-level unique constraint",
+        "No INSERT ... ON CONFLICT / unique index / atomic upsert"
+      ],
+      "blackbox_indicators": [
+        "Two parallel signups with the same email/username both succeed",
+        "Two users both provisioned as org owner/first-admin",
+        "Duplicate records (same slug, same invite acceptance) created",
+        "Two parallel 'claim handle' requests both return 201"
+      ],
+      "evidence_required": [
+        "Parallel identical create/claim requests with the same unique field",
+        "More than one success or duplicate resource IDs returned",
+        "Resulting duplicate rows or duplicate privileged role",
+        "Source path showing the check and insert are separate and unguarded"
+      ],
+      "false_positive_checks": [
+        "DB unique constraint/index present so the second insert errors and app returns 409",
+        "Transaction with row/advisory lock around check+insert",
+        "One success, others rejected as duplicate",
+        "Idempotent upsert (ON CONFLICT DO NOTHING) collapses the duplicate"
+      ],
+      "suggested_validation_task": "Send two parallel account-create or handle-claim requests with the same unique field using fresh test data and check whether both are created.",
+      "reporting_guidance": "Report as TOCTOU uniqueness bypass; emphasize privilege impact when it yields duplicate owners/admins and attach both success responses.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "RACE-004",
+      "vuln_class": "race-conditions",
+      "what_to_look_for": "Rate-limit / OTP / throttle bypass via concurrency: attempt counters (failed-login, OTP/2FA verify, password-reset, SMS send) read-increment-store non-atomically or check the limit before incrementing, so a parallel burst all pass the threshold check simultaneously.",
+      "source_indicators": [
+        "attempts = get(key); if attempts < MAX: ...; set(key, attempts+1)  (GET+SET, not atomic)",
+        "Limit checked at request start, counter persisted only after the work",
+        "In-memory per-process counter behind multiple workers (no shared atomic store)",
+        "OTP verify path with no lock and code not invalidated on first failure",
+        "Missing atomic Redis INCR + EXPIRE or Lua script for the counter"
+      ],
+      "blackbox_indicators": [
+        "N concurrent OTP/2FA guesses accepted beyond the stated max attempts",
+        "Login lockout (e.g., 5 tries) bypassed by sending 50 in parallel",
+        "More OTP/SMS sends succeed than the documented per-window cap",
+        "X-RateLimit-Remaining inconsistent or counts fewer than requests sent"
+      ],
+      "evidence_required": [
+        "Documented/observed limit (e.g., 5 attempts or 3 OTP sends)",
+        "Concurrent burst exceeding the limit with each request marked accepted/processed",
+        "Counter or remaining-quota showing fewer than the actual requests sent",
+        "For OTP: multiple guesses evaluated against a single live code"
+      ],
+      "false_positive_checks": [
+        "Atomic INCR-then-check (counter incremented before evaluation)",
+        "Single-use code invalidated atomically on the first verify",
+        "Edge/WAF rate-limit serializes regardless of app code",
+        "Lock or DB-backed atomic counter present",
+        "All but the first N return 429/locked"
+      ],
+      "suggested_validation_task": "Against a test account, fire a parallel burst of wrong-OTP or failed-login attempts exceeding the stated cap and count how many are actually evaluated.",
+      "reporting_guidance": "Report as throttle/limit bypass enabling brute force; quantify attempts allowed versus the documented cap and note OTP/2FA brute-force impact.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "RACE-005",
+      "vuln_class": "race-conditions",
+      "what_to_look_for": "Status-transition double-processing: an action guarded only by a mutable status field (pending->processed, open->closed) with no idempotency key, atomic CAS, or lock, so concurrent or replayed requests both observe the actionable status and each execute the side effect (double refund, double payout, double ship).",
+      "source_indicators": [
+        "if (order.status == 'pending') { processPayout(); order.status='paid'; save() }",
+        "Webhook/callback handler with no idempotency or dedup key",
+        "Refund/transfer with no UPDATE ... WHERE status='pending' affected-rows guard",
+        "Missing unique constraint on an idempotency_key column",
+        "No optimistic version check before the state-changing write"
+      ],
+      "blackbox_indicators": [
+        "Two parallel refund/withdraw/confirm requests both succeed (double payout)",
+        "Replaying a payment/webhook callback triggers the action twice",
+        "Two shipment/fulfillment events for one order",
+        "Duplicate external side effects (two emails, two ledger entries)"
+      ],
+      "evidence_required": [
+        "Resource's actionable status before the test",
+        "Concurrent or replayed identical action requests",
+        "More than one success each confirming the side effect executed",
+        "Post-state showing the duplicate effect (two refunds / two ledger rows)"
+      ],
+      "false_positive_checks": [
+        "Atomic UPDATE ... WHERE status=expected with rows-affected==0 guarding the losers",
+        "Idempotency key / dedup table rejects the replay (one 200, rest cached/409)",
+        "Pessimistic lock or per-resource queue serializes processing",
+        "Optimistic version mismatch rejects the second write",
+        "Downstream processor idempotent (PSP dedupes the refund)"
+      ],
+      "suggested_validation_task": "On a test order/refund in actionable state, send two parallel identical action requests plus one replay and check for duplicate side effects.",
+      "reporting_guidance": "Report as double-processing / missing idempotency; show the duplicate side effects and tie them to financial or inventory impact.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "RACE-006",
+      "vuln_class": "race-conditions",
+      "what_to_look_for": "Filesystem TOCTOU: a filesystem check (exists/access/stat/owner) is separated from the open/read/write/extract on the same untrusted path, or temp files use predictable names, so a concurrent attacker swaps the path for a symlink between check and use (privileged file overwrite/read).",
+      "source_indicators": [
+        "os.access(path, W_OK) or fs.existsSync(p) then a separate open()/write()",
+        "tempfile.mktemp() or predictable /tmp/<name> created then opened later",
+        "access()/stat() followed by open() on the same untrusted path",
+        "Archive extraction or upload-move that re-stats then writes without O_EXCL/O_NOFOLLOW",
+        "chown/chmod applied after create instead of atomic create with mode"
+      ],
+      "blackbox_indicators": [
+        "Parallel same-name upload/export operations clobber or overwrite each other",
+        "Two parallel imports/exports to a predictable path collide or one wins arbitrary content",
+        "Error/timing differences indicating a non-atomic open on a shared path"
+      ],
+      "evidence_required": [
+        "Source path showing check and use on the same name with a window between them",
+        "Absence of O_CREAT|O_EXCL|O_NOFOLLOW / mkstemp usage",
+        "For live: demonstrated file overwrite/clobber via parallel same-name operations",
+        "Privilege context of the writing process"
+      ],
+      "false_positive_checks": [
+        "Atomic open with O_CREAT|O_EXCL|O_NOFOLLOW (or mkstemp / NamedTemporaryFile)",
+        "Random unguessable temp names in a private sticky-bit directory",
+        "Operation runs unprivileged with no symlink-followable target",
+        "File descriptor (not path) reused after the check, no re-resolution",
+        "Per-operation unique directory prevents name collision"
+      ],
+      "suggested_validation_task": "In a test workspace, trigger parallel same-name upload/export operations and observe whether one clobbers the other or a predictable temp path is reused.",
+      "reporting_guidance": "Report as filesystem TOCTOU, classify as source-root-cause (predictable path / non-atomic open), and tie to privileged file overwrite or info disclosure where the process is privileged.",
+      "output_states": [
+        "needs_source_root_cause",
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "false_positive"
+      ]
+    }
+  ]
+}

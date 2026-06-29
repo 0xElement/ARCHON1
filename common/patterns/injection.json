@@ -1,0 +1,258 @@
+{
+  "vuln_class": "injection",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "INJ-001",
+      "vuln_class": "injection",
+      "what_to_look_for": "OS command injection: user input flowing into a shell-interpreted exec sink. The danger sign is a string built from a request param passed to a shell, OR an argument that can break out of a non-shell exec via metacharacters/path. Look for unescaped concatenation reaching the command string.",
+      "source_indicators": [
+        "child_process.exec/execSync with a template string containing req.body/req.query/req.params",
+        "os.system / subprocess.* with shell=True and an f-string or % concatenation",
+        "Runtime.exec(String) or ProcessBuilder with a single concatenated command string",
+        "Go exec.Command(\"sh\",\"-c\", userVar) or exec.Command(\"bash\",\"-c\", ...)",
+        "PHP system()/exec()/shell_exec()/passthru()/proc_open with request data not via escapeshellarg",
+        "user value reaching ping/curl/ffmpeg/imagemagick/git/tar wrapper without arg-array separation",
+        "backtick or popen() invocation interpolating a filename/hostname from input"
+      ],
+      "blackbox_indicators": [
+        "time-delay differential: payload `;sleep 7` or `|sleep 7` or `$(sleep 7)` adds ~7s to response",
+        "param values like hostname/filename/format/cmd/exec/jobid that look like CLI wrapper inputs",
+        "error output leaking shell syntax (sh: 1: ..., command not found, /bin/sh)",
+        "feature is an obvious shell wrapper (ping host, DNS lookup, archive extract, image convert)",
+        "OOB DNS/HTTP callback fires from `;nslookup <token>.collab` or `$(curl <token>)` style probe"
+      ],
+      "evidence_required": [
+        "source-to-sink path: tainted request field -> shell exec call with no escaping/allowlist",
+        "the exact exec API and whether a shell is invoked (shell=True / sh -c / single-string exec)",
+        "blackbox: reproducible timing delta or OOB callback tied to an injected separator, two trials",
+        "confirmation that input is not constrained to an enum/numeric/allowlist before the sink"
+      ],
+      "false_positive_checks": [
+        "input passed as a separate argv element (array form, no shell) -> metacharacters inert, not injectable",
+        "value validated against a strict allowlist/regex (e.g. ^[a-zA-Z0-9.]+$) or cast to int before sink",
+        "escapeshellarg/shlex.quote/proper quoting applied -> demote",
+        "the 'command' is a constant and the variable is only an unreachable/dead branch",
+        "timing delta caused by upstream network latency, not the injected sleep (control trial without payload)"
+      ],
+      "suggested_validation_task": "Send a benign time-delay probe (e.g. value `127.0.0.1;sleep 9` vs baseline `127.0.0.1`) and compare response latency across two trials each.",
+      "reporting_guidance": "Report as OS command injection (CWE-78); cite the sink, the proven timing/OOB differential, and whether a shell was actually spawned.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "INJ-002",
+      "vuln_class": "injection",
+      "what_to_look_for": "NoSQL operator/JSON injection: untyped request body or query merged directly into a MongoDB/Mongoose/other document-store filter, letting an attacker smuggle operators ($ne, $gt, $regex, $where) or change query shape. Classic in auth: { user, pass } from req.body passed straight to findOne.",
+      "source_indicators": [
+        "collection.find/findOne(req.body) or (req.query) with no per-field type coercion",
+        "Mongoose model.find({ field: req.query.x }) where x can be an object",
+        "$where with a JS string built from input, or mapReduce/aggregate $function user code",
+        "JSON body parsed then spread into a filter (...req.body) for find/update/delete",
+        "no express body type guard; querystring lib that yields objects for key[$ne]=... syntax",
+        "Knex/Sequelize raw JSON operators or qb.whereRaw with interpolated input on a JSON column"
+      ],
+      "blackbox_indicators": [
+        "login bypass when sending {\"user\":\"admin\",\"pass\":{\"$ne\":null}} as JSON body",
+        "param style url like field[$ne]= or field[$gt]= accepted and altering result set size",
+        "Content-Type application/json endpoint where a value object yields more/auth'd records",
+        "$regex injection: {\"$regex\":\"^a\"} changes returned rows, enabling blind extraction",
+        "boolean-differential: object-typed operator value flips response between 200/401 or row counts"
+      ],
+      "evidence_required": [
+        "source path: request field reaching the query object without scalar/type validation",
+        "blackbox: a differential where an operator-bearing object changes auth result or row set vs scalar baseline",
+        "the datastore + query API (find/aggregate/$where) confirming operator interpretation",
+        "absence of input typing (e.g. String(x) coercion, schema cast, or strict body validation)"
+      ],
+      "false_positive_checks": [
+        "fields explicitly coerced with String()/Number() or validated by a schema (Joi/zod/Mongoose cast) before query",
+        "body parser configured to reject nested objects / query strictly typed -> operators can't arrive",
+        "sanitize middleware present (express-mongo-sanitize) stripping $-keys and dots",
+        "endpoint already requires verified auth on a different field, so $ne bypass yields nothing",
+        "the differential is explained by legitimate matching, not operator interpretation (re-test with literal)"
+      ],
+      "suggested_validation_task": "On a JSON endpoint, compare a scalar value vs an operator object (e.g. {\"$ne\":null} or {\"$gt\":\"\"}) in one non-credential field and observe whether the result set/response state changes.",
+      "reporting_guidance": "Report as NoSQL injection (CWE-943); show the operator-object differential and the unvalidated source-to-query path.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "INJ-003",
+      "vuln_class": "injection",
+      "what_to_look_for": "Server-side template injection (SSTI): user input concatenated into a template string that is then compiled/rendered, rather than passed as a data binding. The tell is input building the template source itself (render_template_string(user), Twig createTemplate(user), `${...}` in a JS template engine) which exposes the template language's expression evaluator and often RCE.",
+      "source_indicators": [
+        "Jinja2 render_template_string(user) or Template(user).render(), Flask flash/format with input",
+        "Twig $twig->createTemplate($userString) or _self / array template from request",
+        "Nunjucks/Handlebars/EJS/Pug compiling a template string sourced from input (ejs.render(userSrc))",
+        "Velocity/Freemarker/Thymeleaf with inline expression from input; Spring SpEL parser.parseExpression(input)",
+        "string interpolation INTO template source: `\"Hello \" + name + \"!\"` then compiled as template",
+        "mail/notification templates where subject/body template is admin- or user-supplied and rendered"
+      ],
+      "blackbox_indicators": [
+        "math probe renders: input {{7*7}} or ${7*7} or #{7*7} comes back as 49",
+        "engine fingerprint differential: {{7*'7'}} -> 7777777 (Jinja) vs error (Twig)",
+        "user-controlled name/subject/label/template field reflected after server-side processing",
+        "${} or #{} or {{}} sequences in input cause 500s referencing a template engine class",
+        "reflected value where a literal stays literal but an expression evaluates"
+      ],
+      "evidence_required": [
+        "source path: input reaching a compile/render-of-template-string call (not a data context binding)",
+        "blackbox: an arithmetic/string expression that evaluates server-side (e.g. {{7*7}}->49), distinct from literal echo",
+        "identification of the template engine (controls exploitability/RCE reachability)",
+        "proof it is template-source injection, not autoescaped data interpolation"
+      ],
+      "false_positive_checks": [
+        "input is passed as a render CONTEXT variable (render_template(file, name=user)) -> data binding, autoescaped, not SSTI",
+        "engine has sandbox/autoescape on and expression returns escaped literal {{7*7}} unchanged",
+        "the 49 came from the app's own arithmetic, not template eval (test with {{6*7}} to confirm it tracks)",
+        "reflected XSS only (client-side) with no server-side evaluation -> different class, route to XSS catalog",
+        "expression syntax is stripped/encoded before reaching renderer"
+      ],
+      "suggested_validation_task": "Submit a harmless arithmetic expression in the suspect field ({{7*7}}, ${7*7}, #{7*7}, or {{6*7}}) and check whether the response contains the computed product instead of the literal.",
+      "reporting_guidance": "Report as server-side template injection (CWE-1336/CWE-94); name the engine and show the evaluated expression, noting RCE reachability.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "INJ-004",
+      "vuln_class": "injection",
+      "what_to_look_for": "LDAP / directory-filter injection: user input concatenated into an LDAP search filter or DN without escaping, letting an attacker inject filter metacharacters ( ) * | & = to alter the query, enable auth bypass, or blind attribute enumeration. Common in login and user-lookup features against AD/OpenLDAP.",
+      "source_indicators": [
+        "filter strings built by concatenation: \"(uid=\" + user + \")\" or f\"(&(uid={user})(pass={pwd}))\"",
+        "ldapjs/ldap3/python-ldap/Spring LdapTemplate.search with an interpolated filter argument",
+        "DN built from input: \"cn=\"+name+\",ou=...\" without escapeDN/escape_dn_chars",
+        "no use of escapeLDAPSearchFilter / ldap.filter.escape / RFC4515 escaping helper",
+        "JNDI/DirContext.search(base, filter, ...) where filter embeds raw request data"
+      ],
+      "blackbox_indicators": [
+        "auth/login form where payload `*` or `*)(uid=*` or `admin)(&)` changes the result",
+        "wildcard `*` in a username/search field returns all/extra records",
+        "injecting `)` or `(` triggers an LDAP filter/parse error (e.g. javax.naming, invalid filter)",
+        "boolean-differential via `*)(|(uid=*` style payloads flipping match/no-match",
+        "search box that maps to directory attributes (uid, cn, mail) and reacts to filter metacharacters"
+      ],
+      "evidence_required": [
+        "source path: input concatenated into an LDAP filter/DN with no RFC4515/RFC4514 escaping",
+        "blackbox: a filter-metacharacter differential (e.g. `*` widening results or `)` causing a filter error)",
+        "the LDAP API and whether an escaping helper is applied before the sink",
+        "confirmation input is not constrained to a safe charset/allowlist pre-filter"
+      ],
+      "false_positive_checks": [
+        "escapeLDAPSearchFilter / ldap.filter.escape / encodeForLDAP applied to every interpolated value -> demote",
+        "parameterized/bound search where placeholders are escaped by the library",
+        "input restricted to a strict allowlist (e.g. numeric id) before building the filter",
+        "the `*` result change is a legitimate substring feature, not injection (test `)` to confirm metachar parsing)",
+        "lookup hits a non-LDAP store; the filter syntax is unrelated"
+      ],
+      "suggested_validation_task": "Enter a single `*` and then a lone `)` into the directory-search/login field and observe result-set widening or an LDAP filter parse error versus a normal value.",
+      "reporting_guidance": "Report as LDAP injection (CWE-90); cite the unescaped filter/DN construction and the metacharacter differential (auth-bypass or enumeration impact).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "INJ-005",
+      "vuln_class": "injection",
+      "what_to_look_for": "HTTP header / CRLF injection: user input written into a response header, redirect Location, Set-Cookie, or an outbound email header without stripping CR/LF. Permits response splitting, header injection, cookie setting, cache poisoning, or SMTP header injection. Also covers reflected Host/forwarded headers trusted for URL building.",
+      "source_indicators": [
+        "res.setHeader/header()/addHeader with a value containing req.* and no \\r\\n stripping",
+        "redirect(req.query.url) / Location header from input; res.redirect with user-supplied target",
+        "Set-Cookie value built from input; raw header write in a low-level HTTP/CGI handler",
+        "email send where To/Subject/From/Reply-To header is set from request input (PHPMailer addCustomHeader, raw mail() headers)",
+        "logging or response built by concatenating input into a header line without encoding",
+        "Host/X-Forwarded-Host header used to build absolute URLs (password-reset links, redirects)"
+      ],
+      "blackbox_indicators": [
+        "payload with encoded CRLF (%0d%0a) in a reflected param injects a new header (e.g. Set-Cookie:inj=1) into the response",
+        "open-redirect-style param (url, next, return, redirect, dest) reflected into Location",
+        "%0d%0aHeader: value appears as a real response header, not body text",
+        "Host header poisoning: spoofed Host reflected into a generated link or cache key",
+        "email feature where header field accepts newline and adds Bcc/extra headers"
+      ],
+      "evidence_required": [
+        "source path: input written into a header/redirect/cookie/email-header sink with no CR/LF removal",
+        "blackbox: a CRLF payload producing a NEW header line (response splitting) or a controlled redirect target",
+        "which sink (HTTP response header vs Location vs Set-Cookie vs SMTP header) and runtime behavior",
+        "confirmation the runtime/framework does not already reject CR/LF in header values"
+      ],
+      "false_positive_checks": [
+        "framework/runtime rejects or strips CR/LF in header values (Node http throws on \\n; modern servers block) -> not exploitable",
+        "redirect target validated against an allowlist of hosts/paths before being set",
+        "the %0d%0a is reflected into the response BODY (HTML), not a header -> XSS class, not CRLF/splitting",
+        "value is URL-encoded by the framework so CRLF stays inert",
+        "email library that enforces single-line headers / rejects newlines"
+      ],
+      "suggested_validation_task": "Send a benign CRLF probe (e.g. param value `x%0d%0aX-Inj-Test:1`) and inspect raw response headers for a new X-Inj-Test header, or test an off-site value in a redirect param for an unvalidated Location.",
+      "reporting_guidance": "Report as HTTP header/CRLF injection (CWE-93/CWE-113); show the injected header line or controlled redirect and name the sink.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "INJ-006",
+      "vuln_class": "injection",
+      "what_to_look_for": "XML external entity (XXE) injection: an XML parser that resolves DOCTYPE/external entities while processing user-supplied XML (uploads, SOAP, SAML, SVG, DOCX/XLSX, RSS). Enables local file read, SSRF, and blind OOB exfiltration. The tell is a parser constructed without disabling DTDs/external entities.",
+      "source_indicators": [
+        "Java: DocumentBuilderFactory/SAXParserFactory/XMLInputFactory without disallow-doctype-decl / external-general-entities=false",
+        "Python: lxml etree.parse with resolve_entities default, or xml.dom/pulldom without defusedxml",
+        "PHP: libxml_disable_entity_loader not set / simplexml_load_string on user XML (pre-8.0)",
+        ".NET XmlDocument/XmlReader with DtdProcessing=Parse and XmlResolver set",
+        "Node: libxmljs parse with noent:true, or a SOAP/SAML lib resolving entities",
+        "file-upload or API consuming XML/SVG/DOCX/SAML where the parser config is default"
+      ],
+      "blackbox_indicators": [
+        "XML/SVG/DOCX upload or XML/SOAP endpoint accepts a DOCTYPE and reflects entity expansion",
+        "in-band: a defined entity referencing a benign value is expanded in the response",
+        "OOB: parameter/external entity pointing at an attacker URL triggers a server callback (DNS/HTTP)",
+        "Content-Type application/xml or text/xml endpoint that processes the body server-side",
+        "error referencing entity/DTD resolution (e.g. failed to load external entity, DOCTYPE not allowed)"
+      ],
+      "evidence_required": [
+        "source path: user XML reaching a parser whose DTD/external-entity resolution is not disabled",
+        "blackbox: an entity expansion observed in-band, OR an OOB callback from an external-entity probe",
+        "the parser/library and its security configuration flags",
+        "confirmation the endpoint actually parses the XML server-side (not just stores it)"
+      ],
+      "false_positive_checks": [
+        "parser hardened: DOCTYPE disallowed / external entities disabled / defusedxml / XmlResolver=null -> not vulnerable",
+        "library/runtime version that disables external entities by default (e.g. PHP 8+, modern .NET) with no override",
+        "the XML is never parsed (stored/forwarded as opaque bytes) -> no sink",
+        "entity expansion blocked but error is generic -> confirm with an OOB probe before claiming",
+        "schema validation rejects DOCTYPE before entity resolution"
+      ],
+      "suggested_validation_task": "Submit XML with a benign external entity pointing to an OOB collaborator URL (parameter entity, no local-file read) and watch for a DNS/HTTP callback; do not exfiltrate sensitive files.",
+      "reporting_guidance": "Report as XXE (CWE-611); show the OOB callback or in-band entity expansion and cite the parser's unsafe configuration.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    }
+  ]
+}

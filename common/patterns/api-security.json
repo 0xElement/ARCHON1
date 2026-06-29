@@ -1,0 +1,215 @@
+{
+  "vuln_class": "api-security",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "API-001",
+      "vuln_class": "api-security",
+      "what_to_look_for": "Object-level endpoints (GET/PUT/DELETE /resource/{id}) that fetch by a client-supplied identifier without scoping the query to the authenticated principal's owner/tenant — classic BOLA/IDOR.",
+      "source_indicators": [
+        "Model.findById(req.params.id) / findByPk(id) with no where:{userId:req.user.id} owner filter",
+        "Route reads req.params.id and passes straight to DAO/repository before any ownership check",
+        "Auth middleware enforces isAuthenticated() but never compares object.owner to req.user",
+        "GraphQL node(id)/Relay global-ID resolver fetching by id with no owner/tenant scope",
+        "ORM query lacks tenant_id/org_id predicate in a multi-tenant schema"
+      ],
+      "blackbox_indicators": [
+        "Sequential or guessable IDs in paths: /api/v1/orders/1001, /invoices/8842",
+        "Account A's token returns 200 with account B's object body",
+        "IDOR surface on /users/{id}, /documents/{id}, /payments/{id}",
+        "Response contains records whose owner != the authenticated subject"
+      ],
+      "evidence_required": [
+        "Two-account proof: A's token retrieving an object known to belong to B",
+        "Request/response pair showing cross-tenant/cross-user data in the body",
+        "The object ID demonstrably owned by a different principal"
+      ],
+      "false_positive_checks": [
+        "Confirm the object is private, not an intentionally public/shared resource",
+        "Verify the 200 actually returns B's data, not an empty/filtered body",
+        "Rule out field-level redaction or downstream gateway authz that masks the object",
+        "Ensure the ID truly maps to another tenant, not a re-used/collided value"
+      ],
+      "suggested_validation_task": "With account A's token, GET the object ID owned by account B and diff the returned body against B's known values.",
+      "reporting_guidance": "Report as BOLA/IDOR with the two-account proof and exact endpoint+ID; scale severity to data sensitivity (PII/financial > metadata).",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "API-002",
+      "vuln_class": "api-security",
+      "what_to_look_for": "Privileged/admin action endpoints (delete user, change role, approve, export-all) that authenticate the caller but never enforce function-level role/permission — Broken Function Level Authorization.",
+      "source_indicators": [
+        "Admin route missing requireRole('admin')/@PreAuthorize while sibling routes have it",
+        "Single controller serves user and admin actions; role gate only in the SPA, not server-side",
+        "Express/Fastify router mounts /admin handlers with only an auth (not authz) middleware",
+        "@PreAuthorize/@RolesAllowed annotation absent on a state-changing method"
+      ],
+      "blackbox_indicators": [
+        "Standard-user token calls /api/admin/*, DELETE /users/{id}, POST /roles and gets 200/204",
+        "Privileged endpoints enumerated from swagger.json or JS bundle are reachable by low-priv tokens",
+        "Action returns success for a role that has no UI affordance for it",
+        "PUT/PATCH on another principal's role/state accepted without 403"
+      ],
+      "evidence_required": [
+        "Low-privilege token successfully invoking a privileged action (state change or privileged 200)",
+        "Confirmation the function is privileged (admin baseline behaves differently / is gated elsewhere)"
+      ],
+      "false_positive_checks": [
+        "Verify the action is genuinely not permitted for that role by design",
+        "Confirm the 200 made a real change, not a no-op with authz enforced downstream",
+        "Rule out generic success on a feature-flagged/disabled endpoint"
+      ],
+      "suggested_validation_task": "Replay a privileged read variant (e.g., admin user-listing) with a standard-user token and check for 200 instead of 403.",
+      "reporting_guidance": "Report as BFLA; name the privileged function, the role used, and whether it caused a state change vs privileged read; severity by blast radius.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "API-003",
+      "vuln_class": "api-security",
+      "what_to_look_for": "Create/update endpoints that bind the raw request body to an ORM model with no allowlist, letting a client over-post privileged attributes (role, isAdmin, verified, balance, ownerId) — mass assignment.",
+      "source_indicators": [
+        "User.update(req.body) / Object.assign(model, req.body) / new Model(req.body)",
+        "Sequelize/Mongoose create(req.body) with no fields:/pick allowlist",
+        "Spring @ModelAttribute binding the entity directly with no @JsonIgnore on sensitive fields",
+        "Rails model lacking strong params / params.permit! used",
+        "Request body spread into persistence with no DTO/whitelist layer"
+      ],
+      "blackbox_indicators": [
+        "Adding \"role\":\"admin\" / \"isAdmin\":true / \"verified\":true / \"balance\":N to a PUT/POST body persists",
+        "Undocumented field echoed back in the subsequent GET after update",
+        "Profile/settings update accepts unknown properties without a 400/422"
+      ],
+      "evidence_required": [
+        "Before/after showing a privileged field changed via an injected body parameter",
+        "Re-GET confirming the injected, out-of-schema field was persisted"
+      ],
+      "false_positive_checks": [
+        "Re-GET shows the field stripped/ignored (no persistence)",
+        "Field is intentionally user-settable",
+        "Change reverted by business logic or the field is not actually privileged"
+      ],
+      "suggested_validation_task": "PATCH your own record with one undocumented low-impact key, then re-GET to confirm whether unknown fields persist before touching privileged keys.",
+      "reporting_guidance": "Report as mass assignment / over-posting; show the injected key, the persisted privileged value, and the missing allowlist; severity by which field is writable.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "API-004",
+      "vuln_class": "api-security",
+      "what_to_look_for": "Responses that serialize the full backing model and leak sensitive fields (credentials, tokens, PII, internal flags) the client never needs — excessive data exposure, often relying on client-side filtering.",
+      "source_indicators": [
+        "res.json(user) / return entity directly with no DTO or field projection",
+        "SELECT * then serialized to JSON",
+        ".toJSON()/serializer without hiding passwordHash/mfa_secret/tokens",
+        "GraphQL type exposing sensitive fields with no field-level auth",
+        "List endpoint returns the full object graph per item"
+      ],
+      "blackbox_indicators": [
+        "Response body contains password/passwordHash, mfa_secret, ssn, internal_notes, is_admin, reset_token",
+        "List endpoint returns far more per-object data than the UI renders",
+        "Other users' PII present in a collection response",
+        "Fields obviously stripped only in the SPA, not by the API"
+      ],
+      "evidence_required": [
+        "Response body containing a clearly sensitive field the client should not receive",
+        "Confirmation the field is sensitive (credential/secret/PII/internal)"
+      ],
+      "false_positive_checks": [
+        "Field is non-sensitive despite a scary name",
+        "Data belongs to the requesting user and disclosure is appropriate",
+        "Value is masked/tokenized/truncated rather than raw"
+      ],
+      "suggested_validation_task": "GET a standard resource (your user, an order list) and scan the JSON for sensitive keys beyond what the UI consumes.",
+      "reporting_guidance": "Report as excessive data exposure; quote the leaked fields and the endpoint; severity by secret/PII class and whether other users' data is included.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "API-005",
+      "vuln_class": "api-security",
+      "what_to_look_for": "Security-sensitive endpoints (login, OTP/2FA verify, password-reset, payment, invite, messaging) with no throttle, lockout, or attempt counter — unrestricted resource consumption / brute-force exposure.",
+      "source_indicators": [
+        "Auth/OTP/reset route with no express-rate-limit / @RateLimiter / bucket middleware",
+        "OTP or token verification with no attempt counter or account lockout",
+        "Loop/bulk handler with no max page size or per-caller quota",
+        "No CAPTCHA/backoff on a credential-checking endpoint"
+      ],
+      "blackbox_indicators": [
+        "Dozens of rapid requests to /login, /verify-otp, /reset all return 200/401 with no 429",
+        "No Retry-After or X-RateLimit-* headers on sensitive routes",
+        "Short numeric OTP accepts unlimited guesses",
+        "Bulk export/pagination accepts arbitrarily large limit= without cap"
+      ],
+      "evidence_required": [
+        "A small controlled burst with no 429/Retry-After/lockout observed",
+        "Confirmation the endpoint is security-sensitive (auth/OTP/payment/messaging)"
+      ],
+      "false_positive_checks": [
+        "Throttling enforced at WAF/CDN/gateway (test through the real production edge)",
+        "Account lockout or CAPTCHA triggers instead of an HTTP 429",
+        "Endpoint is not actually sensitive or is idempotent/read-only"
+      ],
+      "suggested_validation_task": "Send a small controlled burst (~30 requests) of invalid attempts to the sensitive endpoint and check for any 429/Retry-After/lockout response.",
+      "reporting_guidance": "Report as missing rate limit / anti-automation on a sensitive action; state observed request volume with no throttle; severity by feasibility of brute-force/abuse.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "API-006",
+      "vuln_class": "api-security",
+      "what_to_look_for": "Multiple API versions / legacy or internal route prefixes where an older version lacks the authorization, tenancy, or input checks applied to the current one — version-skew auth bypass.",
+      "source_indicators": [
+        "Both /api/v1 and /api/v2 mounted; v1 controller missing the authz middleware v2 has",
+        "Legacy controller retained without the new ownership/role checks",
+        "Security fix applied only to the latest handler; old route still routes to old code",
+        "Internal/beta path (/internal, /v3beta, /legacy) mounted without the standard auth chain"
+      ],
+      "blackbox_indicators": [
+        "/api/v1/{resource} returns data while /api/v2/{resource} enforces auth/403",
+        "Swapping the version prefix bypasses tenant or role enforcement",
+        "Deprecated version still live (200, not 404/410) and reachable",
+        "Undocumented version discovered in JS bundle/swagger responds unauthenticated"
+      ],
+      "evidence_required": [
+        "Same object/action accessible via the older version without the auth the new version requires",
+        "Documented diff in auth behavior between versions (403 vs 200) for equivalent requests"
+      ],
+      "false_positive_checks": [
+        "Confirm the old version is not actually decommissioned (404/410)",
+        "Verify both versions enforce equivalent auth (no real gap)",
+        "Rule out the legacy version being network-restricted/internal-only"
+      ],
+      "suggested_validation_task": "Replay an authenticated v2 request against the v1/legacy path and compare auth enforcement (403 vs 200).",
+      "reporting_guidance": "Report as version-skew/legacy-endpoint auth bypass; show the two versioned requests side by side and the differing enforcement; severity inherits the bypassed control.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "reviewed_no_issue",
+        "not_applicable",
+        "false_positive"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,244 @@
+{
+  "vuln_class": "authentication-session",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "AUTH-001",
+      "vuln_class": "authentication-session",
+      "what_to_look_for": "Password-reset tokens that are predictable, reusable, unbound to the requesting user, never expired, or not invalidated after a successful reset. Watch for tokens derived from Math.random()/timestamps/sequential IDs, tokens echoed back in the response or URL and accepted again, and reset endpoints that take a user_id/email in the body alongside the token (letting one user's valid token reset another account).",
+      "source_indicators": [
+        "Token generated via Math.random(), Date.now(), uuid v1, or md5(email+timestamp) instead of crypto.randomBytes/secrets.token_urlsafe",
+        "Reset record lacks expires_at / used_at columns or they are never checked",
+        "resetPassword(token, userId, newPassword) takes a separate user id/email not derived from the token row",
+        "No DELETE/UPDATE marking the token consumed after password change",
+        "Token compared with == / string equality instead of constant-time compare"
+      ],
+      "blackbox_indicators": [
+        "Reset link token is short/sequential/base64 of an integer and increments across requests",
+        "Re-submitting the same reset link after use still returns 200 and changes the password",
+        "POST /reset accepts email/user_id field that can be swapped to a victim while keeping attacker's token",
+        "Reset token still valid hours/days later (no expiry)",
+        "Host header or X-Forwarded-Host reflected into the emailed reset link (poisoning)"
+      ],
+      "evidence_required": [
+        "Captured reset request/response showing token structure or reflected identifier",
+        "Replay of a used token producing a second successful reset (HTTP 200 + login with new password)",
+        "Demonstration that a token bound to account A resets account B, or that expiry is absent"
+      ],
+      "false_positive_checks": [
+        "Confirm token is actually high-entropy crypto-random before claiming predictability",
+        "Verify the user_id in the body is server-validated against the token's owner, not trusted",
+        "Check whether a short TTL or single-use invalidation exists server-side even if not obvious in one file",
+        "Rule out test/staging seed accounts that legitimately allow repeated resets"
+      ],
+      "suggested_validation_task": "Request two resets for an attacker-owned account and check token entropy/sequence, then replay the first (already-used) token once to see if it is still accepted.",
+      "reporting_guidance": "Report as account takeover via password reset; cite token entropy/binding/expiry/single-use defect and the exact replay that succeeded.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "AUTH-002",
+      "vuln_class": "authentication-session",
+      "what_to_look_for": "MFA that is enforced only in the UI or on the wrong endpoint, leaving a fully authenticated session before the second factor is verified. Look for login that issues the real session cookie/JWT first and only then prompts for OTP, an /mfa/verify step that can be skipped by calling protected APIs directly, and OTP verification with no attempt limit / no lockout (brute-forceable 6-digit code).",
+      "source_indicators": [
+        "Session/JWT issued in the password step, with a separate mfa_passed flag that protected routes never check",
+        "OTP verify endpoint has no rate limit, attempt counter, or code-expiry; code stored in plaintext/session",
+        "Client-side gating only (if (user.mfaRequired) showOtpScreen) with no server middleware",
+        "Backup-code or 'remember this device' path that bypasses verify and sets mfa_passed=true",
+        "OTP compared with == and not invalidated after success (reusable)"
+      ],
+      "blackbox_indicators": [
+        "After password step the session cookie already grants access to /api/* without completing OTP",
+        "Skipping the OTP screen and directly requesting a post-login page returns authorized content",
+        "OTP endpoint accepts unlimited guesses (no 429 / lockout) for a 6-digit code",
+        "A second login endpoint (mobile/legacy/API) returns a token without prompting for MFA",
+        "Same OTP code works more than once or after its displayed validity window"
+      ],
+      "evidence_required": [
+        "Request sequence showing an authorized protected response while MFA state is incomplete",
+        "Captured rate-limit absence (e.g. 100 OTP attempts all 200/incorrect, no 429)",
+        "Identification of the alternate endpoint or flag that skips server-side MFA enforcement"
+      ],
+      "false_positive_checks": [
+        "Confirm the pre-MFA token is not a restricted 'mfa-pending' scope that protected routes reject",
+        "Verify protected endpoints truly accept the session, not just return a generic page",
+        "Check whether a WAF/edge rate-limit catches OTP brute force even if app code does not",
+        "Ensure the 'alternate endpoint' isn't itself behind its own MFA challenge"
+      ],
+      "suggested_validation_task": "Complete only the password step, then issue one benign authenticated request (e.g. GET /api/me) to check whether protected data is returned before OTP is verified.",
+      "reporting_guidance": "Report as MFA bypass / second-factor not enforced server-side; show the exact request that succeeded without a valid second factor.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "AUTH-003",
+      "vuln_class": "authentication-session",
+      "what_to_look_for": "Session identifier not rotated on privilege transition - i.e. the same session ID/cookie survives across the anonymous->authenticated boundary (session fixation) and across role/privilege escalation. Look for login handlers that set user data into an existing session without regenerating the ID, frameworks where session.regenerate()/session_regenerate_id() is missing, and session IDs accepted from a URL parameter.",
+      "source_indicators": [
+        "Login sets req.session.userId without req.session.regenerate() (Express), session_regenerate_id() missing (PHP), or Django login() not called",
+        "Session ID read from query string / URL (?sid=, ?PHPSESSID=) or accepted from a request param",
+        "Cookie set without HttpOnly/Secure/SameSite, enabling a pre-set fixed value to persist",
+        "Privilege/role elevation updates session in place with no ID rotation",
+        "Custom session store keyed on a client-supplied token reused before and after auth"
+      ],
+      "blackbox_indicators": [
+        "Session cookie value is identical before login and after a successful login",
+        "A session ID injected before authentication (attacker-chosen) remains valid and authenticated post-login",
+        "Server honors a session ID supplied via URL parameter",
+        "No new Set-Cookie issued on the login response",
+        "Cookie lacks HttpOnly/Secure/SameSite in Set-Cookie"
+      ],
+      "evidence_required": [
+        "Pre-auth and post-auth cookie capture showing the same session value",
+        "Demonstration that an attacker-fixed session ID becomes authenticated after the victim logs in",
+        "Login response headers showing no session rotation (Set-Cookie absent or unchanged)"
+      ],
+      "false_positive_checks": [
+        "Confirm the unchanged cookie is the actual session ID, not a static CSRF/anti-CSRF or analytics cookie",
+        "Verify the framework isn't rotating server-side session data while keeping a stable opaque cookie name",
+        "Check that SameSite/Secure flags don't already neutralize the fixation vector in the target context",
+        "Rule out load-balancer affinity cookies being mistaken for the session token"
+      ],
+      "suggested_validation_task": "Capture the session cookie as an anonymous user, log in with a test account, and compare the cookie value before vs after to confirm whether the ID rotates.",
+      "reporting_guidance": "Report as session fixation; cite the unchanged session ID across the auth boundary and the path by which an attacker can pre-seed it.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive"
+      ]
+    },
+    {
+      "pattern_id": "AUTH-004",
+      "vuln_class": "authentication-session",
+      "what_to_look_for": "JWTs accepted without proper signature/claims validation: 'alg':'none' accepted, algorithm confusion (RS256 token re-signed as HS256 using the public key as the HMAC secret), decode-without-verify, missing exp/nbf checks, or unvalidated aud/iss. Look for jwt.decode() used instead of jwt.verify(), verify called with algorithms allowing 'none' or both RS256+HS256, and trusting client claims like role/is_admin in the payload.",
+      "source_indicators": [
+        "jwt.decode(token) / jwt.sign without verify, or verify({ algorithms: ['none', ...] })",
+        "verify accepts both ['RS256','HS256'] (alg-confusion exposure) or reads alg from the token header",
+        "No exp/nbf validation, or ignoreExpiration:true",
+        "Secret is weak/hardcoded ('secret', 'changeme') for HS256",
+        "Authorization decisions read role/admin/scope straight from decoded payload with no server-side re-check"
+      ],
+      "blackbox_indicators": [
+        "Token with header {\"alg\":\"none\"} and stripped signature is accepted",
+        "Expired token (exp in the past) still authorizes requests",
+        "Tampering a base64 payload claim (e.g. role=admin) without re-signing is accepted",
+        "Token signed with HS256 using the published RS256 public key is accepted",
+        "Same JWT works against a different audience/tenant than it was issued for"
+      ],
+      "evidence_required": [
+        "A forged/altered token (alg:none, modified claim, or HS256-confusion) that yields an authorized response",
+        "An expired token producing a 200 on a protected endpoint",
+        "Source location showing decode-without-verify or permissive algorithm list"
+      ],
+      "false_positive_checks": [
+        "Confirm the endpoint actually trusts the JWT (not a separate server-side session) before claiming bypass",
+        "Verify the library version doesn't already reject 'none'/alg-confusion by default",
+        "Check that a gateway/edge validates the token even if the app code looks permissive",
+        "Ensure the 'accepted' forged token isn't just returning a generic/unauthenticated page"
+      ],
+      "suggested_validation_task": "Take a valid token for an attacker account, set its exp to the past (or header alg to none with empty signature), and send one request to a protected read endpoint to see if it is still authorized.",
+      "reporting_guidance": "Report as JWT signature/claims validation bypass; name the exact defect (none, alg-confusion, expiry, aud/iss, trusted client claim) and show the forged token that was accepted.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "AUTH-005",
+      "vuln_class": "authentication-session",
+      "what_to_look_for": "OAuth/OIDC callback handlers missing CSRF state validation, with open-redirect-influenced redirect_uri, or weak account linking that trusts an unverified email claim. Look for /callback that reads the code and exchanges it without comparing the returned state to the session-stored value, redirect_uri/return_to taken from a request param and not allow-listed, and account linking/login that keys on email from the IdP without checking email_verified.",
+      "source_indicators": [
+        "Callback handler exchanges 'code' but never compares 'state' to a server-stored nonce",
+        "redirect_uri / return_to / next read from query param and passed through without an allow-list",
+        "Account lookup/link by IdP email without checking email_verified == true",
+        "State generated but stored client-side only (cookie the attacker can set) instead of bound to session",
+        "PKCE code_verifier not used for public clients / not validated"
+      ],
+      "blackbox_indicators": [
+        "Callback accepts a request with a missing or attacker-chosen state and still logs in",
+        "redirect_uri can be pointed at an attacker domain or an open-redirect on the trusted host to leak the code",
+        "Logging in via an IdP with an unverified attacker-set email lands on a pre-existing victim account",
+        "No state parameter present in the initial authorization redirect",
+        "Reusing a previously seen authorization code is accepted"
+      ],
+      "evidence_required": [
+        "Callback request with forged/absent state completing authentication",
+        "Demonstration that redirect_uri/return_to can be redirected off-origin to capture the code/token",
+        "Account-linking flow where an unverified email claim attaches to or logs into a different user"
+      ],
+      "false_positive_checks": [
+        "Confirm state is genuinely unvalidated server-side, not validated in middleware before the handler",
+        "Verify redirect_uri is not actually checked against the IdP's registered allow-list (IdP-side enforcement)",
+        "Check whether email_verified is enforced elsewhere in the linking path",
+        "Rule out PKCE/nonce binding that already prevents the forged-state attack"
+      ],
+      "suggested_validation_task": "Initiate the OAuth login, then replay the callback once with the state parameter removed (or altered) to observe whether authentication still completes.",
+      "reporting_guidance": "Report as OAuth login CSRF / account takeover via callback; specify the missing control (state binding, redirect_uri allow-list, or email_verified) and show the request that bypassed it.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "AUTH-006",
+      "vuln_class": "authentication-session",
+      "what_to_look_for": "Sessions/tokens that remain valid after logout, password change, or role downgrade - i.e. logout only clears the client cookie, and privileges are read from a long-lived token never re-checked. Look for logout handlers that just res.clearCookie() / delete client storage without destroying the server session or revoking the token, stateless JWTs with long TTL and no deny-list, and authorization that trusts roles baked into an old token after the role was revoked.",
+      "source_indicators": [
+        "logout() only clears the cookie / localStorage and never calls session.destroy() or token revocation",
+        "Stateless JWT with long exp and no revocation/deny-list/jti tracking",
+        "Password-change / role-change handlers don't bump a token version, sessions_valid_after, or invalidate existing sessions",
+        "Authorization reads role/permissions from the token payload, not from current DB state",
+        "Refresh tokens not rotated or revoked on logout/password change"
+      ],
+      "blackbox_indicators": [
+        "A captured session cookie/JWT still authorizes protected requests after the user clicks logout",
+        "Old session still works after the account's password is changed",
+        "A token issued while the user was admin still grants admin after the role is revoked (until exp)",
+        "Refresh token continues minting access tokens after logout",
+        "Concurrent sessions are not terminated by 'log out everywhere' / password reset"
+      ],
+      "evidence_required": [
+        "Replay of the pre-logout token producing an authorized 200 after logout",
+        "Replay of a session after a password change still succeeding",
+        "Demonstration that a downgraded user's old token retains elevated access"
+      ],
+      "false_positive_checks": [
+        "Confirm the replayed token is the real session credential, not a cached static asset response",
+        "Verify there is no short TTL + immediate revocation that closes the window in practice",
+        "Check whether a server-side deny-list/token-version invalidates the token despite client-only logout code",
+        "Ensure observed 'access' is genuinely authorized data, not a public/unauthenticated endpoint"
+      ],
+      "suggested_validation_task": "Authenticate a test account, save the session token, log out (or change its password) in another request, then replay the saved token once against GET /api/me to see if it is still authorized.",
+      "reporting_guidance": "Report as session/token not invalidated on logout/credential or role change; cite the exact post-event replay that remained authorized and the missing server-side revocation.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "reviewed_no_issue",
+        "false_positive",
+        "duplicate"
+      ]
+    }
+  ]
+}

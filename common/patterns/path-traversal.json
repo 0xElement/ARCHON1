@@ -1,0 +1,242 @@
+{
+  "vuln_class": "path-traversal",
+  "source": "inline",
+  "patterns": [
+    {
+      "pattern_id": "PATH-001",
+      "vuln_class": "path-traversal",
+      "what_to_look_for": "A user-controlled file/path/name/template/page/doc parameter flows into a filesystem read (fs.readFile/readFileSync, sendFile, PHP fopen/include, Python open(), Java new File()/Paths.get().resolve()) where the joined path is never canonicalized and asserted to stay under a fixed base directory.",
+      "source_indicators": [
+        "fs.readFileSync(path.join(baseDir, req.query.file)) with no realpath containment check",
+        "res.sendFile(req.params[0]) or express.static over a user-joined path",
+        "PHP fopen/file_get_contents on $_GET[...] joined to a docroot",
+        "Python open(os.path.join(BASE, request.args['file'])) without abspath().startswith(BASE)",
+        "Java new File(baseDir, request.getParameter('name')) / Paths.get(base).resolve(userInput)",
+        "Blacklist that strips '../' once (non-recursive) instead of normalize-then-contain"
+      ],
+      "blackbox_indicators": [
+        "Param named file/path/name/template/page/doc/download carrying a filename",
+        "GET /download?file=../../../../etc/passwd returns root:x:0:0 content",
+        "Content-Disposition reflects the attacker-supplied filename",
+        "Differential: changing ../ depth flips response (404 vs 200 vs raw bytes)",
+        "Reading /etc/passwd, /proc/self/environ, web.config, or app source succeeds"
+      ],
+      "evidence_required": [
+        "Source-to-sink trace: user param -> filesystem read",
+        "Absence of canonical-path (realpath/normalize + startsWith base) containment",
+        "Live response returning out-of-root file contents (e.g. /etc/passwd)",
+        "Exact reproduction request + raw response excerpt"
+      ],
+      "false_positive_checks": [
+        "Confirm no normalize-then-startsWith(baseDir) guard runs after the join",
+        "Check input isn't locked to an allowlist/enum or an opaque hashed id",
+        "Rule out a WAF/framework normalizer rejecting traversal upstream",
+        "Verify returned bytes are the real target file, not a templated error echoing the path"
+      ],
+      "suggested_validation_task": "Request the read/download endpoint with file=../../../../etc/passwd alongside a known in-scope file and compare responses for an out-of-root read.",
+      "reporting_guidance": "Report as path traversal/LFI naming the exact parameter, the minimal traversal payload, and the retrieved out-of-root file as proof; rate by sensitivity of files reachable from the base dir.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "PATH-002",
+      "vuln_class": "path-traversal",
+      "what_to_look_for": "A user-controlled value selects an include/import/require/template target where a URL, wrapper, or absolute path can be supplied, yielding remote (RFI) or arbitrary local (LFI-to-source/RCE) inclusion via PHP include/require, dynamic require()/import(), or a template loader reading from a user path.",
+      "source_indicators": [
+        "PHP include/require/include_once($_GET[...]) or fopen() on a user-supplied URL",
+        "php.ini allow_url_include=On / allow_url_fopen reachable on the include sink",
+        "Node require(userInput) or dynamic import(userVar) with attacker-controlled module path",
+        "Template engine render(userPath) loading includes from filesystem or URL (Twig/Jinja/EJS)",
+        "php://filter, data://, expect:// wrappers usable on the inclusion sink"
+      ],
+      "blackbox_indicators": [
+        "page/module/template/lang/view param resolving to .php/.tpl or extensionless includes",
+        "page=//attacker-host or http://attacker triggers an outbound fetch (true RFI)",
+        "page=php://filter/convert.base64-encode/resource=index returns base64 source",
+        "Setting the param to a known local file changes page composition"
+      ],
+      "evidence_required": [
+        "Source/sink trace: user input -> include/require/import",
+        "Proof the sink accepts a wrapper or remote URL (not a fixed-suffix path)",
+        "Live proof: OAST callback to attacker host OR php://filter base64 source disclosure",
+        "Reproduction request + response or out-of-band hit"
+      ],
+      "false_positive_checks": [
+        "Confirm value isn't suffixed/prefixed onto a fixed path that locks it to one directory",
+        "Check allow_url_include is actually On for true RFI vs LFI-only",
+        "Rule out an allowlist/switch of permitted include names",
+        "Distinguish a reflected URL echo from an actual server-side fetch"
+      ],
+      "suggested_validation_task": "Point the include/page param at a benign OAST URL and separately at php://filter/convert.base64-encode/resource=<known-file>, then watch for an outbound callback or base64 source in the response.",
+      "reporting_guidance": "State RFI vs LFI explicitly, name the inclusion sink and wrapper used, and attach the OAST callback or decoded source as proof; escalate to RCE class when a remote/wrapper include executes.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "PATH-003",
+      "vuln_class": "path-traversal",
+      "what_to_look_for": "Archive extraction (zip/tar/jar/docx/ipa) joins each entry name onto the output directory and writes without verifying the resolved path stays inside the extraction root, so an entry named ../../ or an absolute path escapes and overwrites arbitrary files (Zip-Slip).",
+      "source_indicators": [
+        "new File(destDir, zipEntry.getName()) / Paths.get(dir, entry.name) then write, no canonical-path check",
+        "Node fs.writeFile(path.join(out, entry.fileName)) (unzipper/yauzl/adm-zip) with no normalize guard",
+        "Python zipfile.extractall()/tarfile.extractall() on untrusted archive without filter= (pre-3.12)",
+        "Missing entryPath.getCanonicalPath().startsWith(destDir) assertion before write",
+        "Archive entry name used raw as the write destination"
+      ],
+      "blackbox_indicators": [
+        "Feature accepts user-uploaded zip/tar/jar/docx/ipa/backup and extracts it server-side",
+        "Config/cron/webroot artifacts change after uploading a crafted archive",
+        "Import/restore/plugin-install endpoint that ingests an archive",
+        "Behavior differs between an archive with a ../ entry and a benign one"
+      ],
+      "evidence_required": [
+        "Extraction sink joining entry name without a containment check",
+        "Crafted archive containing a ../ (or absolute-path) entry",
+        "Proof a benign marker file was written outside the extraction root",
+        "Reproduction archive + observed out-of-root file or effect"
+      ],
+      "false_positive_checks": [
+        "Confirm no canonical-path / normalize-and-startsWith guard runs before write",
+        "Check the library/version doesn't reject traversal entries by default (e.g. Python 3.12 data filter)",
+        "Verify the extraction dir isn't a throwaway sandbox with no sensitive neighbors",
+        "Rule out entry-name sanitization that strips ../ first"
+      ],
+      "suggested_validation_task": "Upload an archive with one benign entry named ../<unique>.txt targeting a path you can read back, and confirm it lands outside the extraction directory.",
+      "reporting_guidance": "Report as Zip-Slip with the crafted entry name and the out-of-root write location; escalate to RCE or config-overwrite when a sensitive sink path is writable.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "PATH-004",
+      "vuln_class": "path-traversal",
+      "what_to_look_for": "File operations (archive extraction, upload move, static serving, temp/log handling) follow symlinks, so a symlink entry or a planted link redirects reads/writes outside the intended root; or a check-then-use TOCTOU gap lets the path change between validation and the operation.",
+      "source_indicators": [
+        "tar/zip extractor recreates symlink entries without validating the link target (no NoFollow/realpath check)",
+        "fs operations lacking lstat/O_NOFOLLOW; realpath() result not re-validated against base dir",
+        "Static server (express.static/nginx) serving a directory where users can plant symlinks",
+        "Check-then-use gap: access()/exists() then open() on the same user-controlled path",
+        "Java Files.copy/move on an untrusted tree without LinkOption.NOFOLLOW_LINKS"
+      ],
+      "blackbox_indicators": [
+        "Archive import preserves symlinks; an uploaded tar with a symlink entry is then read through",
+        "After uploading a symlink-bearing archive, reading the link path returns out-of-root content",
+        "Download endpoint returns the target of a symlink planted via another feature",
+        "Race-prone endpoints (rename/move/import) intermittently read or write the wrong file"
+      ],
+      "evidence_required": [
+        "Sink that follows links or lacks NOFOLLOW/realpath re-check",
+        "Crafted symlink entry or a planted link",
+        "Proof of out-of-root read or write through the link (benign marker or known file)",
+        "Reproduction steps + observed effect"
+      ],
+      "false_positive_checks": [
+        "Confirm the extractor doesn't skip or deny symlink entries by default",
+        "Check realpath containment isn't enforced after link resolution",
+        "Verify the OS/container layer actually permits symlinks",
+        "Rule out the link target resolving inside the allowed root anyway"
+      ],
+      "suggested_validation_task": "Extract/upload an archive whose entry is a symlink to a benign known in-scope file, then read it back to confirm the link was followed outside the root.",
+      "reporting_guidance": "Report symlink-following (or TOCTOU) with the link entry/target and the resulting out-of-root read or write; note it bypasses ../-only Zip-Slip filters.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    },
+    {
+      "pattern_id": "PATH-005",
+      "vuln_class": "path-traversal",
+      "what_to_look_for": "The server or framework decodes/normalizes a path so encoded or platform-specific traversal slips past a filter: double-encoding (%252e), %2e%2e%2f, overlong UTF-8 (..%c0%af), backslashes, null byte (%00), leading-slash absolute path, or an nginx 'alias' location without a trailing slash (off-by-slash).",
+      "source_indicators": [
+        "Traversal filter runs on raw input but the server URL-decodes after the check (decode-order bug)",
+        "Single-pass replace('../','') or a regex that misses encoded or \\..\\ forms",
+        "nginx: location /static { alias /var/www/files; } with no trailing slash (alias traversal)",
+        "Path concat from request.uri without decode-then-normalize-then-contain",
+        "Null-byte or extension-append truncation in older runtimes (PHP<5.3, legacy Java File)"
+      ],
+      "blackbox_indicators": [
+        "..%2f / ..%252f / %2e%2e%2f / ..%c0%af / ..\\ variants return out-of-root files where plain ../ is blocked",
+        "Off-by-slash: GET /static../app.config (nginx alias) returns a parent-dir file",
+        "Leading /etc/passwd or a \\\\ absolute path returns file contents",
+        "%00 or ;.png appended bypasses an extension allowlist"
+      ],
+      "evidence_required": [
+        "Which encoding/normalization bypass actually succeeds",
+        "Decode/normalize ordering bug or alias misconfig in source/config",
+        "Live out-of-root file retrieved via the encoded payload",
+        "Reproduction request with the exact encoding + response excerpt"
+      ],
+      "false_positive_checks": [
+        "Confirm plain ../ is genuinely blocked so the encoded variant is the real bypass, not noise",
+        "Check the decoded body is genuine out-of-root content, not a 404/error page",
+        "Rule out a CDN/WAF normalizing before origin (test the origin directly if in scope)",
+        "Verify nginx alias vs root semantics before claiming off-by-slash"
+      ],
+      "suggested_validation_task": "Replay the blocked traversal using encoded variants (%2e%2e%2f, %252e, ..%c0%af, ..\\, leading-slash) and the nginx off-by-slash form against a known out-of-root file.",
+      "reporting_guidance": "Report the specific encoding or alias bypass with the exact payload and retrieved file; flag decode-after-check ordering or an nginx alias missing its trailing slash as the root cause.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "duplicate"
+      ]
+    },
+    {
+      "pattern_id": "PATH-006",
+      "vuln_class": "path-traversal",
+      "what_to_look_for": "The write destination of an upload/export/save is built from a user-controlled filename or directory field, letting ../ or an absolute path redirect the write outside the intended upload directory (overwrite webroot/config/keys, chain to RCE).",
+      "source_indicators": [
+        "path.join(uploadDir, req.body.filename) / file.mv(dir + req.files.name) using the raw client filename",
+        "A separate path/folder field used as the write target unchecked",
+        "Python open(os.path.join(UPLOAD, request.form['name']),'wb') with no basename()",
+        "No path.basename()/sanitize and no resolved-path containment on the write side",
+        "Content-Disposition / multipart filename trusted for the storage path"
+      ],
+      "blackbox_indicators": [
+        "Upload accepts a filename/path field; sending name=../../app/x.js makes the file appear served/executed elsewhere",
+        "Overwriting a known static asset via a traversal filename changes app behavior",
+        "Writing into the webroot yields a retrievable/executable file",
+        "Server honors an absolute path supplied in the filename"
+      ],
+      "evidence_required": [
+        "Write sink using a user-controlled filename/dir without basename + containment",
+        "Upload carrying a ../ or absolute-path filename",
+        "Proof the file landed outside the upload dir (benign marker retrieved)",
+        "Reproduction upload + the location of the written file"
+      ],
+      "false_positive_checks": [
+        "Confirm the server doesn't apply basename()/UUID rename before writing",
+        "Check resolved write-path containment isn't enforced",
+        "Verify the target dir is actually sensitive/served, not an isolated quota dir",
+        "Rule out a storage layer (e.g. S3 key) treating ../ as a literal key, not a path escape"
+      ],
+      "suggested_validation_task": "Upload a benign marker file with filename ../<unique>.txt (and separately an absolute path) into a directory you can read back, confirming it wrote outside the upload root.",
+      "reporting_guidance": "Report upload path-traversal write with the traversal filename and the out-of-root write location; escalate to RCE when the destination is an executable webroot path.",
+      "output_states": [
+        "matched_candidate",
+        "needs_blackbox_validation",
+        "needs_source_root_cause",
+        "false_positive",
+        "not_applicable"
+      ]
+    }
+  ]
+}
