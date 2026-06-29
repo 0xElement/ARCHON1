@@ -8699,7 +8699,13 @@ async function dispatchToAgent(dispatch) {
   if (dispatchType === 'parallel-phases') {
     // PARALLEL EXECUTION for security-testing squads (pentest, red-team, cloud-security, etc.)
     try {
-      const { totalCost, allCosts } = await dispatchPentestParallel(dispatch)
+      // Block A (Autonomous OS): the Mission Director wraps the pipeline. Flag-off
+      // (ARCHON_ENABLE_BLACKBOX_MASTER_AGENT) ⇒ run() === dispatchPentestParallel(dispatch),
+      // byte-for-byte identity. Shadow observes+recommends; active loops (cap=ARCHON_AUTONOMY_HOPS).
+      const __missionDirector = require('./src/orchestrator/mission-director')
+      const { totalCost, allCosts } = await __missionDirector.run(dispatch, {
+        dispatchPentestParallel, getCostBudget, _isTaskCancelled, log, logActivity,
+      })
 
       // Cancelled mid-flight → stop here: keep status 'cancelled', no grading/report/'done'.
       if (_isTaskCancelled(taskId)) {
