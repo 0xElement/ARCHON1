@@ -1,0 +1,13 @@
+{
+  "evidence_id": "EV-001",
+  "candidate_id": "CAND-001",
+  "type": "request|response|screenshot|source|tool_output|log|reproduction|impact|root_cause",
+  "asset": "",
+  "feature": "",
+  "description": "",
+  "file_path": "",
+  "content_ref": "",
+  "captured_by": "",
+  "scope_status": "in_scope|out_of_scope|unknown",
+  "quality_level": "L0|L1|L2|L3|L4"
+}

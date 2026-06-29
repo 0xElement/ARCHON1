@@ -337,6 +337,7 @@ ARCHON keeps its planning and architecture in-repo so the project tracks like a 
 | **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)** | Authorize → dispatch → triage → report, field by field, with troubleshooting. |
 | **[SETUP-LOCAL.md](./SETUP-LOCAL.md)** | Portable roots, `.env.local`, and the local-dev data layer. |
 | **[BACKLOG.md](./BACKLOG.md)** | Open bugs and improvements: symptom → root cause (file) → fix. |
+| **[docs/autonomous-agent-os-spec/](./docs/autonomous-agent-os-spec/)** | The Autonomous Agent OS blueprint — vision, architecture, schemas, prompts — plus the fit analysis ([FIT_AND_BUILD_PLAN](./docs/autonomous-agent-os-spec/FIT_AND_BUILD_PLAN.md)) and the wired, audited [ULTRAPLAN](./docs/autonomous-agent-os-spec/ULTRAPLAN.md) for evolving ARCHON into it behind feature flags. |
 
 ---
 

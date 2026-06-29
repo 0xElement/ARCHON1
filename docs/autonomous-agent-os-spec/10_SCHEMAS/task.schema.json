@@ -1,0 +1,18 @@
+{
+  "task_id": "task-001",
+  "engagement_id": "eng-001",
+  "mode": "blackbox|static|whitebox|hybrid",
+  "type": "blackbox.authz|static.pattern_review|whitebox.freehand_review|audit.validation",
+  "assigned_agent": "",
+  "objective": "",
+  "scope": {},
+  "allowed_actions": [],
+  "test_intensity": "passive|standard|active|restricted",
+  "knowledge_graph_refs": [],
+  "inputs": [],
+  "constraints": [],
+  "evidence_required": [],
+  "priority": "low|medium|high|critical",
+  "status": "proposed|queued|running|evidence_submitted|audited|judged|reported|blocked|rejected",
+  "stop_condition": "confirmed|rejected|blocked|duplicate|needs_more_evidence"
+}

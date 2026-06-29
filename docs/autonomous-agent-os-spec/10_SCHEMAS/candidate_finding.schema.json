@@ -1,0 +1,27 @@
+{
+  "candidate_id": "CAND-001",
+  "title": "",
+  "category": "",
+  "source": "blackbox|pattern|freehand|hybrid",
+  "feature": "",
+  "affected_assets": [],
+  "entry_points": [],
+  "source_files": [
+    {
+      "path": "",
+      "function": "",
+      "line_start": 0,
+      "line_end": 0
+    }
+  ],
+  "evidence_refs": [],
+  "hypothesis_refs": [],
+  "impact": "",
+  "reproduction_steps": [],
+  "root_cause": "",
+  "remediation": "",
+  "confidence": "low|medium|high",
+  "requires_blackbox_validation": true,
+  "auditor_status": "pending|validated|rejected|needs_more_evidence",
+  "judge_status": "pending|accepted|rejected"
+}

@@ -1,0 +1,60 @@
+# Recommended Repository Structure
+
+```text
+ARCHON/
+  docs/
+    autonomous-agent-os-spec/
+  src/
+    orchestrator/
+      mission-director.js
+      queue-manager.js
+      task-lifecycle.js
+      agent-router.js
+      scope-governor.js
+      safety-governor.js
+    intel/
+      knowledge-graph.js
+      coverage-engine.js
+      correlation-engine.js
+      attack-chain-engine.js
+    agents/
+      recon/
+      blackbox/
+      source/
+      validation/
+      reporting/
+    source-review/
+      phase1-feature-mapper.js
+      phase2-pattern-router.js
+      phase3-freehand-reviewer.js
+      templates/
+    patterns/
+      access-control/
+      authentication/
+      injection/
+      xss/
+      ssrf/
+      file-handling/
+      api/
+      graphql/
+      business-logic/
+      cloud/
+    evidence/
+      evidence-store.js
+      evidence-validator.js
+    reporting/
+      report-builder.js
+      finding-writer.js
+      remediation-writer.js
+  prompts/
+    mission-director.md
+    blackbox-master.md
+    phase1-feature-map.md
+    phase2-pattern-review.md
+    phase3-freehand-review.md
+  schemas/
+    task.schema.json
+    evidence.schema.json
+    candidate.schema.json
+    finding.schema.json
+```
