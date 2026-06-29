@@ -1,0 +1,33 @@
+# ARCHON — Autonomous Agent OS (spec DOCKER_BUILD_AND_RUNTIME_GUIDE).
+# Two services share one image + one data volume (var/intel). All Autonomous-OS
+# flags default OFF; opt a block into shadow by setting ARCHON_ENABLE_AUTONOMOUS_OS=1
+# + ARCHON_ENABLE_<BLOCK>=1 (and ARCHON_DRIVE_<BLOCK>=1 for active) in the env below.
+services:
+  daemon:
+    build: .
+    image: archon:latest
+    command: ["node", "event-bus.js"]
+    environment:
+      KURU_AGENTS_ROOT: /app
+      KURU_INTEL_ROOT: /app/var/intel
+      # KURU_CLAUDE_BIN: /root/.local/bin/claude    # provide the Claude CLI at runtime
+      ARCHON_ENABLE_AUTONOMOUS_OS: "false"          # master kill-switch (off = current product)
+    volumes:
+      - ./var/intel:/app/var/intel                  # the single data layer (spec's 4 mounts collapse here)
+      # - ${HOME}/.claude:/root/.claude:ro           # subscription OAuth (no API key)
+    restart: unless-stopped
+
+  dashboard:
+    image: archon:latest
+    depends_on:
+      - daemon
+    command: ["node", "scripts/dashboard.js"]
+    environment:
+      KURU_AGENTS_ROOT: /app
+      KURU_INTEL_ROOT: /app/var/intel
+      PORT: "4000"
+    ports:
+      - "127.0.0.1:4000:4000"                        # operator portal, localhost-only
+    volumes:
+      - ./var/intel:/app/var/intel
+    restart: unless-stopped

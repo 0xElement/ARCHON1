@@ -1,0 +1,73 @@
+name: ci
+
+# Autonomous Agent OS CI (ULTRAPLAN §5.0 F-Verification). Three jobs:
+#   A — npm test with every flag OFF (the merge floor / current product).
+#   B — flag-OFF byte-stability: the suite again with flags explicitly off + a check
+#       that no shadow/kg artifacts are produced (reports stay byte-stable).
+#   C — flag-ON shadow: every ARCHON_ENABLE_* set (no DRIVE), suite green, AND the
+#       grep-gate (no ajv/js-yaml, no direct ARCHON_ENABLE_* reads outside paths.js).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  a-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci || npm install
+      - name: npm test (all flags off — merge floor)
+        env:
+          KURU_AGENTS_ROOT: ${{ github.workspace }}
+          KURU_INTEL_ROOT: ${{ github.workspace }}/var/intel
+        run: npm test
+
+  b-flag-off-byte-stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci || npm install
+      - name: suite with flags explicitly OFF
+        env:
+          KURU_AGENTS_ROOT: ${{ github.workspace }}
+          KURU_INTEL_ROOT: ${{ github.workspace }}/var/intel
+          ARCHON_ENABLE_AUTONOMOUS_OS: "false"
+        run: npm test
+      - name: no shadow/kg artifacts when off
+        run: |
+          test ! -d var/intel/shadow && test ! -d var/intel/kg && echo "byte-stable: no autonomous-os artifacts"
+
+  c-flag-on-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci || npm install
+      - name: suite with all blocks in SHADOW (no DRIVE)
+        env:
+          KURU_AGENTS_ROOT: ${{ github.workspace }}
+          KURU_INTEL_ROOT: ${{ github.workspace }}/var/intel
+          ARCHON_ENABLE_AUTONOMOUS_OS: "1"
+          ARCHON_ENABLE_STRICT_SCHEMA: "1"
+          ARCHON_ENABLE_KNOWLEDGE_GRAPH: "1"
+          ARCHON_ENABLE_THREE_PHASE_SOURCE_REVIEW: "1"
+          ARCHON_ENABLE_PATTERN_REVIEW: "1"
+          ARCHON_ENABLE_CORRELATION_ENGINE: "1"
+          ARCHON_ENABLE_SOURCE_GUIDED_PENTEST: "1"
+          ARCHON_ENABLE_BLACKBOX_MASTER_AGENT: "1"
+          ARCHON_ENABLE_CONTINUOUS_REPORT: "1"
+          ARCHON_ENABLE_STRICT_JUDGE_GATE: "1"
+        run: npm test
+      - name: grep-gate (no ajv / js-yaml in net-new modules; no direct ARCHON_ENABLE_* reads)
+        run: |
+          ! grep -rEn "require\(['\"](ajv|js-yaml)['\"]\)" src common/schemas tools 2>/dev/null || (echo "forbidden dependency" && exit 1)
+          ! grep -rEn "process\.env\.ARCHON_(ENABLE|DRIVE)_" src common 2>/dev/null || (echo "direct flag read outside paths.js" && exit 1)
+          echo "grep-gate clean"
