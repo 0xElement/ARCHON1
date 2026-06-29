@@ -26,6 +26,15 @@ const NODE_TYPES = {
   METRIC: 'metric',         // Financial metric (PE, ROE, etc.)
   CATALYST: 'catalyst',     // Growth catalyst or risk trigger
   SECTOR: 'sector',         // Industry sector
+  // Autonomous Agent OS Knowledge Graph (Block B) — additive, inert unless the KG is used.
+  FEATURE: 'feature',           // a mapped source feature
+  SOURCE_FILE: 'source_file',   // a reviewed source file
+  CANDIDATE: 'candidate',       // a candidate finding (pre-confirmation)
+  CONFIRMED: 'confirmed',       // a CONFIRMED finding
+  CHAIN: 'chain',               // an attack chain
+  CORRELATION: 'correlation',   // a typed correlation record
+  HYPOTHESIS: 'hypothesis',     // a planner/source hypothesis
+  ENDPOINT: 'endpoint',         // a discovered endpoint
 }
 
 /**
@@ -40,6 +49,13 @@ const EDGE_TYPES = {
   BACKEND_OF: 'backend_of',       // asset → asset
   REDIRECTS_TO: 'redirects_to',   // asset → asset
   AUTHENTICATED_BY: 'authenticated_by', // asset → credential
+  // Autonomous Agent OS Knowledge Graph (Block B) — additive.
+  EVIDENCE_SUPPORTS_CANDIDATE: 'evidence_supports_candidate',
+  CANDIDATE_CORRELATES_WITH_SOURCE: 'candidate_correlates_with_source',
+  CANDIDATE_CORRELATES_WITH_BLACKBOX: 'candidate_correlates_with_blackbox',
+  FINDING_PART_OF_ATTACK_CHAIN: 'finding_part_of_attack_chain',
+  HYPOTHESIS_TARGETS_FEATURE: 'hypothesis_targets_feature',
+  FEATURE_HANDLED_BY_SOURCE_FILE: 'feature_handled_by_source_file',
 }
 
 class AttackGraph {
