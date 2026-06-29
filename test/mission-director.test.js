@@ -5,7 +5,18 @@
 'use strict'
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const os = require('node:os')
 
+// Shadow/active mode writes director-recommendations.jsonl to INTEL_ROOT/shadow.
+// Redirect INTEL_ROOT to a throwaway dir so the suite NEVER pollutes the real
+// var/intel — that keeps the CI flag-off byte-stability check (no shadow/kg
+// artifacts) honest. Set before the first require that loads paths.
+process.env.KURU_INTEL_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'archon-md-'))
+for (const m of ['../paths', '../src/shadow/shadow-sink', '../src/orchestrator/mission-director']) {
+  try { delete require.cache[require.resolve(m)] } catch {}
+}
 const md = require('../src/orchestrator/mission-director')
 
 function withEnv(env, fn) {
