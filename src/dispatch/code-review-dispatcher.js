@@ -56,7 +56,12 @@ const CLASS = {
   'account-takeover': { agent: 'siphon',      module: null, catalog: null },
 }
 const MAPPER_POOL = ['marshal', 'siphon', 'cipher', 'quill', 'beacon', 'breaker']
-const PHASES = ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2', 'verify', 'report']
+// Phase 3 freehand source review (Autonomous OS Block D). flag-off ⇒ 'freehand'
+// absent from PHASES ⇒ byte-identical 8-phase flow. Computed at module load via
+// paths.flagMode (no direct env read — grep-gate). See ULTRAPLAN.md §5.3.
+const FH_MODE = typeof __roots.flagMode === 'function' ? __roots.flagMode('THREE_PHASE_SOURCE_REVIEW') : 'off'
+const PHASES = ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2',
+  ...(FH_MODE !== 'off' ? ['freehand'] : []), 'verify', 'report']
 const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
 
 // The fixed Phase-1 feature-map contract (enforced in the prompt; full template on disk).
@@ -270,6 +275,31 @@ Report template + CVSS: ${METH}/templates/phase2_feature_report_template.md , ${
 Write the report to: ${outFile} (mkdir -p first). Then reply one line: rows reverse-checked, findings (by severity), residual gaps.`
 }
 
+// Phase 3 — freehand senior-pentester review (Autonomous OS Block D). Open-ended
+// reasoning to surface novel / business-logic vulns that the pattern pass misses.
+// fhDir = phase2/freehand (active, AUDITOR-globbed) or a non-globbed sibling (shadow).
+function freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir) {
+  const mapFile = `${outDir}/phase1-maps/features/${feature.slug}.md`
+  const outFile = `${fhDir}/${feature.slug}.md`
+  return `You are ${agent.toUpperCase()}, Phase-3 FREEHAND security reviewer on the code-review squad — a senior pentester, NOT a pattern matcher.
+
+Source tree: ${sourceDir}
+Phase-1 feature map (read fully): ${mapFile}
+Methodology (follow it): ${METH}/prompts/phase3_freehand_review_v1.md
+Candidate template (one block per finding): ${METH}/templates/phase3_freehand_candidate_template.md
+
+Pattern review (Phase 2) already covered the KNOWN classes. Your job is the UNKNOWN: logic
+flaws, trust-boundary mistakes, state/race issues, abuse of intended functionality, multi-step
+chains, and anything that "feels wrong" when you read the code as an attacker. Ask the
+methodology's senior-pentester questions of THIS feature; reason about how a real attacker would
+abuse it, not which signature matches.
+
+Each candidate MUST follow the template, including the **Required black-box proof** field — a
+source-only novel candidate is a HYPOTHESIS (NEEDS-LIVE), never CONFIRMED. Cite file:line for every claim.
+
+Write your candidates to: ${outFile} (mkdir -p first). Reply one line: novel candidates found, top risk, what needs live proof.`
+}
+
 function auditorPrompt(taskId, outDir, features, classes) {
   return `You are AUDITOR, the independent verifier. Reverse-check the Phase-2 code-review findings — never trust the assessor's claim.
 
@@ -405,6 +435,25 @@ async function runCodeReview(dispatch, deps) {
     trackCosts(results)
   }
 
+  // Phase 3 — freehand senior-pentester review (Autonomous OS Block D, flag-gated).
+  // ACTIVE ⇒ candidates land under phase2/freehand/ so the EXISTING phase2/**/*.md
+  // glob routes them through AUDITOR Phase 2v + the evidence contract (NOVEL/source-
+  // only ⇒ NEEDS-LIVE, never CONFIRMED) with zero verifier/reporter edits. SHADOW ⇒
+  // a non-globbed sibling that AUDITOR/SCRIBE never read (report byte-stable).
+  if (FH_MODE !== 'off' && runPhase('freehand')) {
+    const fhDir = FH_MODE === 'active' ? `${outDir}/phase2/freehand` : `${outDir}/phase3-freehand-shadow`
+    fs.mkdirSync(fhDir, { recursive: true })
+    const maxFreehand = meta.maxFreehand || maxPhase2
+    const fhFeatures = p2Features.slice(0, maxFreehand)
+    updateProgress(78, `Phase 3 (freehand): ${fhFeatures.length} features [${FH_MODE}]`)
+    logActivity('CURATOR', `🔎 Phase 3 freehand review (${FH_MODE}): ${fhFeatures.length} features`, { taskId, squad, projectId: projectId || '' })
+    const results = await runWaves(fhFeatures, WAVE, async (feature, idx) => {
+      const agent = MAPPER_POOL[idx % MAPPER_POOL.length]
+      return spawnAgent(agent, taskId, freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir), `task-${taskId}-fh-${feature.slug}`, null)
+    })
+    trackCosts(results)
+  }
+
   // Phase 2v — AUDITOR verify (+ PROBER runtime if deployUrl)
   if (runPhase('verify')) {
     if (deployUrl) {
@@ -485,4 +534,6 @@ module.exports = {
   CLASS,
   MAPPER_POOL,
   PHASES,
+  freehandPrompt,
+  FH_MODE,
 }
