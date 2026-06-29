@@ -1,0 +1,37 @@
+{
+  "$comment": "Autonomous Agent OS — pattern catalog descriptor (Block E). 'markdown' source = ARCHON's richer catalog stays the source of truth (ids extracted by id_regex); 'inline' source = full 9-field patterns. validate.js subset only.",
+  "title": "pattern_catalog",
+  "type": "object",
+  "required": ["vuln_class", "source"],
+  "properties": {
+    "vuln_class": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "enum": ["markdown", "inline"] },
+    "markdown": { "type": "string" },
+    "id_regex": { "type": "string" },
+    "expected_count": { "type": "integer" },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pattern_id", "vuln_class", "what_to_look_for"],
+        "properties": {
+          "pattern_id": { "type": "string", "minLength": 1 },
+          "vuln_class": { "type": "string", "minLength": 1 },
+          "what_to_look_for": { "type": "string", "minLength": 1 },
+          "source_indicators": { "type": "array", "items": { "type": "string" } },
+          "blackbox_indicators": { "type": "array", "items": { "type": "string" } },
+          "evidence_required": { "type": "array", "items": { "type": "string" } },
+          "false_positive_checks": { "type": "array", "items": { "type": "string" } },
+          "suggested_validation_task": { "type": "string" },
+          "reporting_guidance": { "type": "string" },
+          "output_states": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["matched_candidate", "needs_blackbox_validation", "needs_source_root_cause", "reviewed_no_issue", "not_applicable", "false_positive", "duplicate"] }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

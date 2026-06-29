@@ -1,0 +1,55 @@
+{
+  "vuln_class": "sqli",
+  "source": "inline",
+  "$comment": "Full 9-field catalog for SQL injection (previously a null code-review catalog).",
+  "patterns": [
+    {
+      "pattern_id": "SQLI-001",
+      "vuln_class": "sqli",
+      "what_to_look_for": "User input concatenated or interpolated directly into a SQL string instead of a parameterized query / bound parameter.",
+      "source_indicators": ["string concatenation building a query", "template literal / sprintf into SQL", "raw query API with request data", "ORDER BY / column name from request"],
+      "blackbox_indicators": ["error-based DB messages", "boolean/time-based response differences on quote/operator injection"],
+      "evidence_required": ["the exact sink line", "the request param feeding it", "a benign payload that changes the query's logic or provokes a DB error"],
+      "false_positive_checks": ["input is an integer cast before use", "an allow-list constrains the value", "the driver auto-parameterizes the call"],
+      "suggested_validation_task": "Send a benign boolean/time probe to the entry point and confirm a query-logic change (no destructive payload).",
+      "reporting_guidance": "Cite the sink file:line and the tainted param path; report severity by data sensitivity + auth context.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "false_positive"]
+    },
+    {
+      "pattern_id": "SQLI-002",
+      "vuln_class": "sqli",
+      "what_to_look_for": "ORDER BY / column / table identifier taken from request input (parameterization does not cover identifiers).",
+      "source_indicators": ["sort/order param mapped into the query identifier position", "dynamic table/column name from input"],
+      "blackbox_indicators": ["changing the sort param changes column ordering unexpectedly or errors"],
+      "evidence_required": ["the identifier sink", "absence of an allow-list mapping"],
+      "false_positive_checks": ["value mapped through a fixed allow-list before use"],
+      "suggested_validation_task": "Probe the sort/column param against a known allow-list bypass; confirm identifier injection.",
+      "reporting_guidance": "Note that parameterized queries do NOT protect identifier positions — allow-list is the fix.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "reviewed_no_issue"]
+    },
+    {
+      "pattern_id": "SQLI-003",
+      "vuln_class": "sqli",
+      "what_to_look_for": "Second-order injection: stored input later concatenated into a query in a different code path.",
+      "source_indicators": ["value persisted then read into a raw query elsewhere", "no encoding on the read path"],
+      "blackbox_indicators": ["payload stored in one feature manifests in another's query"],
+      "evidence_required": ["the store path", "the vulnerable read/query path", "the data flow between them"],
+      "false_positive_checks": ["the read path parameterizes", "value normalized on store"],
+      "suggested_validation_task": "Store a benign marker via the write path, observe it reach the query sink via the read path.",
+      "reporting_guidance": "Trace the full store→read data flow; second-order issues are easily missed by per-endpoint review.",
+      "output_states": ["matched_candidate", "needs_source_root_cause", "needs_blackbox_validation"]
+    },
+    {
+      "pattern_id": "SQLI-004",
+      "vuln_class": "sqli",
+      "what_to_look_for": "ORM 'raw' / 'where(string)' / fragment escape hatches fed request data.",
+      "source_indicators": ["ORM .raw()/.whereRaw()/literal() with interpolated input", "fragment/Arel.sql with request data"],
+      "blackbox_indicators": ["injection observable only on the raw-escape-hatch endpoints"],
+      "evidence_required": ["the escape-hatch call", "the tainted argument"],
+      "false_positive_checks": ["bound parameters passed alongside the raw fragment", "constant-only fragment"],
+      "suggested_validation_task": "Probe only the endpoints using the ORM raw escape hatch.",
+      "reporting_guidance": "Call out that the ORM is safe by default but the raw escape hatch opts out.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "false_positive"]
+    }
+  ]
+}

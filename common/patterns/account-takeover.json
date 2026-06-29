@@ -1,0 +1,43 @@
+{
+  "vuln_class": "account-takeover",
+  "source": "inline",
+  "$comment": "Full 9-field catalog for Account Takeover (previously a null code-review catalog).",
+  "patterns": [
+    {
+      "pattern_id": "ATO-001",
+      "vuln_class": "account-takeover",
+      "what_to_look_for": "Password-reset token weak, guessable, long-lived, not single-use, or not bound to the account.",
+      "source_indicators": ["reset token from a weak RNG / sequential / timestamp", "token not invalidated on use", "token not tied to the user id"],
+      "blackbox_indicators": ["reset link reusable", "token for one account works for another"],
+      "evidence_required": ["the token generation + validation code", "the missing single-use / binding check"],
+      "false_positive_checks": ["cryptographically-random single-use token bound to the account with short TTL"],
+      "suggested_validation_task": "Request a reset, confirm token entropy/single-use/binding properties against the account.",
+      "reporting_guidance": "Critical; ATO via reset is a full compromise — describe the exact missing property.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "reviewed_no_issue"]
+    },
+    {
+      "pattern_id": "ATO-002",
+      "vuln_class": "account-takeover",
+      "what_to_look_for": "Email/phone change or 2FA disable without re-authentication or confirmation to the OLD contact.",
+      "source_indicators": ["sensitive identity change path with no current-password / step-up check", "no notification to the prior contact"],
+      "blackbox_indicators": ["identity changed using only a session, no re-auth"],
+      "evidence_required": ["the change endpoint", "absence of step-up / confirmation"],
+      "false_positive_checks": ["re-auth or confirmation-to-old-contact enforced"],
+      "suggested_validation_task": "Attempt an email/2FA change with only a valid session; confirm no step-up required.",
+      "reporting_guidance": "Chains with session theft into full ATO; note the missing step-up.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "needs_source_root_cause"]
+    },
+    {
+      "pattern_id": "ATO-003",
+      "vuln_class": "account-takeover",
+      "what_to_look_for": "Auth response oracle / inconsistent error enabling user enumeration + credential stuffing at scale.",
+      "source_indicators": ["distinct messages/timing for unknown-user vs bad-password", "no rate limit / lockout"],
+      "blackbox_indicators": ["enumerable valid usernames", "no throttling on auth"],
+      "evidence_required": ["the differentiating response", "absence of rate limiting"],
+      "false_positive_checks": ["uniform response + global rate limiting present"],
+      "suggested_validation_task": "Probe login with known vs unknown users; measure response/timing differences and throttling.",
+      "reporting_guidance": "Medium-High depending on lockout; pairs with credential stuffing.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "false_positive"]
+    }
+  ]
+}

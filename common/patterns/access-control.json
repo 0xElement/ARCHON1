@@ -1,0 +1,8 @@
+{
+  "vuln_class": "access-control",
+  "source": "markdown",
+  "markdown": "squads/code-review/methodology/catalogs/access_control_40_pattern_catalog.md",
+  "id_regex": "\\|\\s*(Pattern\\s+[A-Z0-9]+)\\s*\\|",
+  "expected_count": 40,
+  "$comment": "Thin descriptor — the 40-pattern markdown catalog is the source of truth ('use these exact IDs, do not rename'). The engine extracts the canonical pattern IDs by regex; it never replaces the markdown."
+}

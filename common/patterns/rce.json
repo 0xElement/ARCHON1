@@ -1,0 +1,43 @@
+{
+  "vuln_class": "rce",
+  "source": "inline",
+  "$comment": "Full 9-field catalog for Remote Code / Command Injection (previously a null code-review catalog).",
+  "patterns": [
+    {
+      "pattern_id": "RCE-001",
+      "vuln_class": "rce",
+      "what_to_look_for": "Request input flows into a shell/exec/system call or a command string (OS command injection).",
+      "source_indicators": ["exec/spawn/system/popen with request data", "shell:true with interpolated input", "backticks / command string built from input"],
+      "blackbox_indicators": ["time-delay (sleep) or out-of-band signal on shell metacharacters"],
+      "evidence_required": ["the exec sink", "the tainted argument", "a benign time/OOB probe — never a destructive payload"],
+      "false_positive_checks": ["argv array form with no shell", "input strictly allow-listed", "value is a fixed enum"],
+      "suggested_validation_task": "Send a benign time-delay or out-of-band probe (gated by active-poc) and confirm command execution.",
+      "reporting_guidance": "Critical; any live impact proof fires ONLY behind the active-poc 3-gate (benign nonce/echo).",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "false_positive"]
+    },
+    {
+      "pattern_id": "RCE-002",
+      "vuln_class": "rce",
+      "what_to_look_for": "Server-side template injection — request data rendered as a template expression.",
+      "source_indicators": ["user input passed as the template string (not the context)", "eval-like template engine call with input"],
+      "blackbox_indicators": ["template arithmetic (e.g. {{7*7}}) evaluates in the response"],
+      "evidence_required": ["the render sink", "the tainted template arg"],
+      "false_positive_checks": ["input is the data context, not the template", "auto-escaped output context"],
+      "suggested_validation_task": "Submit a benign template-arithmetic probe and confirm evaluation.",
+      "reporting_guidance": "SSTI frequently escalates to RCE; note the engine and sandbox status.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "needs_source_root_cause"]
+    },
+    {
+      "pattern_id": "RCE-003",
+      "vuln_class": "rce",
+      "what_to_look_for": "Unsafe deserialization of attacker-controlled data into language objects (pickle, Marshal, native deserialize, gadget chains).",
+      "source_indicators": ["deserialize/load of request body or cookie", "native object deserialization of untrusted input"],
+      "blackbox_indicators": ["crafted serialized object triggers an observable side effect"],
+      "evidence_required": ["the deserialize sink", "the untrusted source", "a available gadget path (best-effort)"],
+      "false_positive_checks": ["safe format (JSON to a plain map)", "signed/encrypted payload verified before deserialize"],
+      "suggested_validation_task": "Confirm the untrusted source reaches the deserializer; live gadget proof only under active-poc.",
+      "reporting_guidance": "Critical; describe the gadget surface and any signing that is or isn't enforced.",
+      "output_states": ["matched_candidate", "needs_source_root_cause", "needs_blackbox_validation"]
+    }
+  ]
+}

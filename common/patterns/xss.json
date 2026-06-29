@@ -1,0 +1,8 @@
+{
+  "vuln_class": "xss",
+  "source": "markdown",
+  "markdown": "squads/code-review/methodology/catalogs/xss_50_pattern_catalog.md",
+  "id_regex": "(XSS-[0-9]+)",
+  "expected_count": 50,
+  "$comment": "Thin descriptor — the 50-pattern XSS markdown catalog is the source of truth. The engine extracts the XSS-NN ids by regex."
+}

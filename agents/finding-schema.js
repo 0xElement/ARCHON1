@@ -39,6 +39,17 @@ function normalizeSeverity(s) {
   return lc.charAt(0).toUpperCase() + lc.slice(1)
 }
 
+// Pattern-review output states (Autonomous Agent OS Block E). Additive — does not
+// affect normalizeFinding/validateFinding. Unknown/missing → 'matched_candidate'.
+const PATTERN_OUTPUT_STATES = Object.freeze([
+  'matched_candidate', 'needs_blackbox_validation', 'needs_source_root_cause',
+  'reviewed_no_issue', 'not_applicable', 'false_positive', 'duplicate',
+])
+function normalizePatternState(s) {
+  const v = String(s == null ? '' : s).toLowerCase().trim().replace(/[\s-]+/g, '_')
+  return PATTERN_OUTPUT_STATES.includes(v) ? v : 'matched_candidate'
+}
+
 /**
  * Normalize a finding record to canonical schema. Non-destructive: returns
  * a fresh object; original input is not mutated. Object-shaped fields like
@@ -186,9 +197,11 @@ function wrapFinding(finding, { source = 'UNKNOWN', taskId = '' } = {}) {
 module.exports = {
   normalizeFinding,
   normalizeSeverity,
+  normalizePatternState,
   readFindingsFile,
   validateFinding,
   wrapFinding,
   CANONICAL_SEVERITIES,
+  PATTERN_OUTPUT_STATES,
   REQUIRED_FIELDS,
 }

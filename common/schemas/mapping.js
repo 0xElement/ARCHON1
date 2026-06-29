@@ -90,6 +90,26 @@ function toCandidateFinding(finding) {
   }
 }
 
+// ── pattern output state (Block E) ↔ auditor status. NEVER writes validation_status. ──
+const _STATE2AUDITOR = {
+  matched_candidate: 'pending',
+  needs_blackbox_validation: 'needs_more_evidence',
+  needs_source_root_cause: 'needs_more_evidence',
+  reviewed_no_issue: 'rejected',
+  not_applicable: 'rejected',
+  false_positive: 'rejected',
+  duplicate: 'pending',
+}
+function mapPatternStateToAuditor(state) { return _STATE2AUDITOR[String(state || '')] || 'pending' }
+function mapDispositionToPatternState(disposition) {
+  const d = String(disposition || '').toUpperCase()
+  if (d === 'CONFIRMED') return 'matched_candidate'
+  if (d === 'NEEDS-LIVE') return 'needs_blackbox_validation'
+  if (d === 'KILLED' || d === 'DISPROVEN') return 'false_positive'
+  if (d === 'SUSPECTED') return 'needs_source_root_cause'
+  return 'matched_candidate'
+}
+
 // task.mode from dispatch facts (mirrors engagement-mode classifier vocabulary).
 function taskModeFrom({ squad, hasSource, hasLive }) {
   const sq = String(squad || '').replace(/-squad$/, '')
@@ -107,4 +127,6 @@ module.exports = {
   synthesizeEvidenceId, synthesizeCorrelationId,
   toCandidateFinding,
   taskModeFrom,
+  mapPatternStateToAuditor,
+  mapDispositionToPatternState,
 }

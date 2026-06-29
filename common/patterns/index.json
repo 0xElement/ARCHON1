@@ -1,0 +1,12 @@
+{
+  "$comment": "Autonomous Agent OS pattern-catalog registry (Block E). Maps a vuln class to its descriptor file under common/patterns/. ARCHON's richer markdown catalogs remain the source of truth for access-control (40) and xss (50); the 4 previously-null code-review classes (sqli/ssrf/rce/account-takeover) ship as full inline catalogs. The other ~14 spec categories are added incrementally behind the same flag.",
+  "version": "1",
+  "classes": {
+    "access-control": "access-control.json",
+    "xss": "xss.json",
+    "sqli": "sqli.json",
+    "ssrf": "ssrf.json",
+    "rce": "rce.json",
+    "account-takeover": "account-takeover.json"
+  }
+}

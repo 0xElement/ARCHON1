@@ -60,6 +60,10 @@ const MAPPER_POOL = ['marshal', 'siphon', 'cipher', 'quill', 'beacon', 'breaker'
 // absent from PHASES ⇒ byte-identical 8-phase flow. Computed at module load via
 // paths.flagMode (no direct env read — grep-gate). See ULTRAPLAN.md §5.3.
 const FH_MODE = typeof __roots.flagMode === 'function' ? __roots.flagMode('THREE_PHASE_SOURCE_REVIEW') : 'off'
+// Pattern-catalog engine (Autonomous OS Block E). flag-off ⇒ phase2Prompt's catalog
+// line is byte-identical to today; active ⇒ the engine resolves a catalog for the
+// previously-null classes (sqli/ssrf/rce/account-takeover). See ULTRAPLAN.md §5.4.
+const PAT_MODE = typeof __roots.flagMode === 'function' ? __roots.flagMode('PATTERN_REVIEW') : 'off'
 const PHASES = ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2',
   ...(FH_MODE !== 'off' ? ['freehand'] : []), 'verify', 'report']
 const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
@@ -256,7 +260,12 @@ function phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir) {
   const mapFile = `${outDir}/phase1-maps/features/${feature.slug}.md`
   const outFile = `${outDir}/phase2/${cls}/${feature.slug}.md`
   const moduleLine = c.module ? `Vuln module (follow it exactly): ${METH}/prompts/${c.module}` : `(no dedicated module for ${cls} — use your ${cls}-review skill)`
-  const catalogLine = c.catalog ? `Pattern catalog (apply EVERY pattern): ${METH}/catalogs/${c.catalog}` : `(no catalog — apply your skill's full pattern set for ${cls})`
+  let catalogLine = c.catalog ? `Pattern catalog (apply EVERY pattern): ${METH}/catalogs/${c.catalog}` : `(no catalog — apply your skill's full pattern set for ${cls})`
+  if (PAT_MODE !== 'off' && !c.catalog) {
+    // Engine fills the previously-null classes; flag-off path above is untouched (byte-stable).
+    const p = (() => { try { return require('../intel/pattern-catalog').catalogPathFor(cls) } catch { return null } })()
+    if (p) catalogLine = `Pattern catalog (apply EVERY pattern): ${p}`
+  }
   return `You are ${agent.toUpperCase()}, Phase-2 ${cls} assessor on the code-review squad.
 
 Source tree: ${sourceDir}

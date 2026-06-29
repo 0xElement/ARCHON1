@@ -39,6 +39,15 @@ const CLASS_TO_WSTG = {
   'info-disclosure': 'WSTG-ERRH', 'information-disclosure': 'WSTG-ERRH', secrets: 'WSTG-CONF',
 }
 
+// vuln_class → pattern-catalog descriptor file (Autonomous Agent OS Block E).
+// PURE const — no I/O here (the actual catalog read lives in src/intel/pattern-catalog.js);
+// this only declares which class maps to which catalog so coverage stays a deps-free module.
+const CATALOG_BY_CLASS = {
+  'access-control': 'access-control.json', idor: 'access-control.json',
+  xss: 'xss.json', sqli: 'sqli.json', ssrf: 'ssrf.json', rce: 'rce.json',
+  'account-takeover': 'account-takeover.json',
+}
+
 // agent name → WSTG area(s) it exercises.
 const AGENT_TO_WSTG = {}
 for (const w of WSTG) for (const a of w.owner) { if (a !== 'all') (AGENT_TO_WSTG[a] = AGENT_TO_WSTG[a] || []).push(w.id) }
@@ -75,4 +84,4 @@ function checklistText() {
   return WSTG.map(w => `- ${w.id} ${w.name} → ${w.owner.join('/')}`).join('\n')
 }
 
-module.exports = { WSTG, ownerFor, wstgForFinding, computeCoverage, checklistText, CLASS_TO_WSTG }
+module.exports = { WSTG, ownerFor, wstgForFinding, computeCoverage, checklistText, CLASS_TO_WSTG, CATALOG_BY_CLASS }

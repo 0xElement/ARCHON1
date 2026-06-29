@@ -64,6 +64,8 @@ function correlate(findings) {
 function buildCorrelationMap(taskId, iters, deps = {}) {
   const intelRoot = deps.intelRoot
   const log = deps.log || (() => {})
+  // Block E: under the pattern flag, merge by stable pattern_id when present; off = deriveVulnClass verbatim (byte-stable).
+  const PAT_MODE = (() => { try { return require('../../paths').flagMode('PATTERN_REVIEW') } catch { return 'off' } })()
   const all = []
   for (const it of iters || []) {
     const vf = `${intelRoot}/VALIDATED-FINDINGS-${it.taskId}.jsonl`
@@ -73,7 +75,7 @@ function buildCorrelationMap(taskId, iters, deps = {}) {
       try {
         const f = JSON.parse(ln)
         all.push({ id: f.id || '', title: f.title || '', severity: f.severity || '', kind: it.kind || 'blackbox',
-          cls: deriveVulnClass(f.title), locus: findingLocus(f), param: findingParam(f) })
+          cls: (PAT_MODE !== 'off' && f.pattern_id) ? String(f.pattern_id) : deriveVulnClass(f.title), locus: findingLocus(f), param: findingParam(f) })
       } catch {}
     }
   }

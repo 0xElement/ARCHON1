@@ -1,0 +1,43 @@
+{
+  "vuln_class": "ssrf",
+  "source": "inline",
+  "$comment": "Full 9-field catalog for Server-Side Request Forgery (previously a null code-review catalog).",
+  "patterns": [
+    {
+      "pattern_id": "SSRF-001",
+      "vuln_class": "ssrf",
+      "what_to_look_for": "Server fetches a URL/host taken from request input without an allow-list (webhooks, link preview, import-by-URL, avatar fetch).",
+      "source_indicators": ["http client called with a request-derived URL", "url/host/endpoint param flowing into fetch/get", "no allow-list or scheme/host validation"],
+      "blackbox_indicators": ["the server makes a request to an attacker-controlled collaborator host", "internal-only host returns different timing/content"],
+      "evidence_required": ["the fetch sink", "the tainted URL param", "an out-of-band callback to a controlled host (benign)"],
+      "false_positive_checks": ["host validated against an allow-list", "only a fixed base URL with a constrained path suffix"],
+      "suggested_validation_task": "Point the URL param at a controlled out-of-band collaborator and confirm the server-side request (benign, no internal target).",
+      "reporting_guidance": "Distinguish full SSRF from blind SSRF; note metadata-endpoint and internal-service reach.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "reviewed_no_issue"]
+    },
+    {
+      "pattern_id": "SSRF-002",
+      "vuln_class": "ssrf",
+      "what_to_look_for": "Allow-list bypass via redirect-following, DNS rebinding, or parser confusion (userinfo@, octal/hex IPs).",
+      "source_indicators": ["URL validated once but client follows redirects", "host parsed differently than the fetcher uses it"],
+      "blackbox_indicators": ["a redirect to an internal host is followed", "rebinding reaches an internal IP"],
+      "evidence_required": ["the validation gap (parse vs fetch mismatch or redirect-follow)", "an out-of-band confirmation"],
+      "false_positive_checks": ["redirects disabled", "host re-validated after each hop"],
+      "suggested_validation_task": "Serve a redirect from an allowed host to a controlled host; confirm it is followed.",
+      "reporting_guidance": "Emphasize that one-time validation is insufficient when redirects are followed.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "needs_source_root_cause"]
+    },
+    {
+      "pattern_id": "SSRF-003",
+      "vuln_class": "ssrf",
+      "what_to_look_for": "Cloud metadata / internal-service reach (169.254.169.254, link-local, .internal) not blocked.",
+      "source_indicators": ["no deny-list for link-local/metadata ranges", "raw IP allowed"],
+      "blackbox_indicators": ["metadata endpoint content returned or timing-distinguishable"],
+      "evidence_required": ["the reachable internal target", "absence of a deny-list"],
+      "false_positive_checks": ["egress firewall blocks the range regardless of app code"],
+      "suggested_validation_task": "Attempt a benign reach to a known internal/link-local target (only with explicit scope + active-poc gate).",
+      "reporting_guidance": "Critical when cloud metadata credentials are reachable; gate any live proof behind active-poc.",
+      "output_states": ["matched_candidate", "needs_blackbox_validation", "not_applicable"]
+    }
+  ]
+}
