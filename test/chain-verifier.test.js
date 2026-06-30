@@ -28,6 +28,24 @@ function test(name, fn) {
 
 console.log('chain-verifier tests:')
 
+// ── OFFLINE fixture server (no internet dependency) ──────────────────────────
+// The verifier runs curl via spawnSync (blocking). A same-process HTTP server
+// would deadlock (its event loop can't accept while spawnSync blocks), so the
+// fixture runs in a SEPARATE process. It mimics example.com's observable signals
+// (HTTP 200, a Content-Type header, an "Example Domain" body) so the chain checks
+// pass with no network. BASE replaces the old https://example.com calls.
+const { spawn, spawnSync } = require('child_process')
+// Make curl bypass any inherited proxy for the local fixture (some CI/Docker envs
+// set http_proxy, which would otherwise route 127.0.0.1 through a dead proxy).
+process.env.NO_PROXY = process.env.no_proxy = '127.0.0.1,localhost'
+const FIXTURE_PORT = 38291
+const FIXTURE_HTML = '<!doctype html><html><head><title>Example Domain</title></head><body><h1>Example Domain</h1><p>This domain is for use in illustrative examples.</p></body></html>'
+const __fixtureChild = spawn(process.execPath, ['-e',
+  `require('http').createServer((q,s)=>{s.writeHead(200,{'Content-Type':'text/html; charset=UTF-8'});s.end(${JSON.stringify(FIXTURE_HTML)})}).listen(${FIXTURE_PORT},'127.0.0.1')`],
+  { stdio: 'ignore' })
+const BASE = `http://127.0.0.1:${FIXTURE_PORT}`
+;(() => { for (let i = 0; i < 100; i++) { const r = spawnSync('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', BASE], { encoding: 'utf8', timeout: 1500 }); if (r.stdout === '200') return; spawnSync('sleep', ['0.05']) } })()
+
 test('exports CHAIN_OUTPUT_SCHEMA', () => {
   assert.ok(cv.CHAIN_OUTPUT_SCHEMA)
   assert.strictEqual(cv.CHAIN_OUTPUT_SCHEMA.type, 'object')
@@ -70,7 +88,7 @@ test('empty chain fails', () => {
 test('dry-run skips execution', () => {
   const r = cv.verifyChain({
     id: 't', name: 't', severity: 'Info',
-    steps: [{ step_id: 1, description: 'x', curl: 'curl https://example.com', expected_result: 'anything' }],
+    steps: [{ step_id: 1, description: 'x', curl: 'curl ' + BASE, expected_result: 'anything' }],
   }, { dryRun: true })
   assert.strictEqual(r.stepResults[0].status, 'dry-run')
 })
@@ -81,7 +99,7 @@ test('rejects command not in allow-list (e.g. wget)', () => {
   // it has download side-effects we don't want unattended.
   const r = cv.verifyChain({
     id: 't', name: 't', severity: 'Low',
-    steps: [{ step_id: 1, description: 'x', curl: 'wget https://example.com', expected_result: 'x' }],
+    steps: [{ step_id: 1, description: 'x', curl: 'wget ' + BASE, expected_result: 'x' }],
   })
   assert.strictEqual(r.verified, false)
   assert.match(r.stepResults[0].reason, /first token must be one of curl\/openssl\/dig\/nslookup\/host/)
@@ -132,7 +150,7 @@ test('allows quoted strings containing special chars', () => {
   // since we run without shell and the quote contents are a single argv token
   const r = cv.verifyChain({
     id: 't', name: 't', severity: 'Low',
-    steps: [{ step_id: 1, description: 'quoted', curl: 'curl -d "name=a;b|c" -s https://example.com', expected_result: '' }],
+    steps: [{ step_id: 1, description: 'quoted', curl: 'curl -d "name=a;b|c" -s ' + BASE, expected_result: '' }],
   }, { dryRun: true })
   assert.strictEqual(r.stepResults[0].status, 'dry-run')
 })
@@ -151,8 +169,8 @@ test('verifies a real chain end-to-end (example.com)', () => {
   const chain = {
     id: 'live-1', name: 'example reachability', severity: 'Info',
     steps: [
-      { step_id: 1, description: 'root', curl: 'curl -s https://example.com', expected_result: '/Example Domain/i' },
-      { step_id: 2, description: 'head', curl: 'curl -sI https://example.com', expected_result: 'HTTP 200' },
+      { step_id: 1, description: 'root', curl: 'curl -s ' + BASE, expected_result: '/Example Domain/i' },
+      { step_id: 2, description: 'head', curl: 'curl -sI ' + BASE, expected_result: 'HTTP 200' },
     ],
   }
   const r = cv.verifyChain(chain)
@@ -165,7 +183,7 @@ test('fails chain when a step does not match', () => {
   const chain = {
     id: 'x', name: 'x', severity: 'Low',
     steps: [
-      { step_id: 1, description: 'fetch', curl: 'curl -s https://example.com', expected_result: 'ThisStringWillNotAppear' },
+      { step_id: 1, description: 'fetch', curl: 'curl -s ' + BASE, expected_result: 'ThisStringWillNotAppear' },
     ],
   }
   const r = cv.verifyChain(chain)
@@ -180,7 +198,7 @@ test('HTTP 200 match works WITHOUT -i flag (fix for Apr-21 Run-1 0/3)', () => {
   // `-w "\nHTTP/STATUS/%{http_code}\n"` so status is always available.
   const chain = {
     id: 'status-fix', name: 's', severity: 'Low',
-    steps: [{ step_id: 1, description: 'plain', curl: 'curl https://example.com', expected_result: 'HTTP 200' }],
+    steps: [{ step_id: 1, description: 'plain', curl: 'curl ' + BASE, expected_result: 'HTTP 200' }],
   }
   const r = cv.verifyChain(chain)
   assert.strictEqual(r.verified, true, `expected verified, got ${r.reason}. response=${r.stepResults[0]?.response?.slice(0,80)}`)
@@ -189,7 +207,7 @@ test('HTTP 200 match works WITHOUT -i flag (fix for Apr-21 Run-1 0/3)', () => {
 test('substring match is case-insensitive (chains shouldnt fail on header casing)', () => {
   const chain = {
     id: 'case', name: 'c', severity: 'Low',
-    steps: [{ step_id: 1, description: 'fetch', curl: 'curl -i https://example.com', expected_result: 'CONTENT-TYPE' }],
+    steps: [{ step_id: 1, description: 'fetch', curl: 'curl -i ' + BASE, expected_result: 'CONTENT-TYPE' }],
   }
   const r = cv.verifyChain(chain)
   assert.strictEqual(r.verified, true, 'case-insensitive substring match should pass')
@@ -200,7 +218,7 @@ test('regex match respects explicit case sensitivity', () => {
   // Real page has "Example Domain" (capital). Without i-flag, should NOT match.
   const chain = {
     id: 're-case', name: 'r', severity: 'Low',
-    steps: [{ step_id: 1, description: 'fetch', curl: 'curl -s https://example.com', expected_result: '/example domain/' }],
+    steps: [{ step_id: 1, description: 'fetch', curl: 'curl -s ' + BASE, expected_result: '/example domain/' }],
   }
   const r = cv.verifyChain(chain)
   assert.strictEqual(r.verified, false, 'case-sensitive regex should NOT match "Example Domain"')
@@ -209,7 +227,7 @@ test('regex match respects explicit case sensitivity', () => {
 test('match_failure diagnostic captures response preview', () => {
   const chain = {
     id: 'diag', name: 'd', severity: 'Low',
-    steps: [{ step_id: 1, description: 'fetch', curl: 'curl -s https://example.com', expected_result: 'DefinitelyNotInResponse' }],
+    steps: [{ step_id: 1, description: 'fetch', curl: 'curl -s ' + BASE, expected_result: 'DefinitelyNotInResponse' }],
   }
   const r = cv.verifyChain(chain)
   assert.strictEqual(r.verified, false)
@@ -222,7 +240,7 @@ test('stderr captured in stepRecord when present', () => {
   // `-v` writes to stderr; we shouldn't choke on that.
   const chain = {
     id: 'stderr', name: 's', severity: 'Low',
-    steps: [{ step_id: 1, description: 'verbose', curl: 'curl -v https://example.com', expected_result: 'HTTP 200' }],
+    steps: [{ step_id: 1, description: 'verbose', curl: 'curl -v ' + BASE, expected_result: 'HTTP 200' }],
   }
   const r = cv.verifyChain(chain)
   assert.strictEqual(r.verified, true)
@@ -253,5 +271,6 @@ test('verifyChains filters falsy finding_ids', () => {
   assert.deepStrictEqual(result.results[0].finding_ids, ['F-1', 'F-3'])
 })
 
+try { __fixtureChild.kill() } catch {}
 console.log(`\n${passed} passed, ${failures} failed`)
 process.exit(failures > 0 ? 1 : 0)
