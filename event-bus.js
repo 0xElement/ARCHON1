@@ -8622,33 +8622,41 @@ async function enrichFindingsForTask(taskId) {
   const vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
   if (!fs.existsSync(vf)) { log(`🔎 enrich-findings: no validated findings for ${taskId}`); return }
   const outFile = `${agentPaths.INTEL_ROOT}/findings-detail-${taskId}.json`
-  const prompt = `You are AUDITOR acting as a senior pentest report writer. Enrich each validated finding into a
-COMPLETE, professional finding the operator can act on. Re-read the live evidence if needed; do not invent.
+  const prompt = `You are WRITER, the finding report-writer. Read your identity: cat ${agentPaths.soulPath('writer')}
+Turn each validated finding into a COMPLETE, professional finding — every field filled, none left
+blank/"n/a". Re-read the live evidence if needed; NEVER invent (no fabricated 200s/responses).
 
-Read ${vf} — one JSON finding per line (fields: id, title, severity, url, reproduction_method, reproduction_result, details, impact, cwe).
+Read ${vf} — one JSON finding per line (id, title, severity, url, method, reproduction_method, reproduction_result, details, impact, remediation, validation, raw_request, cvss_vector, cwe).
+
+FOLLOW THE GOLD-STANDARD EXAMPLES exactly (cat them first):
+  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples/example-idor.md
+  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples/example-rce.md
+  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples/example-xss.md
+Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
 
 For EVERY finding id, produce ALL of:
-- description: 2-4 sentences — what the vulnerability is and why it's a flaw on THIS target. No filler.
-- cvss_score: the CVSS 3.1 base score (number 0.0-10.0) you assess for THIS finding.
-- cvss_vector: the full CVSS:3.1 vector you scored it with (e.g. "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H").
-- cwe: the most specific CWE id (e.g. "CWE-89").
-- test_steps: a NUMBERED, end-to-end reproduction a non-author can follow — concrete UI/HTTP steps:
-    "Step 1: <go to / send>", "Step 2: <do this>", "Step 3: <observe this>" … include the exact request/payload.
-- validation: what proves it worked (the response/output an operator should see — the proof).
-- impact: the concrete security impact of THIS finding (what an attacker gains).
-- remediation: a specific, actionable fix for THIS finding.
-- raw_request: the raw HTTP request proving it — "METHOD /path HTTP/1.1", Host, headers, Cookie/Authorization if used, a blank line, then body.
+- description: 2-4 sentences — what the issue IS on THIS target — ENDING with a bold "Root cause: …" line.
+- cwe: the most specific CWE id (e.g. "CWE-89", "CWE-639", "CWE-79").
+- cvss_vector: the FULL CVSS:3.1 base vector. Score the REAL demonstrated impact — a proven RCE is
+  C:H/I:H/A:H (NOT C:N/I:N/A:N); an IDOR read is C:H/I:N. Set every metric to match what was proven.
+- cvss_score: the numeric base score (0.0-10.0) that vector computes to.
+- test_steps: NUMBERED control-vs-bug PoC a non-author can follow — show the CONTROL (the secure/
+  expected case) THEN the BUG (the broken case); the contrast is the proof. Include exact requests/payloads.
+- raw_request: the exact raw HTTP request proving it — "METHOD /path HTTP/1.1", Host, headers,
+  Cookie/Authorization if used, blank line, body.
+- validation: the HTTP RESPONSE / output that proves it worked (status line + key evidence bytes).
+- impact: the concrete attacker gain (data read/written, scope of users/tenants, takeover).
+- remediation: the specific correct fix at the right layer.
 - poc: the exact curl/command that reproduces it.
-
-Score CVSS conservatively but realistically for the demonstrated impact (proven RCE/root → Critical/9.x).
+A field you cannot fill from evidence → write "UNPROVEN — <what's missing>", never filler.
 
 Write STRICT JSON to ${outFile}:
-{ "<finding id>": { "description":"", "cvss_score":0.0, "cvss_vector":"", "cwe":"", "test_steps":["Step 1: …","Step 2: …"], "validation":"", "impact":"", "remediation":"", "raw_request":"", "poc":"" }, ... }
-Write ONLY that file. Then reply one line: enriched N findings.`
-  log(`🔎 Enrich-findings: ${taskId} (AUDITOR)`)
-  logActivity('NEXUS', `🔎 Enriching findings detail`, { type: 'enrich-findings', taskId, details: 'AUDITOR writing description/impact/remediation/raw-request/poc per finding.' })
-  try { await spawnAgent('auditor', taskId, prompt, `task-${taskId}-enrich`, null); log(`✅ Enrich-findings done: ${taskId}`) }
-  catch (e) { log(`❌ enrich-findings ${taskId} failed: ${e.message}`) }
+{ "<finding id>": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "test_steps":["Step 1 (control): …","Step 2 (bug): …"], "raw_request":"", "validation":"", "impact":"", "remediation":"", "poc":"" }, ... }
+Write ONLY that file. Then reply one line: wrote N findings.`
+  log(`✍️ WRITER: ${taskId} — writing complete findings (template-driven)`)
+  logActivity('NEXUS', `✍️ WRITER: writing complete findings`, { type: 'enrich-findings', taskId, details: 'WRITER fills title/CWE/CVSS/description/control-vs-bug PoC/HTTP req+resp/impact/remediation per finding, following the example templates.' })
+  try { await spawnAgent('writer', taskId, prompt, `task-${taskId}-writer`, null); log(`✅ WRITER done: ${taskId}`) }
+  catch (e) { log(`❌ WRITER ${taskId} failed: ${e.message}`) }
 }
 
 function _recoveryBlocked(tid, queue, taskObj) {

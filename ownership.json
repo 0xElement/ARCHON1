@@ -28,6 +28,8 @@
     "auditor": "_universal",
     "scribe": "_universal",
     "arbiter": "_universal",
-    "command": "_universal"
+    "command": "_universal",
+    "triager": "_universal",
+    "writer": "_universal"
   }
 }
