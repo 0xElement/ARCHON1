@@ -68,15 +68,16 @@ of a single prompt:
 | | |
 |---|---|
 | 🎯 **Black-box** | Recon → stack fingerprint → ranked attack plan → parallel specialist waves (fire → observe → mutate → re-fire), WAF-adaptive. |
-| 🔬 **White-box** | Source-only review: inventories → app blueprint → feature mapping → per-class assessment → AUDITOR reverse-check. |
+| 🔬 **White-box** | Source-only review: inventories → app blueprint → feature mapping → per-class assessment → AUDITOR reverse-check. Review classes are **auto-selected from the discovered surface** (all 23 catalog classes available), not a fixed default. |
 | 🔗 **Merged engagement** | Run both; findings aggregate and a single report **de-duplicates** the same vuln seen from source and over the wire. |
 | 🧪 **Independent verification** | AUDITOR re-probes findings; the **evidence contract** demotes anything without replayable proof; chain-verifier replays multi-step exploits via curl. |
+| 🏷️ **Honest confirmation status** | Each finding is tagged `RUNTIME_CONFIRMED` (proven live) vs `SOURCE_CONFIRMED` (proven in code only) vs `NEEDS_LIVE_VALIDATION` / `DISPROVEN` — a source read is never dressed up as a live proof. |
 | ⚖️ **Judge consensus** | 4-stage judge + 3-judge ARBITER consensus on High/Critical before publication. |
 | ⏸️ **Triage-gated reporting** | Confirm / reject / set CVSS (built-in 3.1 calculator) / annotate, *then* generate the report. |
 | 🔁 **Iterations** | Add focused passes to an engagement ("now test access control") without disturbing prior results. |
 | 🛡️ **Safety perimeter** | Fail-closed scope gate; impact-proving exploits fire only behind a 3-gate opt-in (off by default). |
 | 🖥️ **Local portal** | Zero-build single-page dashboard (binds `127.0.0.1`) for dispatch, live progress, triage, and reports. |
-| 📚 **A–Z coverage** | Reports transport/config hygiene (TLS, HSTS, headers, cookie flags) alongside exploitable bugs, mapped to OWASP WSTG. |
+| 📚 **Scored A–Z coverage** | Per-area coverage **scores** ("Authentication: 90%") across OWASP WSTG, reporting transport/config hygiene (TLS, HSTS, headers, cookie flags) alongside exploitable bugs — untested areas stated honestly. |
 
 ---
 
@@ -171,12 +172,17 @@ subscription via OAuth — *not* a metered API key).
 git clone https://github.com/ghostshift-content/ARCHON.git archon && cd archon
 npm install
 
-cp .env.local.example .env.local      # then edit the three KURU_* paths
 npm run setup                         # seed the local data layer (var/intel)
-
 npm run dashboard                     # portal → http://localhost:4000
 npm start                             # (separate shell) the agent daemon
 ```
+
+Roots resolve to the **repo directory** automatically, so a fresh clone needs **no `.env.local`**.
+Override only if your layout differs: `cp .env.local.example .env.local` and edit the `KURU_*` paths.
+Point `KURU_CLAUDE_BIN` at your `claude` binary if it isn't on `PATH`.
+
+**Docker:** `docker compose up` runs the daemon + portal with roots resolved inside the container —
+no host paths baked in. See `Dockerfile` / `docker-compose.yml`.
 
 Open **http://localhost:4000 → New dispatch**, enter a target URL (and optionally a source
 directory), and dispatch. Watch progress under **Tasks**, triage under the run's **Findings** tab,
@@ -215,13 +221,15 @@ troubleshooting — is in **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)**.
 
 ## Configuration
 
-`paths.js` reads three portable roots, auto-loaded from `.env.local` (gitignored) at require time so
-the daemon, dashboard, and every spawned subprocess pick them up:
+`paths.js` is the single root resolver. It auto-loads `.env.local` (gitignored) at require time so the
+daemon, dashboard, and every spawned subprocess pick the roots up — but all three are **optional**:
+roots resolve to the repo dir (and `var/intel` under it) when unset, falling back to the `/root/agents`
+server layout only when it actually exists. So a clone, a container, and a server all work unconfigured.
 
 | Var | Meaning |
 |---|---|
-| `KURU_AGENTS_ROOT` | Code root (where `event-bus.js`, `paths.js`, `squads/` live) — usually the repo dir. |
-| `KURU_INTEL_ROOT`  | Data-layer root (runtime state) — keep it under the gitignored `var/`. `npm run setup` seeds it. |
+| `KURU_AGENTS_ROOT` / `ARCHON_ROOT` | Code root (where `event-bus.js`, `paths.js`, `squads/` live). Default: the repo dir. |
+| `KURU_INTEL_ROOT`  | Data-layer root (runtime state). Default: `var/intel` under the code root. `npm run setup` seeds it. |
 | `KURU_CLAUDE_BIN`  | Path to the `claude` CLI the agents spawn (default: resolve `claude` on `PATH`). |
 
 Optional, **off by default**:
@@ -234,6 +242,7 @@ Optional, **off by default**:
 | `ARCHON_SCOPE_OVERRIDE=1` | Allow a dispatch with **no** scope config (Phase 0.0 is fail-*closed* — missing scope blocks the run). |
 | `ARCHON_ACTIVE_POC=enabled` | Allow the gated Exploit-Prover to fire a **benign** impact-proving payload (e.g. RCE → `echo <nonce>`). Also requires `engagement_mode: active-poc` **and** a permission token in the dispatch. **Fires nothing by default.** Authorized engagements only. |
 | `ARCHON_AUTONOMY=enabled` + `ARCHON_AUTONOMY_HOPS=<n>` | Surface the re-planning loop's follow-ups as an autonomy signal (hop-capped). The re-plan intel is always produced; this only flags auto-chase. |
+| `ARCHON_ENABLE_AUTONOMOUS_OS=1` (+ `ARCHON_ENABLE_<block>` / `ARCHON_DRIVE_<block>`) | Master switch for the experimental **Autonomous Agent OS** layer (Mission Director, knowledge graph, pattern catalogs, decision logging). Tri-state per block: enable ⇒ *shadow* (observe + write to `var/intel/shadow`, drives nothing); add `DRIVE` ⇒ *active*. **Off by default; flag-off is byte-identical to the deterministic pipeline.** See [ROADMAP.md](./ROADMAP.md). |
 | `ADAPTER=cli` | Use the CLI runner adapter (rollback floor) instead of the default SDK adapter. |
 
 `var/` (all runtime state, findings, reports) is gitignored. See **[SETUP-LOCAL.md](./SETUP-LOCAL.md)**
@@ -259,19 +268,26 @@ ARCHON/
 │   ├── squad-policy/         # per-squad scope/severity policy
 │   └── *.js                  # finding schema, judge, handoff, browser verify, scope gates …
 ├── src/
-│   ├── dispatch/             # code-review-dispatcher (white-box engine)
+│   ├── dispatch/             # code-review-dispatcher (white-box engine, surface-driven class selection)
 │   ├── pipeline/             # env-fingerprint, attack-planner, chain-verifier, evidence-contract …
 │   ├── routing/              # model router + target classifier
-│   ├── core/                 # squad framework + WSTG coverage map
+│   ├── core/                 # squad framework + WSTG coverage map (graded per-area scoring)
+│   ├── intel/                # knowledge-graph + pattern-catalog engine
+│   ├── orchestrator/         # Mission Director + task/queue/scope/safety governors (flag-gated autonomy)
+│   ├── source-review/ · evidence/ · reporting/ · shadow/   # Autonomous-OS canonical paths (see ROADMAP)
 │   ├── safety/               # scope/goal scrubbers, quarantine, offensive-vaccine
 │   ├── learning/             # feedback loop, memory ranker
 │   ├── grading/ · ops/ · integrations/ · rendering/ · utils/
 ├── common/                   # static KB: taxonomy (CWE/OWASP/WSTG), payloads, remediation, reporting
+│   ├── patterns/             # 23 vuln-class pattern catalogs + index.json (PATTERN_AUTHORING_GUIDE.md)
+│   └── schemas/              # dependency-free validators (no ajv / js-yaml)
+├── schemas/ · prompts/       # finding/task JSON schemas + flat agent prompts (Autonomous OS)
 ├── scripts/                  # dashboard.js (portal) + setup/metrics/handoff scripts
 ├── ui/                       # zero-build SPA (index.html, app.js, cvss.js)
 ├── tools/                    # emit-finding + maintenance utilities
-├── test/                     # unit + e2e suites (node:test; run-all.js gate)
-├── docs/                     # ARCHON-SYSTEM-MAP.md · ORCHESTRATION.md
+├── test/                     # unit + e2e suites (node:test; run-all.js gate; offline)
+├── docs/                     # ARCHON-SYSTEM-MAP.md · ORCHESTRATION.md · autonomous-agent-os-spec/
+├── Dockerfile · docker-compose.yml   # containerized run (roots resolve from the repo — no host paths)
 └── var/                      # gitignored runtime data layer (= KURU_INTEL_ROOT)
 ```
 
@@ -304,8 +320,9 @@ npm run test:ui  # browser e2e (Playwright) — drives the portal + dispatch/tri
 npm run test:bun # the few bun-only suites (node:test async semantics)
 ```
 
-`npm test` is the product gate (currently green: **108 passed, 0 failed**). A handful of deeper
-framework-internal suites are kept in `test/` but skipped by the gate (they target a full
+`npm test` is the product gate (currently green: **124 passed, 0 failed**) and runs **fully offline**
+— no test touches the public internet (HTTP-dependent suites start a local fixture server). A handful
+of deeper framework-internal suites are kept in `test/` but skipped by the gate (they target a full
 multi-squad / PM2 deployment); run them individually with `node test/<file>`. New `src/pipeline/*`
 modules ship with a matching `test/*.test.js`.
 
@@ -318,10 +335,14 @@ modules ship with a matching `test/*.test.js`.
 - **Read [`CLAUDE.md`](./CLAUDE.md) first** — it documents the architecture, the pipeline phases,
   and the critical invariants (atomic writes, the evidence contract, never hardcode model strings,
   always resolve persona paths through `paths.js`).
-- Keep changes test-backed: `npm test` must stay green. Stage specific files (never `git add -A`);
-  runtime drift under `var/` is gitignored — don't commit it.
-- Contributions welcome via PR. Keep new code in the style of the surrounding module; pipeline
-  modules are pure + tested.
+- Keep changes test-backed: `npm test` must stay green (offline). Stage specific files (never
+  `git add -A`); runtime drift under `var/` is gitignored — don't commit it.
+- Contributions welcome via PR — see **[CONTRIBUTING.md](./CONTRIBUTING.md)** for the rules that block
+  a PR. Extending ARCHON? Start from **[PLUGIN_SDK.md](./PLUGIN_SDK.md)**,
+  **[AGENT_AUTHORING_GUIDE.md](./AGENT_AUTHORING_GUIDE.md)**, or
+  **[PATTERN_AUTHORING_GUIDE.md](./PATTERN_AUTHORING_GUIDE.md)**. The principles every change is gated
+  by are in **[ARCHON_MANIFESTO.md](./ARCHON_MANIFESTO.md)**.
+- Release a clean artifact with `npm run pack:release` (see [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md)).
 
 ---
 
