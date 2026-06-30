@@ -50,6 +50,37 @@ function normalizePatternState(s) {
   return PATTERN_OUTPUT_STATES.includes(v) ? v : 'matched_candidate'
 }
 
+// Confirmation status (handoff item 3, 2026-06-30). DERIVED from validation_status
+// + whether replayable RUNTIME evidence exists — a strict, presentational refinement
+// that NEVER replaces validation_status (the Issue-2 CONFIRMED gate keys on that and
+// must stay untouched). The point: a source-only review can confirm a bug by READING
+// code, but that is SOURCE_CONFIRMED, not the same as proving it against a running
+// app (RUNTIME_CONFIRMED). Don't over-claim a source hypothesis as fully confirmed.
+const CONFIRMATION_STATES = Object.freeze([
+  'RUNTIME_CONFIRMED',     // CONFIRMED + replayable live proof (exploit-prover nonce / captured response)
+  'SOURCE_CONFIRMED',      // CONFIRMED by code reading, but never fired at a live target
+  'NEEDS_LIVE_VALIDATION', // a hypothesis (NEEDS-LIVE / SUSPECTED / unknown) — needs a live target to settle
+  'DISPROVEN',             // checked and refuted (KILLED)
+])
+// True when the finding carries evidence that it was actually exercised against a
+// running target (not merely a suggested repro recipe).
+function hasRuntimeProof(f) {
+  if (f.runtime_confirmed === true) return true
+  if (f.proof_of_execution && f.proof_of_execution.confirmed === true) return true
+  // a captured live RESPONSE is runtime evidence; a reproduction_request alone is
+  // just the recipe (the curl to run), so it does NOT by itself prove runtime.
+  if (typeof f.reproduction_response === 'string' && f.reproduction_response.trim()) return true
+  const ev = f.evidence
+  if (ev && typeof ev === 'object' && (ev.runtime || ev.live || ev.http_response || ev.response)) return true
+  return false
+}
+function deriveConfirmationStatus(f) {
+  const vs = String(f.validation_status == null ? '' : f.validation_status).toUpperCase().trim()
+  if (vs === 'KILLED' || vs === 'DISPROVEN') return 'DISPROVEN'
+  if (vs === 'CONFIRMED') return hasRuntimeProof(f) ? 'RUNTIME_CONFIRMED' : 'SOURCE_CONFIRMED'
+  return 'NEEDS_LIVE_VALIDATION' // NEEDS-LIVE / SUSPECTED / unknown / anything else
+}
+
 /**
  * Normalize a finding record to canonical schema. Non-destructive: returns
  * a fresh object; original input is not mutated. Object-shaped fields like
@@ -100,6 +131,12 @@ function normalizeFinding(finding) {
   }
   if (f.payloads_tried != null && !Array.isArray(f.payloads_tried)) {
     f.payloads_tried = [String(f.payloads_tried)]
+  }
+
+  // confirmation_status: keep an explicit valid value (e.g. the exploit-prover
+  // stamping RUNTIME_CONFIRMED), otherwise derive it from validation_status + proof.
+  if (!CONFIRMATION_STATES.includes(f.confirmation_status)) {
+    f.confirmation_status = deriveConfirmationStatus(f)
   }
 
   return f
@@ -198,10 +235,13 @@ module.exports = {
   normalizeFinding,
   normalizeSeverity,
   normalizePatternState,
+  deriveConfirmationStatus,
+  hasRuntimeProof,
   readFindingsFile,
   validateFinding,
   wrapFinding,
   CANONICAL_SEVERITIES,
   PATTERN_OUTPUT_STATES,
+  CONFIRMATION_STATES,
   REQUIRED_FIELDS,
 }

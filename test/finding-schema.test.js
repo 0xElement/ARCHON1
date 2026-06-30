@@ -222,3 +222,43 @@ test('validateFinding: handles missing optional fields gracefully', () => {
   })
   assert.strictEqual(result.valid, true)
 })
+
+// ── handoff item 3: confirmation_status (derived, never replaces validation_status) ──
+test('confirmation_status: CONFIRMED + runtime proof → RUNTIME_CONFIRMED', () => {
+  const fs = require('../agents/finding-schema')
+  const f = fs.normalizeFinding({
+    id: 'F-1', title: 'X', severity: 'High', validation_status: 'CONFIRMED',
+    proof_of_execution: { type: 'nonce', confirmed: true },
+  })
+  assert.strictEqual(f.confirmation_status, 'RUNTIME_CONFIRMED')
+  assert.strictEqual(f.validation_status, 'CONFIRMED') // gate field untouched
+})
+
+test('confirmation_status: CONFIRMED from source only → SOURCE_CONFIRMED (not over-claimed)', () => {
+  const fs = require('../agents/finding-schema')
+  const f = fs.normalizeFinding({ id: 'F-2', title: 'X', severity: 'High', validation_status: 'CONFIRMED' })
+  assert.strictEqual(f.confirmation_status, 'SOURCE_CONFIRMED')
+  // a reproduction RECIPE (request) alone is not runtime proof
+  const f2 = fs.normalizeFinding({ id: 'F-2b', validation_status: 'CONFIRMED', reproduction_request: 'curl ...' })
+  assert.strictEqual(f2.confirmation_status, 'SOURCE_CONFIRMED')
+  // a captured live RESPONSE is runtime proof
+  const f3 = fs.normalizeFinding({ id: 'F-2c', validation_status: 'CONFIRMED', reproduction_response: 'HTTP/1.1 200 ...' })
+  assert.strictEqual(f3.confirmation_status, 'RUNTIME_CONFIRMED')
+})
+
+test('confirmation_status: NEEDS-LIVE/SUSPECTED/unknown → NEEDS_LIVE_VALIDATION; KILLED → DISPROVEN', () => {
+  const fs = require('../agents/finding-schema')
+  assert.strictEqual(fs.normalizeFinding({ id: 'a', validation_status: 'NEEDS-LIVE' }).confirmation_status, 'NEEDS_LIVE_VALIDATION')
+  assert.strictEqual(fs.normalizeFinding({ id: 'b', validation_status: 'SUSPECTED' }).confirmation_status, 'NEEDS_LIVE_VALIDATION')
+  assert.strictEqual(fs.normalizeFinding({ id: 'c', validation_status: 'unknown' }).confirmation_status, 'NEEDS_LIVE_VALIDATION')
+  assert.strictEqual(fs.normalizeFinding({ id: 'd', validation_status: 'KILLED' }).confirmation_status, 'DISPROVEN')
+})
+
+test('confirmation_status: an explicit valid value is preserved (exploit-prover stamp)', () => {
+  const fs = require('../agents/finding-schema')
+  const f = fs.normalizeFinding({ id: 'e', validation_status: 'CONFIRMED', confirmation_status: 'RUNTIME_CONFIRMED' })
+  assert.strictEqual(f.confirmation_status, 'RUNTIME_CONFIRMED')
+  // an invalid explicit value is overwritten by derivation
+  const g = fs.normalizeFinding({ id: 'f', validation_status: 'CONFIRMED', confirmation_status: 'bogus' })
+  assert.strictEqual(g.confirmation_status, 'SOURCE_CONFIRMED')
+})

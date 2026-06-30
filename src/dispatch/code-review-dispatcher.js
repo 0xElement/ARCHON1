@@ -352,30 +352,42 @@ source-only novel candidate is a HYPOTHESIS (NEEDS-LIVE), never CONFIRMED. Cite 
 Write your candidates to: ${outFile} (mkdir -p first). Reply one line: novel candidates found, top risk, what needs live proof.`
 }
 
-function auditorPrompt(taskId, outDir, features, classes) {
+function auditorPrompt(taskId, outDir, features, classes, deployUrl) {
+  const liveLine = deployUrl
+    ? `A live target IS available (${deployUrl}): a finding you actually exercised there with a captured response is RUNTIME_CONFIRMED; a source-substantiated finding you did NOT fire live is SOURCE_CONFIRMED.`
+    : `NO live target is available (source-only review): the strongest verdict you can issue is SOURCE_CONFIRMED — you can confirm a bug by reading code, but you CANNOT mark it RUNTIME_CONFIRMED without live proof. Do not over-claim.`
   return `You are AUDITOR, the independent verifier. Reverse-check the Phase-2 code-review findings — never trust the assessor's claim.
 
 Read the Phase-2 reports under ${outDir}/phase2/**/*.md (classes: ${classes.join(', ')}; features: ${features.map(f => f.slug).join(', ')}).
-For each reported finding: re-read the cited source path, confirm the auth/object-lookup/sink claim is real, and issue a verdict
-(CONFIRMED / NEEDS-LIVE / DISPROVEN) with a one-line evidence reason. Demote anything you cannot substantiate from source.
+For each reported finding: re-read the cited source path, confirm the auth/object-lookup/sink claim is real, and issue a
+confirmation status with a one-line evidence reason. ${liveLine}
 
-Write verdicts to ${outDir}/phase2/AUDITOR-VERDICTS.md (a table: feature | class | finding | verdict | evidence). Reply one line: confirmed/needs-live/disproven counts.`
+Confirmation status vocabulary (use EXACTLY these):
+- RUNTIME_CONFIRMED     — substantiated AND proven against the running target (captured live response).
+- SOURCE_CONFIRMED      — substantiated from source, but never fired at a live target.
+- NEEDS_LIVE_VALIDATION — a plausible hypothesis that needs a live target to settle.
+- DISPROVEN             — checked and refuted from source.
+Demote anything you cannot substantiate from source.
+
+Write verdicts to ${outDir}/phase2/AUDITOR-VERDICTS.md (a table: feature | class | finding | status | evidence). Reply one line: runtime-confirmed/source-confirmed/needs-live/disproven counts.`
 }
 
-function scribePrompt(taskId, projectId, squad, sourceDir, outDir, features, classes) {
+function scribePrompt(taskId, projectId, squad, sourceDir, outDir, features, classes, deployUrl) {
   return `You are SCRIBE, the reporter. Merge the per-feature Phase-2 reports into ONE final code-review report.
 
 Inputs (read all):
 - ${outDir}/phase1-maps/consolidated/phase1_completion_gate.md and phase2_review_queue.md
 - ${outDir}/phase2/**/*.md  (per-feature reports, classes: ${classes.join(', ')})
-- ${outDir}/phase2/AUDITOR-VERDICTS.md  (only report AUDITOR-CONFIRMED or NEEDS-LIVE findings as findings; note disproven separately)
+- ${outDir}/phase2/AUDITOR-VERDICTS.md  (report RUNTIME_CONFIRMED / SOURCE_CONFIRMED / NEEDS_LIVE_VALIDATION findings; note DISPROVEN separately)
 
-Produce an executive white-box code-review report: scope + coverage (features mapped, depth-status rollup), confirmed findings
-ordered by CVSS (each with file:line trace, impact, fix), a recurring-pattern section (same-functionality classes), and honest gaps.
-Do NOT include orchestration logs. Keep per-feature structure traceable.
+Produce an executive white-box code-review report: scope + coverage (features mapped, depth-status rollup), then findings
+ordered by CVSS — each tagged with its **confirmation status** (RUNTIME_CONFIRMED / SOURCE_CONFIRMED / NEEDS_LIVE_VALIDATION),
+file:line trace, impact, and fix. Be explicit that SOURCE_CONFIRMED means "proven in code, not yet exercised against a
+running app"${deployUrl ? '' : ' (this was a source-only review — nothing is RUNTIME_CONFIRMED)'} — never present a source finding as if it were live-proven. Add a recurring-pattern
+section (same-functionality classes) and honest gaps. Do NOT include orchestration logs. Keep per-feature structure traceable.
 
 Write the report to ${outDir}/FINAL-REPORT-${taskId}.md AND to ${__roots.INTEL_ROOT}/code-review/FINAL-REPORT-${taskId}.md.
-Reply one line: features covered, confirmed findings by severity, top risk.`
+Reply one line: features covered, findings by confirmation status + severity, top risk.`
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -527,14 +539,14 @@ async function runCodeReview(dispatch, deps) {
       trackCosts([uRes])
     }
     updateProgress(86, 'Phase 2v: AUDITOR reverse-check')
-    const kRes = await spawnAgent('auditor', taskId, auditorPrompt(taskId, outDir, p2Features, vulnClasses), `task-${taskId}-auditor`, null)
+    const kRes = await spawnAgent('auditor', taskId, auditorPrompt(taskId, outDir, p2Features, vulnClasses, deployUrl), `task-${taskId}-auditor`, null)
     trackCosts([kRes])
   }
 
   // Phase 3 — SCRIBE report
   if (runPhase('report')) {
     updateProgress(94, 'Phase 3: SCRIBE final report')
-    const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses), `task-${taskId}-scribe`, null)
+    const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl), `task-${taskId}-scribe`, null)
     trackCosts([vRes])
   }
 
