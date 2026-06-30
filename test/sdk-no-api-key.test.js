@@ -64,3 +64,22 @@ test('omitApiKey forces OAuth even if a key IS present (independent-judge semant
     anthropicKey.resetCache()
   }
 })
+
+test('ARCHON_SUBSCRIPTION_ONLY locks every agent to OAuth — key is NEVER injected, even when present', () => {
+  const { buildSpawnEnv } = require('../agents/runner/adapters/common')
+  const anthropicKey = require('../src/integrations/anthropic-key')
+  const prevKey = process.env.ANTHROPIC_API_KEY
+  const prevLock = process.env.ARCHON_SUBSCRIPTION_ONLY
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-test-deadbeef'   // a key IS present…
+  process.env.ARCHON_SUBSCRIPTION_ONLY = '1'               // …but the lock is on
+  anthropicKey.resetCache()
+  try {
+    // default call (no per-call omitApiKey) must STILL suppress the key globally
+    const env = buildSpawnEnv({})
+    assert.ok(!('ANTHROPIC_API_KEY' in env), 'subscription-only lock must suppress the key for every agent → metered billing impossible')
+  } finally {
+    if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = prevKey
+    if (prevLock === undefined) delete process.env.ARCHON_SUBSCRIPTION_ONLY; else process.env.ARCHON_SUBSCRIPTION_ONLY = prevLock
+    anthropicKey.resetCache()
+  }
+})

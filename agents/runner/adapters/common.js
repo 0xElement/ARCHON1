@@ -84,10 +84,17 @@ function buildSpawnEnv(opts = {}) {
   // IS_SANDBOX — claude running as root requires IS_SANDBOX=1 for bypassPermissions; non-sensitive flag
   if (process.env.IS_SANDBOX) env.IS_SANDBOX = process.env.IS_SANDBOX
 
-  // ANTHROPIC_API_KEY — inject ONLY if configured AND not explicitly suppressed.
-  // omitApiKey forces OAuth/subscription auth even when a key is present
-  // (grader.js's independent-judge force-OAuth semantics). We never fabricate.
-  if (!omitApiKey) {
+  // Subscription-only lock (opt-in, default off = unchanged behavior): when
+  // ARCHON_SUBSCRIPTION_ONLY is set, NEVER inject an API key for ANY agent — even
+  // if an ANTHROPIC_API_KEY is present in the env or a saved config file. This
+  // guarantees every run authenticates with the Claude SUBSCRIPTION via OAuth and
+  // can never silently fall through to metered API billing.
+  const subscriptionOnly = /^(1|true|on|yes|enabled)$/i.test(String(process.env.ARCHON_SUBSCRIPTION_ONLY || '').trim())
+
+  // ANTHROPIC_API_KEY — inject ONLY if configured AND not suppressed (per-call
+  // omitApiKey, e.g. grader.js's force-OAuth, OR the global subscription-only
+  // lock above). We never fabricate a key.
+  if (!omitApiKey && !subscriptionOnly) {
     const apiKey = anthropicKey.getAnthropicApiKey()
     if (apiKey) env.ANTHROPIC_API_KEY = apiKey
   }
