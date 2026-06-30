@@ -5785,6 +5785,15 @@ async function dispatchPentestParallel(dispatch) {
         log(`⚠️ Phase 3.05 envelope guard error (non-fatal): ${__envErr.message}`)
       }
 
+      // ── PHASE 3.052: TRIAGER — dedup + merge the validated findings into the canonical
+      // set BEFORE the WRITER writes them, so each REAL issue becomes ONE clean finding
+      // (no duplicates, related issues merged) and severity/CVSS are correct. Rewrites
+      // VALIDATED-FINDINGS with the merged set. Fail-soft + guarded (never loses findings). ──
+      if (phaseEnabled('3.052', squad)) {
+        try { await runTriagerForTask(taskId) }
+        catch (__trErr) { log(`⚠️ Phase 3.052 triager (non-fatal): ${__trErr.message}`) }
+      }
+
       // ── PHASE 3.1: Auto-enrich validated findings (CVSS + detail) right after they're
       // built, so the Findings tab shows SCORED findings live during the run — not only at
       // report time. enrichFindingsForTask first ensureValidatedFindings (promotes live
@@ -8614,8 +8623,70 @@ function ensureValidatedFindings(taskId) {
   } catch (e) { log(`⚠️ ensureValidatedFindings failed (non-fatal): ${e.message}`); return 0 }
 }
 
+// ── TRIAGER (Phase 3.052): dedup + merge validated findings into the canonical set ──
+// The TRIAGER agent reads VALIDATED-FINDINGS, drops empty/n-a, eliminates duplicates, and
+// MERGES related issues into one (same vuln class + locus; cleartext-creds + same-path file =
+// one). It writes TRIAGED-FINDINGS-<taskId>.jsonl. A deterministic guard then validates the
+// output (parseable, non-empty, never MORE than the input) before replacing VALIDATED-FINDINGS,
+// and recomputes CVSS score + severity from each vector via ui/cvss.js (arithmetic, not an LLM).
+// Fail-soft: any problem → keep the original validated set untouched (never lose findings).
+async function runTriagerForTask(taskId) {
+  const { readFindingsFile, normalizeFinding } = require('./agents/finding-schema')
+  const vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
+  if (!fs.existsSync(vf)) { log(`🧹 triager: no validated findings for ${taskId}`); return }
+  const orig = readFindingsFile(vf)
+  if (orig.length <= 1) { log(`🧹 triager: ${orig.length} finding — nothing to dedup/merge for ${taskId}`); return }
+  const outFile = `${agentPaths.INTEL_ROOT}/TRIAGED-FINDINGS-${taskId}.jsonl`
+  try { fs.unlinkSync(outFile) } catch {}
+  const corr = `${agentPaths.INTEL_ROOT}/correlation-${taskId}.json`
+  const prompt = `You are TRIAGER. Read your identity: cat ${agentPaths.soulPath('triager')}
+Deduplicate + MERGE the validated findings into the canonical set. Do NOT invent or drop real issues.
+
+Read ${vf} — one JSON finding per line (id, title, severity, url, details, impact, cvss_vector, original_agent).
+${fs.existsSync(corr) ? `Also read the correlation seed (exact-duplicate groups): cat ${corr}` : ''}
+Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
+
+Rules:
+- DROP empty / "n/a" / non-findings (no real vuln, no evidence).
+- The SAME issue from multiple agents, or the same flaw across params/endpoints, → ONE finding.
+- MERGE related issues into one (same vuln class + same root cause/locus). E.g. cleartext creds +
+  another sensitive file on the SAME path = one "sensitive files exposed" finding. When unsure, keep separate.
+- Each survivor: a defensible CVSS:3.1 vector + a title that matches its real impact. Keep the
+  strongest evidence from each merged member; list every merged-in id in "merged_from".
+
+Write the canonical set as JSONL (one finding per line) to ${outFile}. Each line:
+{"id":"<keep one id>","title":"…","severity":"Critical|High|Medium|Low|Info","cvss_vector":"CVSS:3.1/…","url":"…","details":"…","impact":"…","original_agent":"…","validation_status":"CONFIRMED","reproduction_method":"…","reproduction_result":"…","taskId":"${taskId}","merged_from":["id1","id2"],"source":"triager"}
+Write ONLY that file. Reply one line: triaged N→M findings.`
+  log(`🧹 Phase 3.052 TRIAGER: deduping/merging ${orig.length} findings for ${taskId}`)
+  logActivity('NEXUS', `🧹 Phase 3.052 TRIAGER: dedup + merge`, { type: 'triage', taskId, details: `Deduplicating + merging ${orig.length} validated findings into the canonical set.` })
+  try { await spawnAgent('triager', taskId, prompt, `task-${taskId}-triager`, null) }
+  catch (e) { log(`⚠️ triager agent ${taskId} failed (keeping validated as-is): ${e.message}`); return }
+
+  // Deterministic guard + Stage-3 CVSS/severity validation, THEN replace VALIDATED.
+  let triaged = []
+  try { triaged = readFindingsFile(outFile) } catch {}
+  if (!triaged.length || triaged.length > orig.length) {
+    log(`⚠️ Phase 3.052 TRIAGER output invalid/empty (${triaged.length} vs ${orig.length}) — keeping the ${orig.length} validated findings unchanged`)
+    return
+  }
+  let cvss = null; try { cvss = require('./ui/cvss') } catch {}
+  const canonical = triaged.map(f => {
+    const r = normalizeFinding(f)
+    if (cvss && r.cvss_vector) {
+      try { const { score, vector } = cvss.cvss31(cvss.parseVector(r.cvss_vector)); r.cvss_vector = vector; r.cvss_score = score; r.severity = cvss.sevFromScore(score) } catch {}
+    }
+    r.triaged = true
+    return r
+  })
+  try {
+    fs.writeFileSync(vf, canonical.map(f => JSON.stringify(f)).join('\n') + '\n')
+    log(`✅ Phase 3.052 TRIAGER: ${orig.length} → ${canonical.length} canonical findings (deduped/merged, scored) for ${taskId}`)
+    logActivity('NEXUS', `✅ Phase 3.052 TRIAGER: ${orig.length} → ${canonical.length} findings`, { type: 'triage', taskId, details: `Deduplicated + merged ${orig.length} → ${canonical.length}; CVSS/severity validated.` })
+  } catch (e) { log(`⚠️ triager could not rewrite VALIDATED-FINDINGS (keeping original): ${e.message}`) }
+}
+
 // ── Enrich findings with report-quality structure for the triage view ──
-// Has AUDITOR produce description/impact/remediation/raw_request/poc per finding →
+// Has the WRITER produce description/impact/remediation/raw_request/poc per finding →
 // findings-detail-<taskId>.json (merged by the dashboard's /api/findings).
 async function enrichFindingsForTask(taskId) {
   ensureValidatedFindings(taskId)
