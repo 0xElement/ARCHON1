@@ -967,6 +967,26 @@ async function runWithConcurrency(items, limit, worker) {
   await Promise.all(Array.from({ length: n }, () => runner()))
   return out
 }
+// ATLAS conducts: order the specialist roster by the Phase-1.9 attack plan. Specialists
+// the plan names run FIRST (highest-priority hypotheses first, de-duped); any roster
+// specialist the plan didn't name is appended, so ATLAS commands the ORDER without ever
+// dropping coverage. Fail-soft → the unchanged roster order if there's no/empty plan.
+function _orderSpecialistsByPlan(taskId, roster) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(`${agentPaths.INTEL_ROOT}/attack-plan-${taskId}.json`, 'utf-8'))
+    const hyps = Array.isArray(raw) ? raw : (Array.isArray(raw.plan) ? raw.plan : (Array.isArray(raw.hypotheses) ? raw.hypotheses : []))
+    if (!hyps.length) return roster
+    const inRoster = new Set(roster.map(a => String(a).toLowerCase()))
+    const ranked = hyps
+      .filter(h => h && h.suggested_specialist)
+      .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0))
+      .map(h => String(h.suggested_specialist).toLowerCase())
+    const ordered = []
+    for (const a of ranked) if (inRoster.has(a) && !ordered.includes(a)) ordered.push(a)
+    for (const a of roster) { const la = String(a).toLowerCase(); if (!ordered.includes(la)) ordered.push(la) }
+    return ordered
+  } catch { return roster }
+}
 function getPentestSpecialists() {
   const d = configCache.getAgentsByRole('pentest-squad', 'specialist')
   const list = d.length > 0 ? d : FALLBACK_PENTEST_SPECIALISTS
@@ -5350,8 +5370,21 @@ async function dispatchPentestParallel(dispatch) {
     // Wave 2 (batches 3+4 merged): second-half specialists run in parallel WITH critique.
     // Old: 4 sequential awaits = ~65min wall. New: 2 parallel waves = ~35min wall.
     if (_isTaskCancelled(taskId)) { log(`🛑 Task ${taskId} cancelled — halting before Phase 2 specialists`); killTaskChildren(taskId, 'cancelled'); return { totalCost, allCosts } }
-    const wave1Agents = [...PENTEST_VULN_BATCH1_dyn, ...PENTEST_VULN_BATCH2_dyn]
-    const wave2Agents = [...PENTEST_VULN_BATCH3_dyn, ...PENTEST_VULN_BATCH4_dyn]
+    // ATLAS conducts: reorder the full specialist roster by its attack plan, then
+    // split into the two waves (highest-priority specialists land in wave 1, so they
+    // run first). All specialists still run — ATLAS sets the ORDER, not the membership.
+    const _fullRoster = [...PENTEST_VULN_BATCH1_dyn, ...PENTEST_VULN_BATCH2_dyn, ...PENTEST_VULN_BATCH3_dyn, ...PENTEST_VULN_BATCH4_dyn]
+    const _ordered = _orderSpecialistsByPlan(taskId, _fullRoster)
+    if (_ordered.join() !== _fullRoster.map(a => String(a).toLowerCase()).join()) {
+      log(`🧭 ATLAS conducts → specialist order from attack plan: ${_ordered.map(a => a.toUpperCase()).join(' → ')}`)
+      logActivity('NEXUS', `🧭 ATLAS conducts: specialists ordered by the attack plan`, {
+        type: 'dispatch-phase', squad, taskId, projectId: projectId || '',
+        details: `Plan-ranked order (all still run, 3 at a time): ${_ordered.map(a => a.toUpperCase()).join(' → ')}`,
+      })
+    }
+    const _half = Math.ceil(_ordered.length / 2)
+    const wave1Agents = _ordered.slice(0, _half)
+    const wave2Agents = _ordered.slice(_half)
 
     log(`🔄 Phase 2 Wave 1 — ${wave1Agents.length} specialists in parallel: ${wave1Agents.map(a => a.toUpperCase()).join(', ')}`)
     logEvent('PHASE_START', { taskId, phase: 'vuln-wave1', agents: wave1Agents.map(a => a.toUpperCase()) })
@@ -8887,8 +8920,13 @@ async function dispatchToAgent(dispatch) {
       // (ARCHON_ENABLE_BLACKBOX_MASTER_AGENT) ⇒ run() === dispatchPentestParallel(dispatch),
       // byte-for-byte identity. Shadow observes+recommends; active loops (cap=ARCHON_AUTONOMY_HOPS).
       const __missionDirector = require('./src/orchestrator/mission-director')
+      // conductHops: ATLAS runs N focused follow-up hops (squad.json caps.followupHops,
+      // default 0). First-class conducted behavior — independent of the OS shadow flag.
+      const __conductHops = (() => {
+        try { const c = require('./agents/squad-config-loader').loadSquadConfig(squad); return (c && c.caps && c.caps.followupHops) || 0 } catch { return 0 }
+      })()
       const { totalCost, allCosts } = await __missionDirector.run(dispatch, {
-        dispatchPentestParallel, getCostBudget, _isTaskCancelled, log, logActivity,
+        dispatchPentestParallel, getCostBudget, _isTaskCancelled, log, logActivity, conductHops: __conductHops,
       })
 
       // Cancelled mid-flight → stop here: keep status 'cancelled', no grading/report/'done'.

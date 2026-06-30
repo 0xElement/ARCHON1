@@ -138,22 +138,29 @@ async function run(dispatch, deps = {}) {
   const dpp = deps.dispatchPentestParallel
   if (typeof dpp !== 'function') throw new Error('mission-director.run requires deps.dispatchPentestParallel')
   const mode = agentPaths.flagMode ? agentPaths.flagMode('BLACKBOX_MASTER_AGENT') : 'off'
+  // conductHops (from squad caps.followupHops): "ATLAS conducts N focused follow-up hops"
+  // as a first-class pentest behavior, independent of the Autonomous-OS shadow flag. When
+  // unset (0) the flag-off path stays BYTE-IDENTICAL to dispatchPentestParallel (the identity
+  // test + the no-shadow-pollution invariant both rely on this).
+  const conductHops = Math.max(0, parseInt(deps.conductHops, 10) || 0)
+  const emode = mode === 'active' ? 'active' : (conductHops > 0 ? 'conduct' : mode)
 
   // hop 0 — the full, real pipeline (scope/auditor/judge inside).
   const result = await dpp(dispatch)
-  if (mode === 'off') return result // strict identity
+  if (mode === 'off' && conductHops <= 0) return result // strict identity (unchanged)
 
   const eng = _engagementId(dispatch)
   const log = deps.log || (() => {})
   try {
     const recommendations = observeEngagement(dispatch, deps)
-    shadowSink.append(eng, 'director-recommendations.jsonl', { hop: 0, ts: _now(), mode, recommendations })
-    _appendDecisions(eng, recommendationDecisions({ hop: 0, mode, recommendations, queued: false }))
+    shadowSink.append(eng, 'director-recommendations.jsonl', { hop: 0, ts: _now(), mode: emode, recommendations })
+    _appendDecisions(eng, recommendationDecisions({ hop: 0, mode: emode, recommendations, queued: false }))
 
-    if (mode !== 'active') return result // shadow: observe-only, drives nothing
+    if (mode !== 'active' && conductHops <= 0) return result // shadow: observe-only, drives nothing
 
-    // ACTIVE: bounded, deterministic re-plan loop. Default ARCHON_AUTONOMY_HOPS=1 ⇒ no extra hop.
-    const hopCap = _hopCap()
+    // Bounded, deterministic re-plan loop. hopCap = max(flag-driven ARCHON_AUTONOMY_HOPS,
+    // squad conductHops). Default conductHops=1 ⇒ exactly ONE focused follow-up hop.
+    const hopCap = Math.max(mode === 'active' ? _hopCap() : 0, conductHops)
     const budget = (deps.getCostBudget && deps.getCostBudget(dispatch.squad)) || null
     let hop = 0, spent = (result && result.totalCost) || 0
     let recs = recommendations
@@ -162,25 +169,26 @@ async function run(dispatch, deps = {}) {
       const awaitingTriage = deps.isAwaitingTriage ? deps.isAwaitingTriage(dispatch.taskId) : false
       const d = decideNext({ hop, hopCap, spent, budget, cancelled, awaitingTriage, recommendations: recs })
       if (!d.continue) {
-        log(`🧭 Mission Director: stop after hop ${hop} (${d.reason})`)
-        _appendDecisions(eng, [decisionRecord({ hop, mode, decision: 'gate', why: d.reason, evidence: { spent, budget, openWork: recs.length }, outcome: 'stop' })])
+        log(`🧭 ATLAS conductor: stop after hop ${hop} (${d.reason})`)
+        _appendDecisions(eng, [decisionRecord({ hop, mode: emode, decision: 'gate', why: d.reason, evidence: { spent, budget, openWork: recs.length }, outcome: 'stop' })])
         break
       }
       // Scope re-validate before each extra hop (fail-closed).
       if (deps.scopeValidate && !deps.scopeValidate(dispatch)) {
-        log('🧭 Mission Director: scope re-validation blocked — stop')
-        _appendDecisions(eng, [decisionRecord({ hop, mode, decision: 'scope-gate', why: 'scope re-validation blocked', outcome: 'stop' })])
+        log('🧭 ATLAS conductor: scope re-validation blocked — stop')
+        _appendDecisions(eng, [decisionRecord({ hop, mode: emode, decision: 'scope-gate', why: 'scope re-validation blocked', outcome: 'stop' })])
         break
       }
       hop += 1
       const focus = deriveFocus(recs)
-      _appendDecisions(eng, [decisionRecord({ hop, mode, decision: 'launch-hop', why: d.reason, evidence: { openWork: recs.length }, task_created: focus.focusClasses, confidence: null, outcome: 'hop-launched' })])
+      log(`🧭 ATLAS conductor: follow-up hop ${hop}/${hopCap} — focus: ${(focus.focusClasses || []).join(', ') || '(open work)'}`)
+      _appendDecisions(eng, [decisionRecord({ hop, mode: emode, decision: 'launch-hop', why: d.reason, evidence: { openWork: recs.length }, task_created: focus.focusClasses, confidence: null, outcome: 'hop-launched' })])
       const hopDispatch = { ...dispatch, meta: { ...(dispatch.meta || {}), ...focus } }
       const r = await dpp(hopDispatch) // same taskId — no finding-id drift
       spent += (r && r.totalCost) || 0
       recs = observeEngagement(dispatch, deps)
-      shadowSink.append(eng, 'director-recommendations.jsonl', { hop, ts: _now(), mode, recommendations: recs })
-      _appendDecisions(eng, recommendationDecisions({ hop, mode, recommendations: recs, queued: false }))
+      shadowSink.append(eng, 'director-recommendations.jsonl', { hop, ts: _now(), mode: emode, recommendations: recs })
+      _appendDecisions(eng, recommendationDecisions({ hop, mode: emode, recommendations: recs, queued: false }))
     }
   } catch (e) { log(`🧭 Mission Director error (non-fatal): ${e.message}`) }
   return result
