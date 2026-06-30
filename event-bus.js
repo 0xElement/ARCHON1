@@ -4633,13 +4633,28 @@ async function dispatchPentestParallel(dispatch) {
       const httpOk = /^[1-5]\d\d$/.test(httpCode) && httpCode !== '000'
       if (httpOk) { log(`✅ Pre-flight: ${targetUrl} reachable (HTTP ${httpCode})`) }
       else {
-        // HTTP on the default port didn't answer — is the host itself up?
+        // The dispatched scheme didn't answer — try the ALTERNATE scheme before giving up.
+        // A real web app is often HTTPS-only (443 open, 80 closed) or vice-versa; the bare
+        // probe hits one port and would wrongly fail. If the other scheme answers, switch to
+        // it (targetUrl is `let`) so the whole pipeline tests the live service.
+        const _altUrl = /^https:\/\//i.test(targetUrl) ? targetUrl.replace(/^https:\/\//i, 'http://')
+                      : /^http:\/\//i.test(targetUrl) ? targetUrl.replace(/^http:\/\//i, 'https://')
+                      : 'https://' + targetUrl.replace(/^[a-z]+:\/\//i, '')
+        let _altCode = '000'
+        try { _altCode = execSync(`curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${safeUrl(_altUrl)}"`, { timeout: 15000 }).toString().trim() || '000' }
+        catch (ce2) { _altCode = (ce2.stdout || '').toString().trim() || '000' }
+        const _altOk = /^[1-5]\d\d$/.test(_altCode) && _altCode !== '000'
+        if (_altOk) {
+          log(`✅ Pre-flight: ${targetUrl} dead on its scheme (code ${httpCode}) but ${_altUrl} answers (HTTP ${_altCode}) — switching scheme`)
+          targetUrl = _altUrl
+        } else {
+        // Neither scheme answered — is the host itself up?
         const _host = (() => { try { return safeHost(new URL(/^[a-z]+:\/\//i.test(targetUrl) ? targetUrl : 'http://' + targetUrl).hostname) } catch { return safeHost(targetUrl) } })()
         const _ip = _boxIp || _host
         let pingOk = false
         try { execSync(`ping -c 1 -W 2 ${_ip}`, { timeout: 5000 }); pingOk = true } catch {}
         if (pingOk) {
-          log(`✅ Pre-flight: ${targetUrl} — no HTTP on default port (code ${httpCode}) but host ${_ip} is UP (ping); nmap will find the real ports`)
+          log(`✅ Pre-flight: ${targetUrl} — no HTTP on either scheme (code ${httpCode}/${_altCode}) but host ${_ip} is UP (ping); nmap will find the real ports`)
         } else {
           log(`🚫 Pre-flight FAILED: host ${_ip} unreachable (no HTTP, no ping)`)
           logActivity('NEXUS', `🚫 Target unreachable: ${targetUrl} — aborting pentest`, {
@@ -4648,6 +4663,7 @@ async function dispatchPentestParallel(dispatch) {
           })
           updateProgress(100, 'Aborted — target unreachable')
           throw new Error(`Target ${targetUrl} unreachable — pre-flight check failed`)
+        }
         }
       }
     } catch (e) {
@@ -5048,6 +5064,25 @@ async function dispatchPentestParallel(dispatch) {
         log(`🔍 Target reachability check: HTTP ${httpCode} → ${targetReachable ? 'REACHABLE' : 'UNREACHABLE'}`)
       } catch (e) {
         log(`🔍 Target reachability check failed: ${e.message}`)
+      }
+      // Belt-and-suspenders: never early-exit a target whose web service nmap proved
+      // OPEN (a service that doesn't answer a bare `/` probe but is clearly listening).
+      // nmap-<taskId>.json.httpServices is the authoritative list of web URLs (correct
+      // scheme+port); if it's non-empty the target IS reachable — and we switch the
+      // pipeline to the nmap-confirmed service (e.g. https://host:8443) so it tests it.
+      if (!targetReachable) {
+        try {
+          const nmap = JSON.parse(fs.readFileSync(`${agentPaths.INTEL_ROOT}/nmap-${taskId}.json`, 'utf-8'))
+          const webSvcs = Array.isArray(nmap.httpServices) ? nmap.httpServices.filter(Boolean) : []
+          if (webSvcs.length) {
+            targetReachable = true
+            const _norm = u => String(u).replace(/\/+$/, '')
+            if (!webSvcs.some(u => _norm(u) === _norm(targetUrl))) {
+              targetUrl = webSvcs.find(u => /^https:/i.test(u)) || webSvcs[0] // prefer https
+            }
+            log(`🔍 nmap web service(s) open: ${webSvcs.join(', ')} → REACHABLE (testing ${targetUrl})`)
+          }
+        } catch { /* no nmap artifact — fall through to the curl verdict */ }
       }
     }
 
