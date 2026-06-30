@@ -522,14 +522,17 @@ function findingsForSingleTask(id, label) {
     out.push({
       key: id + '::' + fid, srcTask: id, iteration: label || '',
       id: fid, severity: titleSev(f.severity), title: _liveTitle(f),
-      cvss: null, cvssVector: '', cwe: f.cwe || '', testSteps: [],
+      // emit-finding now carries the structured fields — surface them (the agent's own
+      // claim; AUDITOR re-validates later). Was hardcoded empty → blank finding cards.
+      cvss: typeof f.cvss_score === 'number' ? f.cvss_score : null,
+      cvssVector: f.cvss_vector || '', cwe: f.cwe || '', testSteps: [],
       // lifecycle: the finding agent's own claim — NOT yet validator-confirmed (amber, not green)
       stage: _liveStatus(f) === 'CONFIRMED' ? 'agent-confirmed' : 'suspected',
       agent: f.agent || '', status: _liveStatus(f) === 'CONFIRMED' ? 'AGENT-CONFIRMED' : 'SUSPECTED',
-      url: f.url || '', method: '',
-      description: f.details || '', poc: f.reproduction || '', validation: '',
-      impact: f.impact || '', remediation: '',
-      rawRequest: synthRawRequest('GET', f.url, f.reproduction),
+      url: f.url || '', method: f.method || '',
+      description: f.details || '', poc: f.reproduction || '', validation: f.validation || f.reproduction_result || '',
+      impact: f.impact || '', remediation: f.remediation || f.fix || f.recommendation || '',
+      rawRequest: f.raw_request || f.http_request || synthRawRequest(f.method || 'GET', f.url, f.reproduction),
       judge: '', enriched: false, triage: triage[fid] || null, source: 'live',
     })
   }

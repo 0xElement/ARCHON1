@@ -3776,8 +3776,17 @@ the validator + report:
 1) ACTIVITY-LOG (always available) — one line per finding:
 echo '{"ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","agent":"${agentUpper}","action":"CONFIRMED Finding: TITLE","details":"EVIDENCE — exact request/response or command output","taskId":"${taskId}","projectId":"${projectId || ''}","squad":"${squad}","type":"finding","severity":"critical|high|medium|low|info","status":"confirmed|suspected"}' >> ${agentPaths.INTEL_ROOT}/ACTIVITY-LOG.jsonl
 2) emit-finding helper (cleaner, structured — recommended for multi-line evidence; never corrupts):
-node ${agentPaths.AGENTS_ROOT}/tools/emit-finding.js --task ${taskId} --agent ${agentUpper} --title "<one-line title>" --type confirmed|suspected|surface --cvss "CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_" --confidence high|medium|low --url "URL" --parent "${targetUrl}" --details "WHAT_YOU_FOUND" --impact "WHAT_AN_ATTACKER_GAINS" --reproduction-file /tmp/repro-${agentUpper}.txt
-ALWAYS pass --title (one line: "<vuln class> in <endpoint>: <attacker> can <impact>") and --cvss (a full CVSS:3.1 base vector — the score + severity band are computed from it). Score the vector per ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md. A finding with no title or no CVSS vector is incomplete. (--severity is only the fallback when you cannot supply a vector.)
+node ${agentPaths.AGENTS_ROOT}/tools/emit-finding.js --task ${taskId} --agent ${agentUpper} --title "<one-line title>" --type confirmed|suspected|surface --cvss "CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_" --confidence high|medium|low --url "FULL_VULNERABLE_URL" --method GET|POST|... --parent "${targetUrl}" --details "WHAT_THE_ISSUE_IS" --impact "WHAT_AN_ATTACKER_GAINS" --remediation "THE_FIX" --validation-file /tmp/validation-${agentUpper}.txt --raw-request-file /tmp/rawreq-${agentUpper}.txt --reproduction-file /tmp/repro-${agentUpper}.txt
+FILL EVERY FIELD — a finding card with blanks is incomplete. Required on each finding:
+  --title       one line: "<vuln class> in <endpoint>: <attacker> can <impact>"
+  --cvss        a full CVSS:3.1 base vector — score + severity band are computed from it (score it per ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md). An RCE/SQLi is NOT C:N/I:N/A:N — set the impact metrics to match what you proved. (--severity is only the fallback when you truly cannot vector it.)
+  --url --method  the exact vulnerable endpoint + HTTP method.
+  --details     what the issue IS (the vulnerability explained).
+  --impact      the concrete attacker gain (e.g. "OS commands as www-data", "dump all users").
+  --remediation the fix the vendor should apply.
+  --raw-request-file  a file with the EXACT raw HTTP request that triggers it (request line + headers + body).
+  --validation-file   a file with the response/output that PROVES it (the validation result).
+  --reproduction-file the step-by-step PoC.
 On every CONFIRMED finding fill impact with the concrete attacker gain (e.g. "read any user's invoices via IDOR", "OS commands as www-data"), not just the severity word.
 EVIDENCE CONTRACT: only mark confirmed if you CAPTURED replayable evidence (request/response, command output, DOM proof). No captured evidence → suspected. A confirmed claim without evidence is auto-demoted.
 
