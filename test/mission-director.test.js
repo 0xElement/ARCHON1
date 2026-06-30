@@ -81,3 +81,46 @@ test('deriveFocus reuses recon and focuses on the recommended classes', () => {
 test('run throws clearly if deps.dispatchPentestParallel is missing', async () => {
   await assert.rejects(() => md.run(dispatch, {}), /dispatchPentestParallel/)
 })
+
+// ── handoff item 7: structured decision log ──────────────────────────────────
+test('decisionRecord captures agent/why/evidence/task/confidence/outcome', () => {
+  const r = md.decisionRecord({
+    hop: 2, mode: 'active', agent: 'atlas-followup', decision: 'launch-hop',
+    why: 'open work', evidence: { openWork: 3 }, task_created: ['xss'], confidence: 0.8, outcome: 'hop-launched',
+  })
+  assert.equal(r.agent, 'atlas-followup')
+  assert.equal(r.decision, 'launch-hop')
+  assert.equal(r.why, 'open work')
+  assert.deepEqual(r.task_created, ['xss'])
+  assert.equal(r.confidence, 0.8)
+  assert.equal(r.outcome, 'hop-launched')
+  assert.ok(r.ts) // every decision is timestamped
+})
+
+test('decisionRecord defaults agent to mission-director and nulls absent fields', () => {
+  const r = md.decisionRecord({ hop: 0, mode: 'shadow', decision: 'gate', why: 'no-open-work', outcome: 'stop' })
+  assert.equal(r.agent, 'mission-director')
+  assert.equal(r.task_created, null)
+  assert.equal(r.confidence, null)
+  assert.equal(r.evidence, null)
+})
+
+test('recommendationDecisions maps each rec to a decision row with source as agent', () => {
+  const recs = [
+    { source: 'atlas-followup', type: 'followup', objective: 'chase SSRF', vuln_class: 'ssrf' },
+    { source: 'coverage-gap', type: 'coverage', objective: 'Cover WSTG-ATHN-01', wstg: 'WSTG-ATHN-01' },
+  ]
+  const rows = md.recommendationDecisions({ hop: 1, mode: 'active', recommendations: recs, queued: true })
+  assert.equal(rows.length, 2)
+  assert.equal(rows[0].agent, 'atlas-followup')
+  assert.equal(rows[0].decision, 'recommend-task')
+  assert.equal(rows[0].why, 'chase SSRF')
+  assert.equal(rows[0].evidence.vuln_class, 'ssrf')
+  assert.equal(rows[0].task_created, 'chase SSRF') // queued ⇒ a task was created
+  assert.equal(rows[0].outcome, 'queued')
+  assert.equal(rows[1].evidence.wstg, 'WSTG-ATHN-01')
+  // not queued ⇒ observed only, no task created
+  const observed = md.recommendationDecisions({ hop: 0, mode: 'shadow', recommendations: recs, queued: false })
+  assert.equal(observed[0].task_created, null)
+  assert.equal(observed[0].outcome, 'observed')
+})

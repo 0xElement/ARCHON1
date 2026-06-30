@@ -92,6 +92,44 @@ function _hopCap() {
   return Number.isFinite(n) && n > 0 ? n : 1
 }
 
+// ── Decision log (handoff item 7) ───────────────────────────────────────────
+// One structured record per autonomous decision — WHO decided, WHY, on what
+// EVIDENCE, what TASK it created, how CONFIDENT, and the OUTCOME. Pure builders
+// (tested); written to decision-log.jsonl only while the Director runs (flag on),
+// so the flag-off pipeline is untouched. This is the "why did the agent do that?"
+// audit trail an operator reads after an autonomous engagement.
+function decisionRecord({ hop, mode, agent, decision, why, evidence, task_created, confidence, outcome }) {
+  return {
+    ts: _now(), hop: hop == null ? null : hop, mode: mode || null,
+    agent: agent || 'mission-director',
+    decision: decision || null,
+    why: why || null,
+    evidence: evidence == null ? null : evidence,
+    task_created: task_created == null ? null : task_created,
+    confidence: confidence == null ? null : confidence,
+    outcome: outcome || null,
+  }
+}
+// Each recommendation → a recommend-task decision row, with its source as the
+// deciding agent and its objective/class/wstg as the why/evidence.
+function recommendationDecisions({ hop, mode, recommendations, queued }) {
+  return (recommendations || []).map(r => decisionRecord({
+    hop, mode,
+    agent: r.source || 'mission-director',
+    decision: 'recommend-task',
+    why: r.objective || r.description || null,
+    evidence: { type: r.type || null, wstg: r.wstg || null, vuln_class: r.vuln_class || null },
+    task_created: queued ? (r.objective || r.type || null) : null,
+    confidence: r.confidence == null ? null : r.confidence,
+    outcome: queued ? 'queued' : 'observed',
+  }))
+}
+function _appendDecisions(eng, records) {
+  for (const rec of records) {
+    try { shadowSink.append(eng, 'decision-log.jsonl', rec) } catch { /* fail-soft */ }
+  }
+}
+
 /**
  * The Director entrypoint. deps must provide dispatchPentestParallel; optional
  * getCostBudget, _isTaskCancelled, isAwaitingTriage, scopeValidate, log.
@@ -110,6 +148,7 @@ async function run(dispatch, deps = {}) {
   try {
     const recommendations = observeEngagement(dispatch, deps)
     shadowSink.append(eng, 'director-recommendations.jsonl', { hop: 0, ts: _now(), mode, recommendations })
+    _appendDecisions(eng, recommendationDecisions({ hop: 0, mode, recommendations, queued: false }))
 
     if (mode !== 'active') return result // shadow: observe-only, drives nothing
 
@@ -122,19 +161,29 @@ async function run(dispatch, deps = {}) {
       const cancelled = deps._isTaskCancelled ? deps._isTaskCancelled(dispatch.taskId) : false
       const awaitingTriage = deps.isAwaitingTriage ? deps.isAwaitingTriage(dispatch.taskId) : false
       const d = decideNext({ hop, hopCap, spent, budget, cancelled, awaitingTriage, recommendations: recs })
-      if (!d.continue) { log(`🧭 Mission Director: stop after hop ${hop} (${d.reason})`); break }
+      if (!d.continue) {
+        log(`🧭 Mission Director: stop after hop ${hop} (${d.reason})`)
+        _appendDecisions(eng, [decisionRecord({ hop, mode, decision: 'gate', why: d.reason, evidence: { spent, budget, openWork: recs.length }, outcome: 'stop' })])
+        break
+      }
       // Scope re-validate before each extra hop (fail-closed).
-      if (deps.scopeValidate && !deps.scopeValidate(dispatch)) { log('🧭 Mission Director: scope re-validation blocked — stop'); break }
+      if (deps.scopeValidate && !deps.scopeValidate(dispatch)) {
+        log('🧭 Mission Director: scope re-validation blocked — stop')
+        _appendDecisions(eng, [decisionRecord({ hop, mode, decision: 'scope-gate', why: 'scope re-validation blocked', outcome: 'stop' })])
+        break
+      }
       hop += 1
       const focus = deriveFocus(recs)
+      _appendDecisions(eng, [decisionRecord({ hop, mode, decision: 'launch-hop', why: d.reason, evidence: { openWork: recs.length }, task_created: focus.focusClasses, confidence: null, outcome: 'hop-launched' })])
       const hopDispatch = { ...dispatch, meta: { ...(dispatch.meta || {}), ...focus } }
       const r = await dpp(hopDispatch) // same taskId — no finding-id drift
       spent += (r && r.totalCost) || 0
       recs = observeEngagement(dispatch, deps)
       shadowSink.append(eng, 'director-recommendations.jsonl', { hop, ts: _now(), mode, recommendations: recs })
+      _appendDecisions(eng, recommendationDecisions({ hop, mode, recommendations: recs, queued: false }))
     }
   } catch (e) { log(`🧭 Mission Director error (non-fatal): ${e.message}`) }
   return result
 }
 
-module.exports = { run, observeEngagement, decideNext, deriveFocus }
+module.exports = { run, observeEngagement, decideNext, deriveFocus, decisionRecord, recommendationDecisions }
