@@ -1,7 +1,19 @@
-# ARCHON — Autonomous Agent OS (spec DOCKER_BUILD_AND_RUNTIME_GUIDE).
-# Two services share one image + one data volume (var/intel). All Autonomous-OS
-# flags default OFF; opt a block into shadow by setting ARCHON_ENABLE_AUTONOMOUS_OS=1
-# + ARCHON_ENABLE_<BLOCK>=1 (and ARCHON_DRIVE_<BLOCK>=1 for active) in the env below.
+# ARCHON — containerized run. Two services share one image + one data volume.
+#
+# ── HOW LOGIN WORKS (read this) ───────────────────────────────────────────────
+# ARCHON authenticates with your **Claude subscription via OAuth — NO API key**.
+# The image already bundles the Claude CLI (inside @anthropic-ai/claude-agent-sdk),
+# so you do NOT install or mount a binary. What the container needs is YOUR LOGIN:
+#   1. On the HOST, log in once so ~/.claude holds your OAuth session
+#      (run the `claude` CLI / Claude Code and authenticate).
+#   2. The `daemon` service below mounts that ~/.claude into the container at
+#      /root/.claude — the bundled CLI picks it up via $HOME. That's the whole
+#      auth story. No ANTHROPIC_API_KEY is set or required.
+# The mount is read-write so the CLI can refresh the OAuth token during long runs.
+#
+# All Autonomous-OS flags default OFF (the image == the current product). Opt a
+# block into shadow with ARCHON_ENABLE_AUTONOMOUS_OS=1 + ARCHON_ENABLE_<BLOCK>=1
+# (and ARCHON_DRIVE_<BLOCK>=1 for active).
 services:
   daemon:
     build: .
@@ -10,11 +22,10 @@ services:
     environment:
       KURU_AGENTS_ROOT: /app
       KURU_INTEL_ROOT: /app/var/intel
-      # KURU_CLAUDE_BIN: /root/.local/bin/claude    # provide the Claude CLI at runtime
       ARCHON_ENABLE_AUTONOMOUS_OS: "false"          # master kill-switch (off = current product)
     volumes:
-      - ./var/intel:/app/var/intel                  # the single data layer (spec's 4 mounts collapse here)
-      # - ${HOME}/.claude:/root/.claude:ro           # subscription OAuth (no API key)
+      - ./var/intel:/app/var/intel                  # the single data layer
+      - ${HOME}/.claude:/root/.claude               # YOUR Claude OAuth login (subscription, no API key)
     restart: unless-stopped
 
   dashboard:
@@ -26,8 +37,9 @@ services:
       KURU_AGENTS_ROOT: /app
       KURU_INTEL_ROOT: /app/var/intel
       PORT: "4000"
+      DASHBOARD_HOST: "0.0.0.0"                      # bind all interfaces INSIDE the container…
     ports:
-      - "127.0.0.1:4000:4000"                        # operator portal, localhost-only
+      - "127.0.0.1:4000:4000"                        # …but expose only to the host's localhost
     volumes:
       - ./var/intel:/app/var/intel
     restart: unless-stopped

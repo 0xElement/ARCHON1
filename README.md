@@ -181,8 +181,12 @@ Roots resolve to the **repo directory** automatically, so a fresh clone needs **
 Override only if your layout differs: `cp .env.local.example .env.local` and edit the `KURU_*` paths.
 Point `KURU_CLAUDE_BIN` at your `claude` binary if it isn't on `PATH`.
 
-**Docker:** `docker compose up` runs the daemon + portal with roots resolved inside the container —
-no host paths baked in. See `Dockerfile` / `docker-compose.yml`.
+**Docker:** `docker compose up` runs the daemon + portal with roots resolved inside the container.
+The image already **bundles the Claude CLI** (inside `@anthropic-ai/claude-agent-sdk`) — you don't
+install or mount a binary. It just needs **your login**: log in once on the host (so `~/.claude` holds
+your OAuth session), and the compose mounts that into the container. **No `ANTHROPIC_API_KEY`** — it's
+your subscription. The portal is published to `127.0.0.1:4000` (host-localhost only). See
+`Dockerfile` / `docker-compose.yml` (the auth mount is documented at the top of the compose file).
 
 Open **http://localhost:4000 → New dispatch**, enter a target URL (and optionally a source
 directory), and dispatch. Watch progress under **Tasks**, triage under the run's **Findings** tab,

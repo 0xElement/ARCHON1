@@ -21,6 +21,11 @@ const INTEL = agentPaths.INTEL_ROOT
 const AGENTS = agentPaths.AGENTS_ROOT
 const UI_DIR = path.join(AGENTS, 'ui')
 const PORT = parseInt(process.env.PORT || '4000', 10)
+// Bind address. Default 127.0.0.1 keeps a bare-metal `npm run dashboard` localhost-only.
+// Inside Docker the app must bind 0.0.0.0 or a published port can never reach it (Docker
+// forwards to the container's eth0, not its loopback) — the image sets DASHBOARD_HOST=0.0.0.0,
+// and host-side exposure stays locked down by the compose mapping `127.0.0.1:4000:4000`.
+const HOST = process.env.DASHBOARD_HOST || '127.0.0.1'
 
 let SQUAD_TYPES = {}
 try { SQUAD_TYPES = require(path.join(AGENTS, 'src/core/squad-framework')).SQUAD_TYPES || {} } catch {}
@@ -777,9 +782,9 @@ const server = http.createServer(async (req, res) => {
 // Only start the server when run directly (`node scripts/dashboard.js`).
 // When required (unit tests), export the pure helpers without binding a port.
 if (require.main === module) {
-  server.listen(PORT, '127.0.0.1', () => {
+  server.listen(PORT, HOST, () => {
     console.log(`\n  ▲ ARCHON — Offensive Operations Console`)
-    console.log(`  ➜  http://localhost:${PORT}`)
+    console.log(`  ➜  http://localhost:${PORT}${HOST === '0.0.0.0' ? `  (bound ${HOST} — host access via the published port)` : ''}`)
     console.log(`  data: ${INTEL}`)
     console.log(`  (read-only over core state; dispatch/cancel via daemon inbox)\n  Ctrl-C to stop.\n`)
   })

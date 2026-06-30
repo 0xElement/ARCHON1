@@ -19,9 +19,13 @@ RUN npm ci --omit=dev || npm install --omit=dev
 COPY . .
 
 # Portable roots → the in-container data layer (single mount).
+# DASHBOARD_HOST=0.0.0.0: inside a container the portal MUST bind all interfaces or
+# a published port can never reach it (Docker forwards to eth0, not loopback). Host
+# exposure stays localhost-only via the compose mapping `127.0.0.1:4000:4000`.
 ENV KURU_AGENTS_ROOT=/app \
     KURU_INTEL_ROOT=/app/var/intel \
     PORT=4000 \
+    DASHBOARD_HOST=0.0.0.0 \
     ARCHON_ENABLE_AUTONOMOUS_OS=false
 
 EXPOSE 4000
