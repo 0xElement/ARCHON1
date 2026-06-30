@@ -3918,6 +3918,12 @@ A verified chain of 2 mediums = 1 Critical in the report.
 
   return `You are SCRIBE, the Final Report Writer for the ${squad} squad.
 
+## REPORT FORMAT — follow the canonical template exactly
+Render the report per this template (cat it FIRST):
+  ${agentPaths.AGENTS_ROOT}/common/reporting/templates/report-template-blackbox.md
+Every finding MUST use that template's sections: **Title** (one line: <class> in <endpoint>: <attacker> can <impact>), Summary, **Severity** (a full \`CVSS:3.1/AV:_/AC:_/PR:_/UI:_/S:_/C:_/I:_/A:_\` = score (band)), Target, Roles/access, Preconditions, **Steps to Reproduce** (show a CONTROL request — the secure case — next to the BUG request), Observed (real captured values), Impact, Likely cause & Remediation, Notes/limitations, References.
+Score EVERY finding with CVSS 3.1 using the guide (cat it): ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md — always publish the VECTOR, not just the number. Use the finding's \`cvss_vector\`/\`cvss_score\` if present; otherwise derive the vector from the evidence and the guide. A finding with no CVSS vector is incomplete.
+
 ## CRITICAL LENGTH REQUIREMENT (Opus 4.7 reminder)
 Opus 4.7 defaults to shorter responses than prior models. This report is an EXCEPTION — it must be comprehensive and detailed.
 Required output: 40KB+ markdown, all 8 sections fully populated, complete reproduction curl commands per finding, full CVSS:3.1 vectors (AV:N/AC:L/...), OWASP category mapping, defensive config snippets.
@@ -7378,8 +7384,17 @@ async function extractAndSavePentestReport(taskId, squad = 'pentest') {
       }
     }
     if (!target) target = 'target application';
-    const riskLabel = overallRisk || 'Critical';
-    const riskE = sevEmoji[riskLabel] || '🔴';
+    // Derive the real overall risk from the CONFIRMED findings — never default to
+    // "Critical" when the table is empty (that produced "🔴 Critical / 0 findings").
+    // SCRIBE's own value wins if it set one; otherwise it's the highest severity present,
+    // or "None" when nothing was confirmed.
+    const _sevRank = ['Critical', 'High', 'Medium', 'Low'];
+    const _topSev = _sevRank.find(s => (severityCounts[s] || 0) > 0) || null;
+    const riskLabel = overallRisk || _topSev || (findings.length ? 'Low' : 'None');
+    const riskE = sevEmoji[riskLabel] || (findings.length ? '🟡' : '⚪');
+    const _autoSummary = findings.length
+      ? `Assessment completed. ${findings.length} finding${findings.length === 1 ? '' : 's'} confirmed by AUDITOR${_topSev ? ` (highest severity: ${_topSev})` : ''}.`
+      : `Assessment completed. No confirmed findings — no exploitable vulnerabilities were validated against the target during this engagement.`;
     const date = new Date().toISOString().split('T')[0];
     const sevOrder = ['Critical', 'High', 'Medium', 'Low'];
 
@@ -7402,7 +7417,7 @@ async function extractAndSavePentestReport(taskId, squad = 'pentest') {
 
 ## Executive Summary
 
-${execSummary || 'Full vulnerability assessment completed. Multiple critical findings confirmed.'}
+${execSummary || _autoSummary}
 
 | Severity | Count |
 |----------|-------|
@@ -7546,7 +7561,10 @@ Task: ${taskTitle}
 TaskID: ${taskId}
 
 Read your skill: cat ${agentPaths.skillsDir('scribe')}/*/SKILL.md
-Read platform templates: cat ${agentPaths.skillsDir('scribe')}/*/references/platform-templates.md 2>/dev/null
+Follow the canonical report template + CVSS guide (cat both):
+  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/report-template-blackbox.md
+  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
+Every finding: Title + Severity as a full CVSS:3.1 vector = score (band) + a control-vs-bug repro. Use the finding's cvss_vector if present, else derive it from the guide.
 Read ALL confirmed findings: grep '${taskId}' ${agentPaths.INTEL_ROOT}/ACTIVITY-LOG.jsonl | grep -iE 'CONFIRMED|AUDITOR'
 
 Write the FULL pentest report to ACTIVITY-LOG.jsonl with taskId=${taskId}.
