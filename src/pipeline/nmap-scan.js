@@ -54,7 +54,7 @@ function httpServicesOf(host, ports) {
 // ports ([] if it ran and found none), or null when naabu isn't installed (caller then
 // falls back to nmap -p-). Far faster than nmap -p- and survives a lossy VPN that times
 // a full nmap out. Output is `host:port` per line (-silent). Connect scan (no root needed).
-function runNaabu(host, { rate = 10000, timeoutMs = 45000 } = {}) {
+function runNaabu(host, { timeoutMs = 45000 } = {}) {
   const parse = s => [...new Set(String(s).split('\n')
     .map(l => { const m = l.match(/:(\d{1,5})\s*$/); return m ? +m[1] : null })
     .filter(p => p && p > 0 && p < 65536))]
@@ -62,9 +62,11 @@ function runNaabu(host, { rate = 10000, timeoutMs = 45000 } = {}) {
     let out = '', done = false
     const fin = v => { if (!done) { done = true; resolve(v) } }
     let child
-    // stdin = 'ignore' (/dev/null) is THE fix: naabu also reads hosts from stdin, so an
-    // open inherited/pipe stdin makes it block forever. /dev/null gives immediate EOF.
-    try { child = spawn('naabu', ['-host', host, '-tp', 'full', '-rate', String(rate), '-silent'], { stdio: ['ignore', 'pipe', 'ignore'] }) }
+    // No --rate: naabu's default rate is reliable; forcing -rate 10000 over a lossy/
+    // high-latency VPN drops packets and misses open ports. stdin = 'ignore' (/dev/null)
+    // is THE hang fix: naabu also reads hosts from stdin, so an open inherited/pipe stdin
+    // makes it block forever — /dev/null gives immediate EOF.
+    try { child = spawn('naabu', ['-host', host, '-tp', 'full', '-silent'], { stdio: ['ignore', 'pipe', 'ignore'] }) }
     catch { return fin(null) }
     const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch {} ; fin(parse(out)) }, timeoutMs)
     child.on('error', e => { clearTimeout(timer); fin(e && e.code === 'ENOENT' ? null : parse(out)) }) // ENOENT = not installed
