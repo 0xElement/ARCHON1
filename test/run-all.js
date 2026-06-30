@@ -46,7 +46,6 @@ const SKIP_FILES = new Set([
   'handoff-resolver.test.js',
   'handoff-watcher.test.js',
   'publication-blocking-gate.test.js', // hardcoded /root/intel paths
-  'scrub-goal-paths.test.js',          // /root/intel path placeholders
   'specialist-prompt-handoff.test.js',
   'target-classifier.test.js',         // needs seeded target-profile-rules
   'scribe-trajectory-aware.test.js',

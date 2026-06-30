@@ -22,16 +22,33 @@
 // usually external evidence references, not canonical squad artefact
 // destinations.
 
+const __roots = require('../../paths') // portable roots — the scrub must follow INTEL_ROOT, not a literal
+
 const PLACEHOLDER = '[file path scrubbed — use canonical paths from your prompt]'
 
-// Match a `/root/intel/...` path. The non-whitespace run captures
+// Match a canonical artefact path. The non-whitespace run captures
 // directories (with trailing /), files with extensions, and bare
 // inner paths. Stops at whitespace, commas, semicolons, parens,
 // quotes, backticks, angle brackets — anything that ends the path
 // in normal prose. Trailing periods are tricky (e.g. end-of-sentence
 // vs. ".jsonl"), so we strip a single trailing `.` after capture if
 // it's not part of an extension.
-const PATH_RE = /\/root\/intel\/[^\s,;()'"`<>]+/g
+//
+// Portability fix (2026-06-30): the canonical data-layer root is INTEL_ROOT,
+// which on a portable / Docker / local build resolves UNDER the repo
+// (`<root>/var/intel`), NOT `/root/intel`. A `/root/intel`-only regex therefore
+// no-ops on every non-server deployment — the exact build paths.js now resolves.
+// Build the alternation from the resolved INTEL_ROOT *and* the legacy
+// `/root/intel` literal (belt-and-suspenders for goals authored against the old
+// server layout), so the scrub covers wherever artefacts actually live.
+function _escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+function _buildPathRe() {
+  const roots = new Set(['/root/intel'])
+  try { if (__roots && __roots.INTEL_ROOT) roots.add(String(__roots.INTEL_ROOT).replace(/\/+$/, '')) } catch { /* fail-soft: legacy literal still covered */ }
+  const alt = [...roots].map(_escapeRe).join('|')
+  return new RegExp('(?:' + alt + ')\\/[^\\s,;()\'"`<>]+', 'g')
+}
+const PATH_RE = _buildPathRe()
 
 function scrubFilePathsFromGoal(goal) {
   if (typeof goal !== 'string' || !goal) return ''
