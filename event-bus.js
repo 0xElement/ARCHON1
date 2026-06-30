@@ -171,7 +171,7 @@ const CHECKPOINT_FILE = INTEL_DIR + '/orchestrator/checkpoint.json'
 const PENTEST_COVERAGE = `## 🎯 A→Z COVERAGE MANDATE — ATLAS's standing order
 Full coverage standard (READ IT): ${agentPaths.AGENTS_ROOT}/squads/pentest/methodology/pentest-coverage.md
 This is a COMPREHENSIVE engagement — report EVERYTHING in scope, including informational transport/config hygiene, not only exploitable bugs. A clean check is reported as "Tested — no issues", never skipped.
-- RECON (SCOUT/RANGER): run nmap (-sV + default scripts), ffuf content discovery, subdomain+DNS enum. REPORT every open port/service/version, every discovered dir/file/backup/admin panel, and ALL source/secret leaks — especially .js.map sourcemaps (dump → recover source), exposed .git/.env, swagger/openapi, secrets in JS bundles.
+- RECON (SCOUT/RANGER): the naabu→nmap -sV port/service scan ALREADY ran in Phase 0.4 — read that artifact (don't re-scan), then ffuf content discovery, subdomain+DNS enum. REPORT every open port/service/version, every discovered dir/file/backup/admin panel, and ALL source/secret leaks — especially .js.map sourcemaps (dump → recover source), exposed .git/.env, swagger/openapi, secrets in JS bundles.
 - TRANSPORT/CONFIG (every web run): use sslscan + curl -I to test + REPORT TLS versions (flag TLS 1.0/1.1/SSLv3), weak/deprecated ciphers, certificate issues, HSTS, the security-header set (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy), and cookie flags (Secure/HttpOnly/SameSite).
 - TOOLING: installed = nmap, ffuf, nikto, sslscan, curl. If a tool you'd prefer is missing, use the installed equivalent (ffuf for content discovery, sslscan for TLS) and continue — do NOT block, do NOT attempt apt/go/pip installs (no root). A missing tool is never a reason to stop; verify manually with curl.
 - ⏱️ RATE OF ENGAGEMENT — do NOT bombard the target. This is an assessment, not a stress test: NO DoS, no high-RPS fuzzing, no thousands of rapid requests. Throttle ALL tooling: ffuf \`-t 10 -rate 20\` (≤20 req/s), nmap \`-T2 --max-rate 50\`, nikto default. In manual curl loops insert a small delay (e.g. \`sleep 0.3\`) and keep concurrency low. On HTTP 429/503 or noticeably slower responses, BACK OFF (exponential wait) — never retry-flood. Stay well under any rate that could degrade the service.
@@ -4733,7 +4733,7 @@ async function dispatchPentestParallel(dispatch) {
         updateProgress(7, 'Phase 0.4: nmap full port + service scan')
         logActivity('NEXUS', `🛰️ Phase 0.4: naabu full-port discovery → nmap -sV service scan started`, {
           type: 'nmap-scan', squad, taskId, projectId: projectId || '',
-          details: `Deterministic nmap -sV -p- --min-rate 3000 -T4 on the host (all 65535 ports). The heart-truth artifact every recon + specialist agent reads.`,
+          details: `naabu (-tp 1000) discovers open ports, then nmap -sV runs on JUST those for service/version detection. The single heart-truth artifact (nmap-${taskId}.json) every recon + specialist agent reads — they do NOT re-scan.`,
         })
         const nmap = await runNmapScan(targetUrl, { timeoutMs: 8 * 60 * 1000, ip: _boxIp })
         try { fs.writeFileSync(`${agentPaths.INTEL_ROOT}/nmap-${taskId}.json`, JSON.stringify(nmap, null, 2)) } catch {}
@@ -4988,7 +4988,7 @@ async function dispatchPentestParallel(dispatch) {
     log(`🔄 Phase 1: Dispatching recon agents (${PENTEST_RECON.map(a => a.toUpperCase()).join(', ')})`)
     logActivity('NEXUS', `🔄 Phase 1: Recon — ${PENTEST_RECON.map(a => a.toUpperCase()).join(', ')}`, {
       type: 'dispatch-phase', squad, taskId, projectId: projectId || '',
-      details: `SCOUT: Recon & Attack Surface\nranger: nmap -sV scan\nTarget: ${targetUrl}`
+      details: `SCOUT: Recon & Attack Surface\nRANGER: service enumeration from the Phase-0.4 naabu→nmap result (no re-scan)\nTarget: ${targetUrl}`
     })
     updateProgress(10, 'Phase 1: Recon running (SCOUT + RANGER)')
 
@@ -9342,7 +9342,7 @@ Each specialist must cover every endpoint in the list for their bug class.
 These MUST appear in your activity log or the engagement fails grading:
 
 1. **State engagement type in Phase 0**: Log exactly → \`"Engagement Type: blackbox"\` (or greybox/whitebox as appropriate)
-2. **RANGER runs nmap -sV in Phase 1**: RANGER MUST execute \`nmap -sV TARGET_HOST\` and log results as → \`"RANGER baseline nmap -sV scan"\` 
+2. **RANGER enumerates from the Phase-0.4 scan (no re-scan)**: the naabu→nmap -sV scan ALREADY ran in Phase 0.4 — RANGER reads that result (the nmap artifact in its context) and enumerates each service; only a TARGETED \`nmap -sC -p <one-port> TARGET_HOST\` for deeper script detail, NEVER a fresh host/-sV scan. Log → \`"RANGER service enumeration"\`
 3. **Every finding must include reproduction steps**: All findings logged by ANY agent must include \`"reproduction"\` or \`"steps"\` with exact curl command or numbered steps
 4. **SCRIBE includes Overall Risk Rating**: SCRIBE must log → \`"Overall Risk: [Critical/High/Medium/Low]"\` in final report
 5. **SCRIBE includes Recommendations Summary**: SCRIBE must log → \`"Recommendations:"\` section with numbered list
@@ -9418,11 +9418,12 @@ Step 5 — ATLAS reads this file before Phase 2 dispatch
 ### PHASE 1 — RECON + BASELINE SCAN (ALWAYS)
 1. SCOUT → deep recon using TRACER's endpoint map: subdomains, ports, tech stack, secrets
 2. Build complete Attack Surface Inventory
-3. **RANGER → MANDATORY nmap -sV baseline scan** (runs IN PARALLEL with SCOUT):
-   \`\`\`bash
-   nmap -sV --open -T4 TARGET_HOST -oN /tmp/ranger-nmap-sv.txt
-   \`\`\`
-   RANGER logs: \`"RANGER baseline nmap -sV scan complete: [services found]"\`
+3. **RANGER → service enumeration from the EXISTING Phase-0.4 scan** (runs IN PARALLEL with SCOUT):
+   The naabu→nmap -sV scan ALREADY ran (its result is in your context as the nmap heart-truth
+   artifact). Do NOT re-run a full/-sV host scan. Read every open port/service from it and
+   enumerate each (banners, default creds, known CVEs); run a TARGETED \`nmap -sC -p <one-port>
+   TARGET_HOST\` only for deeper script detail on a specific service.
+   RANGER logs: \`"RANGER service enumeration complete: [services found]"\`
 
 ### PHASE 2 — WEB VULNERABILITY DISCOVERY (Each agent = ONE bug class only)
 
