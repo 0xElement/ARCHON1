@@ -63,19 +63,58 @@ function wstgForFinding(f) {
   return areas && areas.length ? areas[0] : ''
 }
 
-// Which WSTG areas were exercised (by findings and/or agents that ran).
+// Per-area coverage SCORE (handoff item 8 — "Authentication: 90%"). Two modes:
+//   precise — caller knows how many WSTG sub-checks it attempted vs the area total
+//             (attemptedByArea[id] = {attempted, total}); % = attempted/total.
+//   signal  — no sub-check tracking: an area is EXERCISED when its owner agent ran
+//             (base credit: "tested, nothing surfaced yet") and earns depth credit
+//             per finding, capped at 100. A finding with no owner-run still counts
+//             as touched. This is an honest proxy, not a claim of exhaustive testing.
+const AREA_EXERCISED_BASE = 60   // owner ran, no evidence yet
+const AREA_TOUCHED_BASE = 30     // a finding landed but the owner wave didn't run
+const AREA_EVIDENCE_STEP = 20    // each finding (capped at 2) adds depth credit
+function areaScore({ exercised, findingCount = 0, attempted, total }) {
+  if (Number.isFinite(attempted) && Number.isFinite(total) && total > 0) {
+    return Math.round(Math.min(Math.max(attempted, 0), total) / total * 100)
+  }
+  if (!exercised && !findingCount) return 0
+  const base = exercised ? AREA_EXERCISED_BASE : AREA_TOUCHED_BASE
+  return Math.min(100, base + Math.min(findingCount, 2) * AREA_EVIDENCE_STEP)
+}
+
+// Which WSTG areas were exercised (by findings and/or agents that ran), PLUS a
+// graded per-area coverage score.
 //   findings: [{vuln_class|type|title, original_agent}], agentsRun: ['viper',...]
-function computeCoverage(findings = [], agentsRun = []) {
-  const covered = new Set()
-  for (const f of findings || []) { const id = wstgForFinding(f); if (id) covered.add(id) }
-  for (const a of agentsRun || []) for (const id of (AGENT_TO_WSTG[String(a).toLowerCase()] || [])) covered.add(id)
-  const coveredIds = WSTG.map(w => w.id).filter(id => covered.has(id))
-  const notReached = WSTG.filter(w => !covered.has(w.id))
+//   opts.attemptedByArea: { 'WSTG-ATHN': {attempted, total}, ... } (optional, precise mode)
+function computeCoverage(findings = [], agentsRun = [], opts = {}) {
+  const attemptedByArea = (opts && opts.attemptedByArea) || {}
+  const ranAreas = new Set()
+  for (const a of agentsRun || []) for (const id of (AGENT_TO_WSTG[String(a).toLowerCase()] || [])) ranAreas.add(id)
+  const findingCountByArea = {}
+  for (const f of findings || []) { const id = wstgForFinding(f); if (id) findingCountByArea[id] = (findingCountByArea[id] || 0) + 1 }
+
+  const areas = WSTG.map(w => {
+    const exercised = ranAreas.has(w.id)
+    const findingCount = findingCountByArea[w.id] || 0
+    const att = attemptedByArea[w.id] || {}
+    const percent = areaScore({ exercised, findingCount, attempted: att.attempted, total: att.total })
+    return {
+      id: w.id, name: w.name, owner: w.owner,
+      exercised, findings: findingCount, percent,
+      status: percent === 0 ? 'not-reached' : percent >= 80 ? 'covered' : 'partial',
+    }
+  })
+
+  // Binary covered set (back-compat): an area is "covered" if it scored anything.
+  const coveredIds = areas.filter(a => a.percent > 0).map(a => a.id)
+  const notReached = areas.filter(a => a.percent === 0)
   return {
     covered: coveredIds,
-    not_reached: notReached.map(w => ({ id: w.id, name: w.name, owner: w.owner })),
+    not_reached: notReached.map(a => ({ id: a.id, name: a.name, owner: a.owner })),
+    areas,
     total: WSTG.length,
-    percent: Math.round((coveredIds.length / WSTG.length) * 100),
+    percent: Math.round((coveredIds.length / WSTG.length) * 100), // % of areas reached (unchanged meaning)
+    weighted_percent: Math.round(areas.reduce((s, a) => s + a.percent, 0) / WSTG.length), // mean per-area depth
   }
 }
 
@@ -84,4 +123,12 @@ function checklistText() {
   return WSTG.map(w => `- ${w.id} ${w.name} → ${w.owner.join('/')}`).join('\n')
 }
 
-module.exports = { WSTG, ownerFor, wstgForFinding, computeCoverage, checklistText, CLASS_TO_WSTG, CATALOG_BY_CLASS }
+// Human-readable per-area table for reports: "Authentication: 90% (covered)".
+function coverageTable(cov) {
+  const areas = (cov && cov.areas) || []
+  const lines = areas.map(a => `- ${a.name}: ${a.percent}%${a.status === 'not-reached' ? ' (not reached)' : a.status === 'partial' ? ' (partial)' : ''}`)
+  if (cov && Number.isFinite(cov.weighted_percent)) lines.push(`\nOverall depth: ${cov.weighted_percent}% · areas reached: ${cov.percent}%`)
+  return lines.join('\n')
+}
+
+module.exports = { WSTG, ownerFor, wstgForFinding, computeCoverage, areaScore, coverageTable, checklistText, CLASS_TO_WSTG, CATALOG_BY_CLASS }

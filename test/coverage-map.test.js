@@ -5,7 +5,7 @@
 
 const assert = require('node:assert')
 const { test } = require('node:test')
-const { WSTG, ownerFor, wstgForFinding, computeCoverage, checklistText } = require('../src/core/coverage-map')
+const { WSTG, ownerFor, wstgForFinding, computeCoverage, areaScore, coverageTable, checklistText } = require('../src/core/coverage-map')
 
 test('every WSTG area has a name + owner', () => {
   assert.ok(WSTG.length >= 12)
@@ -49,4 +49,41 @@ test('checklistText lists every area with owners', () => {
   const t = checklistText()
   assert.match(t, /WSTG-ATHZ Authorization → warden/)
   assert.match(t, /WSTG-INPV Input Validation/)
+})
+
+// ── handoff item 8: graded per-area coverage scoring ─────────────────────────
+test('areaScore: signal model — not reached / exercised / with evidence', () => {
+  assert.strictEqual(areaScore({ exercised: false, findingCount: 0 }), 0)        // untouched
+  assert.strictEqual(areaScore({ exercised: true, findingCount: 0 }), 60)        // owner ran, nothing surfaced
+  assert.strictEqual(areaScore({ exercised: true, findingCount: 1 }), 80)        // + one finding
+  assert.strictEqual(areaScore({ exercised: true, findingCount: 5 }), 100)       // capped
+  assert.strictEqual(areaScore({ exercised: false, findingCount: 1 }), 50)       // touched by a finding only
+})
+
+test('areaScore: precise model when sub-checks are known (Authentication: 90%)', () => {
+  assert.strictEqual(areaScore({ attempted: 9, total: 10 }), 90)
+  assert.strictEqual(areaScore({ attempted: 10, total: 10 }), 100)
+  assert.strictEqual(areaScore({ attempted: 0, total: 10 }), 0)
+})
+
+test('computeCoverage exposes per-area scores + weighted depth', () => {
+  const cov = computeCoverage([{ vuln_class: 'sqli' }, { vuln_class: 'sqli' }], ['keyring']) // INPV findings; keyring→IDNT/ATHN/SESS
+  const inpv = cov.areas.find(a => a.id === 'WSTG-INPV')
+  assert.strictEqual(inpv.findings, 2)
+  assert.ok(inpv.percent >= 70 && inpv.status !== 'not-reached')
+  const athn = cov.areas.find(a => a.id === 'WSTG-ATHN')
+  assert.strictEqual(athn.percent, 60) // exercised by keyring, no findings
+  const busl = cov.areas.find(a => a.id === 'WSTG-BUSL')
+  assert.strictEqual(busl.percent, 0)
+  assert.strictEqual(busl.status, 'not-reached')
+  assert.ok(cov.weighted_percent > 0 && cov.weighted_percent < 100)
+  assert.strictEqual(cov.areas.length, WSTG.length)
+})
+
+test('coverageTable renders "<area>: <pct>%" lines', () => {
+  const cov = computeCoverage([{ vuln_class: 'sqli' }], ['keyring'])
+  const t = coverageTable(cov)
+  assert.match(t, /Authentication: 60%/)
+  assert.match(t, /Business Logic: 0% \(not reached\)/)
+  assert.match(t, /Overall depth: \d+%/)
 })
