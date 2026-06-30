@@ -512,30 +512,13 @@ function findingsForSingleTask(id, label) {
       enriched: !!detail[f.id], triage: triage[f.id] || null, source: 'validated',
     })
   }
-  // 2) Raw agent findings (live-findings) not already covered by a validated entry.
-  let n = 0
-  for (const f of live) {
-    const u = _normUrl(f.url)
-    if (u && seenUrls.has(u)) continue
-    n++
-    const fid = `LF-${n}`
-    out.push({
-      key: id + '::' + fid, srcTask: id, iteration: label || '',
-      id: fid, severity: titleSev(f.severity), title: _liveTitle(f),
-      // emit-finding now carries the structured fields — surface them (the agent's own
-      // claim; AUDITOR re-validates later). Was hardcoded empty → blank finding cards.
-      cvss: typeof f.cvss_score === 'number' ? f.cvss_score : null,
-      cvssVector: f.cvss_vector || '', cwe: f.cwe || '', testSteps: [],
-      // lifecycle: the finding agent's own claim — NOT yet validator-confirmed (amber, not green)
-      stage: _liveStatus(f) === 'CONFIRMED' ? 'agent-confirmed' : 'suspected',
-      agent: f.agent || '', status: _liveStatus(f) === 'CONFIRMED' ? 'AGENT-CONFIRMED' : 'SUSPECTED',
-      url: f.url || '', method: f.method || '',
-      description: f.details || '', poc: f.reproduction || '', validation: f.validation || f.reproduction_result || '',
-      impact: f.impact || '', remediation: f.remediation || f.fix || f.recommendation || '',
-      rawRequest: f.raw_request || f.http_request || synthRawRequest(f.method || 'GET', f.url, f.reproduction),
-      judge: '', enriched: false, triage: triage[fid] || null, source: 'live',
-    })
-  }
+  // 2) Raw agent claims (live-findings) are DELIBERATELY NOT shown on the Findings board.
+  // The board shows ONLY clean, triaged findings — deduplicated, merged, fully written
+  // (title/CWE/CVSS/PoC/impact/remediation), and properly scored — i.e. the AUDITOR-validated
+  // + TRIAGER set above. Raw claims (blank/n-a/duplicate) never appear here; they remain
+  // readable as the downloadable `live-findings-<taskId>.jsonl` artifact for transparency.
+  // (If a run produces ZERO validated findings, the board is empty until validation/triage runs.)
+  void live
   return out
 }
 // Aggregate findings across ALL iterations of the engagement the task belongs to.
