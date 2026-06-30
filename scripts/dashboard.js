@@ -696,7 +696,10 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=u
 function serveStatic(res, file) {
   try {
     const body = fs.readFileSync(file)
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' })
+    // no-cache: the SPA assets (app.js/app.css/index.html) are tiny and change often during
+    // development — without this the browser heuristically caches them and UI fixes never
+    // load (you'd have to hard-reload). Always revalidate so the latest UI is served.
+    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache, no-store, must-revalidate' })
     res.end(body)
   } catch { res.writeHead(404); res.end('not found') }
 }

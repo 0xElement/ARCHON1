@@ -367,7 +367,10 @@ ol.fsteps li { font-size: 13px; line-height: 1.5; }
 .art:hover { border-color: var(--accent-2); background: var(--bg-3, var(--bg-2)); }
 .art svg { width: 14px; height: 14px; color: var(--accent-2); flex-shrink: 0; }
 .art-sz { color: var(--fg-dim); font-family: var(--mono); font-size: 10.5px; }
-.logstream { max-height: 62vh; overflow-y: auto; display: flex; flex-direction: column; }
+/* No internal scroll box: the log flows on the page so you scroll the WHOLE page freely
+   top-to-bottom, and a 2.5s refresh (which appends new lines at the bottom) never yanks
+   your view. */
+.logstream { display: flex; flex-direction: column; }
 .logrow { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; align-items: baseline; }
 .logrow:last-child { border: 0; }
 .logrow.phase { background: rgba(99,102,241,.06); margin: 0 -8px; padding: 7px 8px; border-radius: 6px; }
