@@ -104,6 +104,19 @@ function stubDeps(spawnCalls) {
     ok('Phase 0 rejects missing sourceDir', res.error && res.phase === 0)
   }
 
+  // ── Test 5: selectVulnClasses derives classes from the discovered surface ──
+  {
+    const all = cr.selectVulnClasses({ '03_graphql': 12, '07_downloads_exports': 4, '02_auth_checks': 30 })
+    ok('graphql surface → graphql class', all.includes('graphql'))
+    ok('downloads surface → file-handling class', all.includes('file-handling'))
+    ok('auth surface → authentication-session class', all.includes('authentication-session'))
+    ok('always keeps the access-control floor', all.includes('access-control'))
+    ok('every selected class is a known CLASS', all.every(c => cr.CLASS[c]))
+    const empty = cr.selectVulnClasses({})
+    ok('empty surface still returns the baseline floor', empty.length >= 5 && empty.includes('xss'))
+    ok("CLASS covers every pattern catalog (23 classes)", Object.keys(cr.CLASS).length === 23)
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
 })().catch(e => { console.error('THREW:', e.stack); process.exit(1) })

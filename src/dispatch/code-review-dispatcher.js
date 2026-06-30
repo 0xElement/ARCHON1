@@ -46,14 +46,57 @@ const { execSync } = require('child_process')
 const METH = path.join(__roots.AGENTS_ROOT, 'squads/code-review/methodology')
 const PRESET_GITLAB = path.join(METH, 'presets/gitlab-features.json')
 
-// vuln class → { specialist, phase-2 module, pattern catalog }
+// vuln class → { specialist, phase-2 module, pattern catalog }. The slugs match
+// common/patterns/<slug>.json — a null catalog auto-resolves to that pattern
+// catalog in phase2Prompt (when the pattern flag is on), else the specialist's
+// own skill. access-control + xss keep their dedicated methodology-pack modules.
 const CLASS = {
-  'access-control': { agent: 'marshal', module: 'phase2_access_control_idor_v1.md', catalog: 'access_control_40_pattern_catalog.md' },
-  'xss':            { agent: 'cipher',         module: 'phase2_xss_html_injection_v1.md',  catalog: 'xss_50_pattern_catalog.md' },
-  'sqli':           { agent: 'quill',     module: null, catalog: null },
-  'ssrf':           { agent: 'beacon',      module: null, catalog: null },
-  'rce':            { agent: 'breaker',        module: null, catalog: null },
-  'account-takeover': { agent: 'siphon',      module: null, catalog: null },
+  'access-control':        { agent: 'marshal', module: 'phase2_access_control_idor_v1.md', catalog: 'access_control_40_pattern_catalog.md' },
+  'multi-tenant':          { agent: 'marshal', module: null, catalog: null },
+  'admin-privileged':      { agent: 'marshal', module: null, catalog: null },
+  'business-logic':        { agent: 'marshal', module: null, catalog: null },
+  'account-takeover':      { agent: 'siphon',  module: null, catalog: null },
+  'authentication-session':{ agent: 'siphon',  module: null, catalog: null },
+  'cryptography-secrets':  { agent: 'siphon',  module: null, catalog: null },
+  'xss':                   { agent: 'cipher',  module: 'phase2_xss_html_injection_v1.md', catalog: 'xss_50_pattern_catalog.md' },
+  'data-exposure':         { agent: 'cipher',  module: null, catalog: null },
+  'logging-audit':         { agent: 'cipher',  module: null, catalog: null },
+  'sqli':                  { agent: 'quill',   module: null, catalog: null },
+  'injection':             { agent: 'quill',   module: null, catalog: null },
+  'deserialization':       { agent: 'quill',   module: null, catalog: null },
+  'ssrf':                  { agent: 'beacon',  module: null, catalog: null },
+  'webhooks':              { agent: 'beacon',  module: null, catalog: null },
+  'cloud-infra':           { agent: 'beacon',  module: null, catalog: null },
+  'api-security':          { agent: 'beacon',  module: null, catalog: null },
+  'graphql':               { agent: 'beacon',  module: null, catalog: null },
+  'rce':                   { agent: 'breaker', module: null, catalog: null },
+  'path-traversal':        { agent: 'breaker', module: null, catalog: null },
+  'file-handling':         { agent: 'breaker', module: null, catalog: null },
+  'race-conditions':       { agent: 'breaker', module: null, catalog: null },
+  'supply-chain':          { agent: 'breaker', module: null, catalog: null },
+}
+// Broad default floor when classes aren't explicitly set AND inventories are
+// skipped (was just access-control+xss — too thin). With inventories present,
+// selectVulnClasses() refines this from the discovered surface.
+const DEFAULT_CLASSES = ['access-control', 'authentication-session', 'xss', 'injection', 'data-exposure', 'business-logic']
+// Auto-select vuln classes from the Phase-1 inventory surface (counts by
+// inventory name, preset-agnostic via substring match). Always keeps a baseline
+// floor, then adds surface-specific classes whose inventory actually matched.
+function selectVulnClasses(counts) {
+  const sel = new Set(['access-control', 'business-logic', 'xss', 'injection', 'data-exposure'])
+  const add = (...cs) => cs.forEach(c => sel.add(c))
+  for (const [name, n] of Object.entries(counts || {})) {
+    if (!n) continue
+    if (/auth|token|actor|session/.test(name)) add('authentication-session', 'account-takeover', 'access-control')
+    if (/route|endpoint|rest|api/.test(name)) add('api-security', 'access-control')
+    if (/graphql/.test(name)) add('graphql', 'api-security')
+    if (/db|quer|search|count/.test(name)) add('sqli', 'injection')
+    if (/render|output|response|shaping|serial/.test(name)) add('xss', 'data-exposure')
+    if (/upload|download|export|file/.test(name)) add('file-handling', 'ssrf', 'path-traversal')
+    if (/worker|job/.test(name)) add('race-conditions', 'injection')
+    if (/service|finder|polic/.test(name)) add('access-control', 'business-logic')
+  }
+  return [...sel].filter(c => CLASS[c])
 }
 const MAPPER_POOL = ['marshal', 'siphon', 'cipher', 'quill', 'beacon', 'breaker']
 // Phase 3 freehand source review (Autonomous OS Block D). flag-off ⇒ 'freehand'
@@ -355,8 +398,12 @@ async function runCodeReview(dispatch, deps) {
     return { error: p0.reason, phase: 0 }
   }
   const preset = (meta.preset === 'gitlab' || meta.preset === 'generic') ? meta.preset : detectPreset(sourceDir)
-  const vulnClasses = (Array.isArray(meta.vulnClasses) && meta.vulnClasses.length
-    ? meta.vulnClasses : ['access-control', 'xss']).filter(c => CLASS[c])
+  // Classes: explicit meta.vulnClasses wins; ['all'] = every catalog; otherwise a
+  // broad default floor here, refined from the discovered surface after inventories.
+  const explicitClasses = Array.isArray(meta.vulnClasses) && meta.vulnClasses.length > 0
+  let vulnClasses = (explicitClasses
+    ? (meta.vulnClasses.length === 1 && meta.vulnClasses[0] === 'all' ? Object.keys(CLASS) : meta.vulnClasses)
+    : DEFAULT_CLASSES).filter(c => CLASS[c])
   const maxFeatures = meta.maxFeatures || (preset === 'gitlab' ? 43 : 10)
   const maxPhase2 = meta.maxPhase2 || 6
   fs.mkdirSync(`${outDir}/phase1-maps/features`, { recursive: true })
@@ -372,7 +419,14 @@ async function runCodeReview(dispatch, deps) {
   // Phase 0a — inventories
   if (runPhase('inventories')) {
     updateProgress(10, 'Phase 0a: scripted inventory enumeration')
-    buildInventories(sourceDir, invDir, preset, log)
+    const invCounts = buildInventories(sourceDir, invDir, preset, log)
+    // Auto-select the vuln classes that the discovered surface actually warrants
+    // (unless the operator pinned an explicit list).
+    if (!explicitClasses) {
+      vulnClasses = selectVulnClasses(invCounts)
+      for (const c of vulnClasses) fs.mkdirSync(`${outDir}/phase2/${c}`, { recursive: true })
+      log(`  🎯 Auto-selected ${vulnClasses.length} vuln classes from surface: ${vulnClasses.join(', ')}`)
+    }
   }
 
   // Phase 0b — App Blueprint (understand the whole system before mapping the parts).
@@ -540,6 +594,8 @@ module.exports = {
   // exported for tests/introspection
   detectPreset,
   buildInventories,
+  selectVulnClasses,
+  DEFAULT_CLASSES,
   CLASS,
   MAPPER_POOL,
   PHASES,
