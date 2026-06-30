@@ -374,6 +374,10 @@ async function renderTaskLogs() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
           <span>${esc(artLabel(a.name))}</span><span class="art-sz">${(a.size / 1024).toFixed(1)} KB</span></a>`).join('')
     : ''
+  // Preserve the reader's scroll position across the re-render: follow new lines ONLY if
+  // they were already pinned to the bottom; otherwise restore where they were reading.
+  const _wasAtBottom = (stream.scrollHeight - stream.scrollTop - stream.clientHeight) < 80
+  const _prevTop = stream.scrollTop
   stream.innerHTML = acts.length ? acts.map(a => {
     const det = String(a.details || '').trim()
     const act = String(a.action || a.raw || '').trim()
@@ -384,9 +388,8 @@ async function renderTaskLogs() {
       <div class="lc"><div class="lact">${esc(act)}</div>${det && det !== act ? `<pre class="ldet">${esc(det)}</pre>` : ''}</div>
     </div>`
   }).join('') : '<div class="empty">No activity logged for this run yet.</div>'
-  // keep scrolled to the latest line while a run is live
-  const t = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(tid))
-  if (t && t.status === 'in-progress') stream.scrollTop = stream.scrollHeight
+  // Stick to the bottom only if the reader was already there — never yank them up from older logs.
+  stream.scrollTop = _wasAtBottom ? stream.scrollHeight : _prevTop
 }
 
 let fnEngagementId = '', fnIterations = [], fnFilter = ''
