@@ -8623,6 +8623,20 @@ function ensureValidatedFindings(taskId) {
   } catch (e) { log(`⚠️ ensureValidatedFindings failed (non-fatal): ${e.message}`); return 0 }
 }
 
+// A real finding has a vulnerability — not a disproven claim, "no X found / no attack
+// surface", or an n/a marker. Mirrors the dashboard filter so non-findings never reach
+// the triager/writer/board. Keep in sync with scripts/dashboard.js isRealFinding().
+function _isRealFinding(f) {
+  // Match the TITLE only — a non-finding declares itself there ("… Disproven Claim",
+  // "No XML Attack Surface Found"). Matching details/notes too would false-drop real
+  // findings whose notes merely mention "not vulnerable"/"not found" in passing.
+  const t = String(f.title || '').toLowerCase()
+  const sev = String(f.severity || '').toLowerCase()
+  if (sev === 'n/a' || sev === 'na' || sev === 'none') return false
+  if (/\bdisproven\b|\bdisproved\b|no .{0,12}attack surface|not exploitable|\bnot found\b|no .{0,25}found|false[- ]positive/.test(t)) return false
+  return true
+}
+
 // ── TRIAGER (Phase 3.052): dedup + merge validated findings into the canonical set ──
 // The TRIAGER agent reads VALIDATED-FINDINGS, drops empty/n-a, eliminates duplicates, and
 // MERGES related issues into one (same vuln class + locus; cleartext-creds + same-path file =
@@ -8689,45 +8703,59 @@ Write ONLY that file. Reply one line: triaged N→M findings.`
 // Has the WRITER produce description/impact/remediation/raw_request/poc per finding →
 // findings-detail-<taskId>.json (merged by the dashboard's /api/findings).
 async function enrichFindingsForTask(taskId) {
+  const { readFindingsFile } = require('./agents/finding-schema')
   ensureValidatedFindings(taskId)
   const vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
-  if (!fs.existsSync(vf)) { log(`🔎 enrich-findings: no validated findings for ${taskId}`); return }
+  if (!fs.existsSync(vf)) { log(`✍️ writer: no validated findings for ${taskId}`); return }
   const outFile = `${agentPaths.INTEL_ROOT}/findings-detail-${taskId}.json`
-  const prompt = `You are WRITER, the finding report-writer. Read your identity: cat ${agentPaths.soulPath('writer')}
-Turn each validated finding into a COMPLETE, professional finding — every field filled, none left
-blank/"n/a". Re-read the live evidence if needed; NEVER invent (no fabricated 200s/responses).
-
-Read ${vf} — one JSON finding per line (id, title, severity, url, method, reproduction_method, reproduction_result, details, impact, remediation, validation, raw_request, cvss_vector, cwe).
-
-FOLLOW THE GOLD-STANDARD EXAMPLES exactly (cat them first):
-  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples/example-idor.md
-  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples/example-rce.md
-  cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples/example-xss.md
+  // Real findings only (drop disproven / "none found"), then write ONE AT A TIME — a
+  // dedicated WRITER call per finding GUARANTEES coverage (the bulk "do all 15" call
+  // silently skipped some) and lets each finding carry its own captured evidence.
+  const findings = readFindingsFile(vf).filter(_isRealFinding)
+  if (!findings.length) { log(`✍️ writer: no real findings for ${taskId}`); return }
+  const detail = {}; try { Object.assign(detail, JSON.parse(fs.readFileSync(outFile, 'utf8'))) } catch {}
+  log(`✍️ WRITER: ${taskId} — writing ${findings.length} findings one-at-a-time (queued, evidence-attached)`)
+  logActivity('NEXUS', `✍️ WRITER: writing ${findings.length} complete findings`, { type: 'enrich-findings', taskId, details: `One finding at a time → guaranteed coverage. Each gets title/CWE/CVSS/description/control-vs-bug PoC/HTTP req+resp/impact/remediation + its captured evidence, following the example templates.` })
+  const EX = `${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples`
+  await runWithConcurrency(findings, _agentConcurrency('pentest-squad'), async (f) => {
+    const perFile = `${agentPaths.INTEL_ROOT}/finding-detail-${taskId}-${f.id}.json`
+    try { fs.unlinkSync(perFile) } catch {}
+    const evidence = `Captured evidence (USE IT VERBATIM — do not invent or paraphrase a different result):\n- reproduction_method (the request/command fired): ${String(f.reproduction_method || f.proof || '(none captured)').slice(0, 1400)}\n- reproduction_result (the response/output observed): ${String(f.reproduction_result || '(none captured)').slice(0, 1400)}`
+    const prompt = `You are WRITER. Read your identity: cat ${agentPaths.soulPath('writer')}
+Write ONE complete, professional finding. NEVER invent — every claim traces to the evidence below.
+Match the gold-standard format that fits this class: ls ${EX}/ ; cat the closest example (idor/xss/rce/access-control/static-sqli).
 Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
 
-For EVERY finding id, produce ALL of:
-- description: 2-4 sentences — what the issue IS on THIS target — ENDING with a bold "Root cause: …" line.
-- cwe: the most specific CWE id (e.g. "CWE-89", "CWE-639", "CWE-79").
-- cvss_vector: the FULL CVSS:3.1 base vector. Score the REAL demonstrated impact — a proven RCE is
-  C:H/I:H/A:H (NOT C:N/I:N/A:N); an IDOR read is C:H/I:N. Set every metric to match what was proven.
-- cvss_score: the numeric base score (0.0-10.0) that vector computes to.
-- test_steps: NUMBERED control-vs-bug PoC a non-author can follow — show the CONTROL (the secure/
-  expected case) THEN the BUG (the broken case); the contrast is the proof. Include exact requests/payloads.
-- raw_request: the exact raw HTTP request proving it — "METHOD /path HTTP/1.1", Host, headers,
-  Cookie/Authorization if used, blank line, body.
-- validation: the HTTP RESPONSE / output that proves it worked (status line + key evidence bytes).
-- impact: the concrete attacker gain (data read/written, scope of users/tenants, takeover).
-- remediation: the specific correct fix at the right layer.
-- poc: the exact curl/command that reproduces it.
-A field you cannot fill from evidence → write "UNPROVEN — <what's missing>", never filler.
+THE FINDING (id ${f.id}):
+- title: ${f.title || ''}
+- url: ${f.url || ''}   method: ${f.method || ''}
+- agent notes/details: ${String(f.details || f.notes || '').slice(0, 1500)}
+- claimed severity: ${f.severity || ''}   cvss_vector (if any): ${f.cvss_vector || ''}
+${evidence}
 
-Write STRICT JSON to ${outFile}:
-{ "<finding id>": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "test_steps":["Step 1 (control): …","Step 2 (bug): …"], "raw_request":"", "validation":"", "impact":"", "remediation":"", "poc":"" }, ... }
-Write ONLY that file. Then reply one line: wrote N findings.`
-  log(`✍️ WRITER: ${taskId} — writing complete findings (template-driven)`)
-  logActivity('NEXUS', `✍️ WRITER: writing complete findings`, { type: 'enrich-findings', taskId, details: 'WRITER fills title/CWE/CVSS/description/control-vs-bug PoC/HTTP req+resp/impact/remediation per finding, following the example templates.' })
-  try { await spawnAgent('writer', taskId, prompt, `task-${taskId}-writer`, null); log(`✅ WRITER done: ${taskId}`) }
-  catch (e) { log(`❌ WRITER ${taskId} failed: ${e.message}`) }
+Produce ALL fields (use Markdown in the prose fields so the card renders nicely):
+- description: 2-4 sentences on THIS issue, ENDING with a bold "**Root cause:** …" line.
+- cwe: the most specific CWE id (e.g. CWE-639, CWE-78, CWE-79).
+- cvss_vector: the FULL CVSS:3.1 vector matching the REAL proven impact (proven RCE → C:H/I:H/A:H; IDOR read → C:H/I:N; never all-N on a real bug). The severity follows this vector.
+- cvss_score: the number that vector computes to.
+- test_steps: NUMBERED control-vs-bug PoC — the CONTROL (secure/expected case) then the BUG (broken case).
+- raw_request: the exact request/command that triggers it — verbatim from reproduction_method.
+- validation: the response/output that PROVES it — verbatim captured bytes from reproduction_result.
+- impact: the concrete attacker gain.
+- remediation: the specific correct fix at the right layer.
+- poc: the exact curl/command to reproduce.
+A field with no evidence → "UNPROVEN — <what's missing>", never filler.
+
+Write STRICT JSON to ${perFile} (ONLY that file):
+{ "${f.id}": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "test_steps":["Step 1 (control): …","Step 2 (bug): …"], "raw_request":"", "validation":"", "impact":"", "remediation":"", "poc":"" } }
+Reply one line: wrote ${f.id}.`
+    try { await spawnAgent('writer', taskId, prompt, `task-${taskId}-writer-${f.id}`, null) }
+    catch (e) { log(`⚠️ writer ${f.id} failed: ${e.message}`); return }
+    try { const one = JSON.parse(fs.readFileSync(perFile, 'utf8')); Object.assign(detail, one); fs.unlinkSync(perFile) }
+    catch { log(`⚠️ writer ${f.id}: no detail parsed (left for retry)`) }
+  })
+  try { fs.writeFileSync(outFile, JSON.stringify(detail, null, 2)); log(`✅ WRITER done: ${taskId} — ${Object.keys(detail).length}/${findings.length} findings written`) }
+  catch (e) { log(`❌ WRITER write failed: ${e.message}`) }
 }
 
 function _recoveryBlocked(tid, queue, taskObj) {

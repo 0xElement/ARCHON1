@@ -447,10 +447,12 @@ function sevFromVector(vector, fallback) {
 // Drop non-findings that should never reach the board: disproven claims, "no X found /
 // no attack surface", and explicit n/a markers. A real finding has a vulnerability.
 function isRealFinding(f) {
-  const t = (String(f.title || '') + ' ' + String(f.details || '')).toLowerCase()
+  // Match the TITLE only — a non-finding declares itself there. Matching details too
+  // would false-drop real findings whose evidence mentions "not found"/"not vulnerable".
+  const t = String(f.title || '').toLowerCase()
   const sev = String(f.severity || '').toLowerCase()
   if (sev === 'n/a' || sev === 'na' || sev === 'none') return false
-  if (/\bdisproven\b|\bdisproved\b|no xml attack surface|no attack surface|not exploitable|not vulnerable|no vuln(erabilit|)|\bnot found\b|no .{0,20}found|false[- ]positive|^n\/a\b|\bn\/a finding/.test(t)) return false
+  if (/\bdisproven\b|\bdisproved\b|no .{0,12}attack surface|not exploitable|\bnot found\b|no .{0,25}found|false[- ]positive/.test(t)) return false
   return true
 }
 function readJsonl(file) {
