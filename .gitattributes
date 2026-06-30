@@ -4,4 +4,3 @@
 _audit-tree.txt export-ignore
 .github/ export-ignore
 .gitattributes export-ignore
-.dockerignore export-ignore

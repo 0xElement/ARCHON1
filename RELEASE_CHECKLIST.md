@@ -1,6 +1,6 @@
 # ARCHON — Release Checklist
 
-Run before a Docker / community release or a developer handoff.
+Run before a community release or a developer handoff.
 
 ## Packaging — produce a clean artifact
 
@@ -14,15 +14,15 @@ npm run pack:release      # → archon-release.zip via `git archive` (tracked fi
 directly — that leaks local Mac paths and a multi-hundred-MB `node_modules`.
 
 The shipped tree keeps: `package.json`, `package-lock.json`, `.env.local.example`,
-`src/`, `agents/`, `common/`, `squads/`, `_universal/`, `scripts/`, `ui/`, `tools/`,
-`test/`, `docs/`, `schemas/`, `Dockerfile`, `docker-compose.yml`, and the docs set.
+`setup.sh`, `src/`, `agents/`, `common/`, `squads/`, `_universal/`, `scripts/`, `ui/`,
+`tools/`, `test/`, `docs/`, `schemas/`, and the docs set.
 
 ## Environment — no hardcoded local paths
 
 Roots resolve automatically (see `paths.js`): explicit env (`KURU_AGENTS_ROOT` /
 `KURU_INTEL_ROOT`) → `ARCHON_ROOT` → `/root/agents` (only if it exists) → **the repo
-dir**. A fresh clone / container therefore needs **no `.env.local`** — verified by
-`npm test` passing with all roots unset.
+dir**. A fresh clone therefore needs **no `.env.local`** — verified by `npm test`
+passing with all roots unset.
 
 ## The checklist
 
@@ -34,7 +34,7 @@ dir**. A fresh clone / container therefore needs **no `.env.local`** — verifie
 - [x] Autonomous-decision logging (agent · why · evidence · task · confidence · outcome).
 - [x] Coverage scoring (per-area % tested).
 - [x] Community/plugin docs (CONTRIBUTING, PLUGIN_SDK, AGENT/PATTERN authoring, ROADMAP, MANIFESTO).
-- [ ] `npm test` inside Docker — `docker compose run --rm dashboard npm test` (run on the release host).
+- [ ] Clean-clone bootstrap — `bash setup.sh` on a fresh clone installs, seeds, and reports Claude status.
 - [ ] Black-box sample assessment — dispatch a URL-only engagement; confirm a clean report.
 - [ ] Source-code review sample assessment — dispatch a source-only engagement; confirm a clean report.
 - [ ] Confirm report output is clean (no orchestration logs, correct statuses).

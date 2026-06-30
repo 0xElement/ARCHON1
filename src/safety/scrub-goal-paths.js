@@ -35,7 +35,7 @@ const PLACEHOLDER = '[file path scrubbed — use canonical paths from your promp
 // it's not part of an extension.
 //
 // Portability fix (2026-06-30): the canonical data-layer root is INTEL_ROOT,
-// which on a portable / Docker / local build resolves UNDER the repo
+// which on a portable / local build resolves UNDER the repo
 // (`<root>/var/intel`), NOT `/root/intel`. A `/root/intel`-only regex therefore
 // no-ops on every non-server deployment — the exact build paths.js now resolves.
 // Build the alternation from the resolved INTEL_ROOT *and* the legacy

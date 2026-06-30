@@ -15,6 +15,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "bootstrap": "bash setup.sh",
     "setup": "node scripts/setup-local.js",
     "start": "node event-bus.js",
     "dashboard": "node scripts/dashboard.js",

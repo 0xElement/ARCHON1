@@ -54,11 +54,11 @@ const fs = require('fs')
 // no sudo): KURU_AGENTS_ROOT + KURU_INTEL_ROOT (e.g. <repo> and <repo>/var/intel).
 // THIS is the single source of truth for both roots — never hardcode either path
 // outside this file (GATE-121 for AGENTS_ROOT; same discipline for INTEL_ROOT).
-// Docker/local-safe resolution (2026-06-30): prefer explicit env, then ARCHON_ROOT,
-// then the production server layout ONLY if it actually exists, else fall back to
-// THIS repo dir (__dirname). So a fresh clone / Docker container / another dev's
-// machine works with NO hardcoded local paths and no required .env.local; a real
-// /root deploy stays byte-identical (the /root/agents existence check passes there).
+// Portable resolution (2026-06-30): prefer explicit env, then ARCHON_ROOT, then the
+// production server layout ONLY if it actually exists, else fall back to THIS repo dir
+// (__dirname). So a fresh clone / another dev's machine works with NO hardcoded local
+// paths and no required .env.local; a real /root deploy stays byte-identical (the
+// /root/agents existence check passes there).
 const AGENTS_ROOT = process.env.KURU_AGENTS_ROOT
   || process.env.ARCHON_ROOT
   || (fs.existsSync('/root/agents') ? '/root/agents' : __dirname)

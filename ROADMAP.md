@@ -15,8 +15,9 @@ Status reflects the current `main`.
   `coverage-map.computeCoverage().areas` + `coverageTable`, surfaced in the report.
 - **Structured decision log** — the Mission Director writes `decision-log.jsonl`
   (agent · why · evidence · task · confidence · outcome) when autonomy is enabled.
-- **Portable / Docker-safe roots** — `paths.js` resolves roots from the repo/cwd
-  when not on the `/root` server; clean release ZIP via `npm run pack:release`.
+- **Portable roots + one-shot setup** — `paths.js` resolves roots from the repo/cwd
+  when not on the `/root` server (fresh clone needs no `.env.local`); `bash setup.sh`
+  bootstraps locally; clean release ZIP via `npm run pack:release`.
 - **Offline test suite** — no test touches the public internet (local fixtures).
 
 ## Next

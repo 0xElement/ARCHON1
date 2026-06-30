@@ -81,14 +81,6 @@ function buildSpawnEnv(opts = {}) {
   // CLAUDE_CONFIG_DIR — non-standard but honoured by the CLI
   if (process.env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
 
-  // CLAUDE_CODE_OAUTH_TOKEN — long-lived SUBSCRIPTION OAuth token (`claude setup-token`).
-  // This is the headless / Docker / cross-platform auth path: on macOS the interactive
-  // login is stored in the Keychain (NOT ~/.claude), so a mounted ~/.claude carries no
-  // credentials into a Linux container — this token is how the subscription reaches it.
-  // It is a subscription credential, NOT an API key, so it is forwarded regardless of
-  // omitApiKey (the force-OAuth path) and never counts as metered-key auth.
-  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN
-
   // IS_SANDBOX — claude running as root requires IS_SANDBOX=1 for bypassPermissions; non-sensitive flag
   if (process.env.IS_SANDBOX) env.IS_SANDBOX = process.env.IS_SANDBOX
 
