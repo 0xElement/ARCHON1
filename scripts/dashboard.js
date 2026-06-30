@@ -426,6 +426,7 @@ function cancelTask(body) {
 
 // ── findings (read-only) — VALIDATED-FINDINGS + ARBITER judgement, by severity ──
 const SEV_ORDER = ['Critical', 'High', 'Medium', 'Low', 'Info']
+const _cvssCalc = (() => { try { return require('../ui/cvss') } catch { return null } })()
 function titleSev(s) {
   const v = String(s || '').toLowerCase()
   if (v.startsWith('crit')) return 'Critical'
@@ -433,6 +434,24 @@ function titleSev(s) {
   if (v.startsWith('med')) return 'Medium'
   if (v.startsWith('low')) return 'Low'
   return 'Info'
+}
+// THE severity shown = the band the CVSS vector computes to (so the badge can never
+// disagree with the score). Falls back to the finding's own severity only when there's
+// no vector. One CVSS, one severity — always consistent.
+function sevFromVector(vector, fallback) {
+  if (_cvssCalc && vector) {
+    try { return _cvssCalc.sevFromScore(_cvssCalc.cvss31(_cvssCalc.parseVector(vector)).score) } catch {}
+  }
+  return titleSev(fallback)
+}
+// Drop non-findings that should never reach the board: disproven claims, "no X found /
+// no attack surface", and explicit n/a markers. A real finding has a vulnerability.
+function isRealFinding(f) {
+  const t = (String(f.title || '') + ' ' + String(f.details || '')).toLowerCase()
+  const sev = String(f.severity || '').toLowerCase()
+  if (sev === 'n/a' || sev === 'na' || sev === 'none') return false
+  if (/\bdisproven\b|\bdisproved\b|no xml attack surface|no attack surface|not exploitable|not vulnerable|no vuln(erabilit|)|\bnot found\b|no .{0,20}found|false[- ]positive|^n\/a\b|\bn\/a finding/.test(t)) return false
+  return true
 }
 function readJsonl(file) {
   // tolerant: agent findings are echo-written and routinely carry raw newlines /
@@ -486,17 +505,20 @@ function findingsForSingleTask(id, label) {
 
   const out = []
   const seenUrls = new Set()
-  // 1) AUDITOR-validated findings (the trusted set).
-  for (const f of validated.filter(f => !f.taskId || String(f.taskId) === id)) {
+  // 1) AUDITOR-validated findings (the trusted set) — minus non-findings (disproven / "none found").
+  for (const f of validated.filter(f => (!f.taskId || String(f.taskId) === id) && isRealFinding(f))) {
     const d = detail[f.id] || {}
     const poc = d.poc || f.reproduction_method || f.reproduction || ''
     if (f.url) seenUrls.add(_normUrl(f.url))
-    const cvss = typeof d.cvss_score === 'number' ? d.cvss_score : (typeof f.cvss_score === 'number' ? f.cvss_score : (f.cvss || null))
+    const _vec = d.cvss_vector || f.cvss_vector || ''
+    // CVSS is the source of truth: score AND severity both come from the vector when present.
+    const cvss = _vec && _cvssCalc ? (() => { try { return _cvssCalc.cvss31(_cvssCalc.parseVector(_vec)).score } catch { return null } })()
+      : (typeof d.cvss_score === 'number' ? d.cvss_score : (typeof f.cvss_score === 'number' ? f.cvss_score : (f.cvss || null)))
     out.push({
       key: id + '::' + f.id, srcTask: id, iteration: label || '',
-      id: f.id, severity: titleSev(f.severity), title: f.title || f.id,
+      id: f.id, severity: sevFromVector(_vec, f.severity), title: f.title || f.id,
       cvss,
-      cvssVector: d.cvss_vector || f.cvss_vector || '',
+      cvssVector: _vec,
       cwe: d.cwe || f.cwe || '',
       testSteps: Array.isArray(d.test_steps) ? d.test_steps : [],
       // lifecycle: validated by AUDITOR; 'scored' once CVSS has been enriched (Phase 3.1)
