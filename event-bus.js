@@ -4731,7 +4731,7 @@ async function dispatchPentestParallel(dispatch) {
         const { runNmapScan, nmapSummary } = require('./src/pipeline/nmap-scan')
         log(`🛰️ Phase 0.4: nmap -sV -p- full service scan (heart truth) on ${targetUrl}`)
         updateProgress(7, 'Phase 0.4: nmap full port + service scan')
-        logActivity('NEXUS', `🛰️ Phase 0.4: nmap full -p- service scan started`, {
+        logActivity('NEXUS', `🛰️ Phase 0.4: naabu full-port discovery → nmap -sV service scan started`, {
           type: 'nmap-scan', squad, taskId, projectId: projectId || '',
           details: `Deterministic nmap -sV -p- --min-rate 3000 -T4 on the host (all 65535 ports). The heart-truth artifact every recon + specialist agent reads.`,
         })

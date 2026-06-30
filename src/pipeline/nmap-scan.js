@@ -11,7 +11,7 @@
 // Scan: nmap -sV -p- --min-rate 3000 -T4 --open  (all 65535 ports, version detect,
 // fast). Connect scan (unprivileged) so it runs without root. Bounded by a timeout.
 
-const { execFile } = require('node:child_process')
+const { execFile, spawn } = require('node:child_process')
 
 // host from a URL or bare host:port — port-agnostic (we scan the whole host)
 function extractHost(target) {
@@ -50,21 +50,57 @@ function httpServicesOf(host, ports) {
   return [...new Set(urls)]
 }
 
-function runNmapScan(target, { timeoutMs = 8 * 60 * 1000, ip } = {}) {
+// Fast full-port discovery with naabu (ProjectDiscovery). Returns an array of open
+// ports ([] if it ran and found none), or null when naabu isn't installed (caller then
+// falls back to nmap -p-). Far faster than nmap -p- and survives a lossy VPN that times
+// a full nmap out. Output is `host:port` per line (-silent). Connect scan (no root needed).
+function runNaabu(host, { rate = 10000, timeoutMs = 45000 } = {}) {
+  const parse = s => [...new Set(String(s).split('\n')
+    .map(l => { const m = l.match(/:(\d{1,5})\s*$/); return m ? +m[1] : null })
+    .filter(p => p && p > 0 && p < 65536))]
   return new Promise(resolve => {
-    // scan the box IP when given (hostname targets that aren't in DNS); else the URL host.
-    // httpServices still report the original host so the vhost flows downstream.
-    const host = (ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) ? ip : extractHost(target)
-    if (!host || !/^[a-zA-Z0-9.\-]+$/.test(host)) {
-      return resolve({ ok: false, host, error: 'invalid host', ports: [], httpServices: [] })
-    }
-    const args = ['-sV', '-p-', '--min-rate', '3000', '-T4', '--open', '-oX', '-', host]
+    let out = '', done = false
+    const fin = v => { if (!done) { done = true; resolve(v) } }
+    let child
+    // stdin = 'ignore' (/dev/null) is THE fix: naabu also reads hosts from stdin, so an
+    // open inherited/pipe stdin makes it block forever. /dev/null gives immediate EOF.
+    try { child = spawn('naabu', ['-host', host, '-tp', 'full', '-rate', String(rate), '-silent'], { stdio: ['ignore', 'pipe', 'ignore'] }) }
+    catch { return fin(null) }
+    const timer = setTimeout(() => { try { child.kill('SIGKILL') } catch {} ; fin(parse(out)) }, timeoutMs)
+    child.on('error', e => { clearTimeout(timer); fin(e && e.code === 'ENOENT' ? null : parse(out)) }) // ENOENT = not installed
+    child.stdout.on('data', d => { out += d })
+    child.on('close', () => { clearTimeout(timer); fin(parse(out)) })
+  })
+}
+
+// Recon port scan: naabu (fast discovery) → nmap -sV on JUST the open ports (quick
+// service/version detection). Falls back to a full nmap -p- only if naabu is missing.
+async function runNmapScan(target, { timeoutMs = 8 * 60 * 1000, ip } = {}) {
+  // scan the box IP when given (hostname targets that aren't in DNS); else the URL host.
+  // httpServices still report the original host so the vhost flows downstream.
+  const host = (ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) ? ip : extractHost(target)
+  if (!host || !/^[a-zA-Z0-9.\-]+$/.test(host)) {
+    return { ok: false, host, error: 'invalid host', ports: [], httpServices: [] }
+  }
+  // Phase A — naabu fast discovery.
+  const naabuPorts = await runNaabu(host)
+  // naabu ran and found NOTHING → no open ports, skip nmap entirely.
+  if (Array.isArray(naabuPorts) && naabuPorts.length === 0) {
+    return { ok: true, host, scannedAt: new Date().toISOString(), command: 'naabu -tp full (0 open ports)', ports: [], httpServices: [] }
+  }
+  // Phase B — nmap -sV on the discovered ports (fast), or full -p- if naabu is absent.
+  const usedNaabu = Array.isArray(naabuPorts) && naabuPorts.length > 0
+  const args = usedNaabu
+    ? ['-sV', '-p', naabuPorts.join(','), '-T4', '--open', '-oX', '-', host]
+    : ['-sV', '-p-', '--min-rate', '3000', '-T4', '--open', '-oX', '-', host]
+  return new Promise(resolve => {
     execFile('nmap', args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
       const ports = parseNmapXml(stdout)
       if (!ports.length && err) {
         return resolve({ ok: false, host, error: err.killed ? `timeout after ${Math.round(timeoutMs / 60000)}min` : err.message, ports: [], httpServices: [] })
       }
-      resolve({ ok: true, host, scannedAt: new Date().toISOString(), command: 'nmap ' + args.join(' '),
+      resolve({ ok: true, host, scannedAt: new Date().toISOString(),
+        command: usedNaabu ? `naabu -tp full → nmap -sV -p ${naabuPorts.join(',')}` : 'nmap ' + args.join(' '),
         ports, httpServices: httpServicesOf(host, ports) })
     })
   })
@@ -86,7 +122,7 @@ function nmapPromptBlock(r, nmapFilePath) {
   return `\n## AUTHORITATIVE NMAP — HEART TRUTH (read FIRST, test EVERY service)\nA full -p- -sV service scan ALREADY RAN on the host. This is ground truth — every open port/service:\n${rows}${web}\nDO NOT re-run a full port scan (no \`nmap -p-\`, no \`-T2/--max-rate\` sweeps) — it is DONE and wastes ~25 min. Only run a targeted \`nmap -sV -sC -p <known-port>\` on a specific service if you need deeper version/script detail. Test EVERY service above (FTP, SSH, web on any port, APIs, DBs) — do NOT limit yourself to the single URL in your task. Raw scan: cat ${nmapFilePath} 2>/dev/null\n`
 }
 
-module.exports = { runNmapScan, extractHost, parseNmapXml, httpServicesOf, nmapSummary, nmapPromptBlock }
+module.exports = { runNmapScan, runNaabu, extractHost, parseNmapXml, httpServicesOf, nmapSummary, nmapPromptBlock }
 
 // self-check: parse a representative nmap XML (run directly)
 if (require.main === module) {
