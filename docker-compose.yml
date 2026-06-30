@@ -3,13 +3,19 @@
 # ── HOW LOGIN WORKS (read this) ───────────────────────────────────────────────
 # ARCHON authenticates with your **Claude subscription via OAuth — NO API key**.
 # The image already bundles the Claude CLI (inside @anthropic-ai/claude-agent-sdk),
-# so you do NOT install or mount a binary. What the container needs is YOUR LOGIN:
-#   1. On the HOST, log in once so ~/.claude holds your OAuth session
-#      (run the `claude` CLI / Claude Code and authenticate).
-#   2. The `daemon` service below mounts that ~/.claude into the container at
-#      /root/.claude — the bundled CLI picks it up via $HOME. That's the whole
-#      auth story. No ANTHROPIC_API_KEY is set or required.
-# The mount is read-write so the CLI can refresh the OAuth token during long runs.
+# so you do NOT install or mount a binary. What the container needs is YOUR LOGIN.
+#
+# Pick the path for your host OS:
+#   • macOS / Windows (the usual case): your interactive login lives in the OS
+#     Keychain/Credential-Manager, which CANNOT be mounted into a Linux container.
+#     Generate a long-lived SUBSCRIPTION token on the host and pass it in:
+#         claude setup-token                      # prints a CLAUDE_CODE_OAUTH_TOKEN
+#         export CLAUDE_CODE_OAUTH_TOKEN=...       # then `docker compose up`
+#     The daemon forwards it to the agents (still subscription auth, NOT an API key).
+#   • Linux host: the login is a file at ~/.claude/.credentials.json, so the
+#     ~/.claude mount below carries it directly — no token needed.
+# Either way: NO ANTHROPIC_API_KEY is set or required. The ~/.claude mount is
+# read-write so the CLI can refresh tokens during long runs.
 #
 # All Autonomous-OS flags default OFF (the image == the current product). Opt a
 # block into shadow with ARCHON_ENABLE_AUTONOMOUS_OS=1 + ARCHON_ENABLE_<BLOCK>=1
@@ -23,9 +29,10 @@ services:
       KURU_AGENTS_ROOT: /app
       KURU_INTEL_ROOT: /app/var/intel
       ARCHON_ENABLE_AUTONOMOUS_OS: "false"          # master kill-switch (off = current product)
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}   # macOS/Windows: `claude setup-token` (subscription, no API key)
     volumes:
       - ./var/intel:/app/var/intel                  # the single data layer
-      - ${HOME}/.claude:/root/.claude               # YOUR Claude OAuth login (subscription, no API key)
+      - ${HOME}/.claude:/root/.claude               # Linux host: carries the login file; macOS/Windows: settings only
     restart: unless-stopped
 
   dashboard:
