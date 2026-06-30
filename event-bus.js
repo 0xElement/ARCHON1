@@ -939,6 +939,34 @@ function _applySquadCap(squad, list) {
   } catch {}
   return list
 }
+// Per-squad agent concurrency — how many specialist subprocesses run AT ONCE.
+// Each agent is a heavyweight `claude` CLI process; spawning a whole wave with an
+// unbounded Promise.all spikes RAM and the OS can SIGTERM the daemon. Read from
+// squad.json caps.agentConcurrency (default 3). Fail-soft → default.
+function _agentConcurrency(squad) {
+  try {
+    const cfg = require('./agents/squad-config-loader').loadSquadConfig(squad)
+    const n = cfg && cfg.caps && cfg.caps.agentConcurrency
+    if (Number.isInteger(n) && n > 0) return n
+  } catch {}
+  return 3
+}
+// Run worker(item, i) over items with at most `limit` in flight. Results keep input
+// order. No deps. Throttles the specialist waves so the machine isn't bombarded.
+async function runWithConcurrency(items, limit, worker) {
+  const arr = Array.isArray(items) ? items : []
+  const out = new Array(arr.length)
+  const n = Math.max(1, Math.min(limit || 1, arr.length || 1))
+  let idx = 0
+  async function runner() {
+    while (idx < arr.length) {
+      const i = idx++
+      out[i] = await worker(arr[i], i)
+    }
+  }
+  await Promise.all(Array.from({ length: n }, () => runner()))
+  return out
+}
 function getPentestSpecialists() {
   const d = configCache.getAgentsByRole('pentest-squad', 'specialist')
   const list = d.length > 0 ? d : FALLBACK_PENTEST_SPECIALISTS
@@ -5294,10 +5322,12 @@ async function dispatchPentestParallel(dispatch) {
     // Record wave assignments for episode metadata
     wave1Agents.forEach(a => { _agentWaveMap[a] = 1; _agentReflexionMap[a] = false })
 
-    const batch1Results = await Promise.all(wave1Agents.map(agent => {
+    const _waveConc = _agentConcurrency(squad)
+    log(`🎚️ Wave 1: ${wave1Agents.length} specialists, ${_waveConc} at a time (throttled — no machine bombard)`)
+    const batch1Results = await runWithConcurrency(wave1Agents, _waveConc, agent => {
       const prompt = buildPentestSpecialistPrompt(agent, taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, techContext, _taskMissedSignals[taskId])
       return spawnWithRetry(agent, prompt, undefined)
-    }))
+    })
     const batch2Results = []
     trackCosts(batch1Results)
 
@@ -5400,11 +5430,11 @@ async function dispatchPentestParallel(dispatch) {
       const reflexionUsed = !!_batch1Critique
       wave2Agents.forEach(a => { _agentWaveMap[a] = 2; _agentReflexionMap[a] = reflexionUsed })
 
-      const wave2Results = await Promise.all(wave2Agents.map(agent => {
+      const wave2Results = await runWithConcurrency(wave2Agents, _agentConcurrency(squad), agent => {
         const basePrompt = buildPentestSpecialistPrompt(agent, taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, techContext, _taskMissedSignals[taskId])
         const prompt = basePrompt + (_batch1Critique || '') + (_fastVerifiedContext || '')
         return spawnWithRetry(agent, prompt, undefined)
-      }))
+      })
       batch3Results = wave2Results
       trackCosts(wave2Results)
 
@@ -5463,7 +5493,7 @@ async function dispatchPentestParallel(dispatch) {
           type: 'conditional-dispatch', squad, taskId, projectId: projectId || ''
         })
         const xxePrompt = buildPentestSpecialistPrompt('spectre', taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, techContext, _taskMissedSignals[taskId])
-        conditionalPromises.push(spawnWithRetry('spectre', xxePrompt + _conditionalReflexion, undefined))
+        conditionalPromises.push(() => spawnWithRetry('spectre', xxePrompt + _conditionalReflexion, undefined))
       }
 
       // DECOY (CSRF) — dispatch if forms/state-changing endpoints or any POST endpoints detected
@@ -5474,7 +5504,7 @@ async function dispatchPentestParallel(dispatch) {
           type: 'conditional-dispatch', squad, taskId, projectId: projectId || ''
         })
         const csrfPrompt = buildPentestSpecialistPrompt('decoy', taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, techContext, _taskMissedSignals[taskId])
-        conditionalPromises.push(spawnWithRetry('decoy', csrfPrompt + _conditionalReflexion, undefined))
+        conditionalPromises.push(() => spawnWithRetry('decoy', csrfPrompt + _conditionalReflexion, undefined))
       }
 
       // RANGER-CMDi (OS Command Injection) — dispatch if parameters that accept user input detected
@@ -5487,13 +5517,15 @@ async function dispatchPentestParallel(dispatch) {
         const cmdiPrompt = buildPentestSpecialistPrompt('ranger', taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, techContext, _taskMissedSignals[taskId])
           + `\n\nFOCUS: OS Command Injection testing ONLY (not recon). Read your CMDi skill: cat ${agentPaths.skillsDir('ranger')}/cmdi-testing/SKILL.md`
           + _conditionalReflexion
-        conditionalPromises.push(spawnWithRetry('ranger', cmdiPrompt, undefined))
+        conditionalPromises.push(() => spawnWithRetry('ranger', cmdiPrompt, undefined))
       }
 
-      // Run ALL conditional specialists in PARALLEL (was sequential — saves 30+ min!)
+      // Run conditional specialists THROTTLED (was unbounded Promise.all — bombarded
+      // the machine; now N-at-a-time via the same concurrency cap).
       if (conditionalPromises.length > 0) {
-        log(`🎯 Conditional: ${conditionalPromises.length} specialists dispatched IN PARALLEL`)
-        const parallelResults = await Promise.all(conditionalPromises)
+        const _condConc = _agentConcurrency(squad)
+        log(`🎯 Conditional: ${conditionalPromises.length} specialists, ${_condConc} at a time`)
+        const parallelResults = await runWithConcurrency(conditionalPromises, _condConc, t => t())
         conditionalResults.push(...parallelResults)
         trackCosts(parallelResults)
       }

@@ -80,6 +80,46 @@ function lockedAppend(file, line) {
   return false
 }
 
+// Identity of a finding for dedup: same agent + class + location + claim. Two emits
+// with the same (agent, type, url, details, reproduction) are the SAME finding.
+function findingKey(rec) {
+  const norm = s => String(s == null ? '' : s).toLowerCase().trim().replace(/\s+/g, ' ')
+  return [norm(rec.agent), norm(rec.type), norm(rec.url), norm(rec.details), norm(rec.reproduction).slice(0, 400)].join('')
+}
+
+// Append rec UNLESS an identical finding is already recorded — dedup-on-write, so a
+// looping agent can't spam the same finding 67×. Read-check-append happens INSIDE the
+// O_EXCL lock, so it's race-safe across the parallel writers.
+// ponytail: O(n) scan of the file per emit — fine at finding scale (dozens–hundreds);
+// switch to an in-memory key index if a run ever emits thousands.
+function lockedAppendUnique(file, rec) {
+  const line = JSON.stringify(rec) + '\n'
+  const lock = file + '.lock'
+  for (let i = 0; i < 100; i++) {
+    let fd
+    try { fd = fs.openSync(lock, 'wx') }
+    catch (e) {
+      if (e.code !== 'EEXIST') throw e
+      try { if (Date.now() - fs.statSync(lock).mtimeMs > 10000) fs.unlinkSync(lock) } catch {}
+      sleepMs(20); continue
+    }
+    try {
+      if (fs.existsSync(file)) {
+        const want = findingKey(rec)
+        for (const l of fs.readFileSync(file, 'utf8').split('\n')) {
+          if (!l) continue
+          let o; try { o = JSON.parse(l) } catch { continue }
+          if (findingKey(o) === want) return 'duplicate'
+        }
+      }
+      fs.appendFileSync(file, line)
+      return 'appended'
+    } finally { try { fs.closeSync(fd) } catch {}; try { fs.unlinkSync(lock) } catch {} }
+  }
+  fs.appendFileSync(file, line) // lock never freed — append anyway (a lost finding is worse than a dup)
+  return 'appended'
+}
+
 function resolveFile(args) {
   if (args.file && args.file !== true) return String(args.file) // explicit override (used by --selftest)
   const task = String(args.task || '').trim()
@@ -114,8 +154,9 @@ function main(argv) {
   const args = parseArgs(argv)
   const file = resolveFile(args)
   const rec = buildRecord(args)
-  lockedAppend(file, JSON.stringify(rec) + '\n') // ONE stringify, ONE line — never malformed
-  process.stdout.write(`finding ${rec.id} (${rec.type}/${rec.severity}) recorded\n`)
+  const result = lockedAppendUnique(file, rec) // dedup-on-write: identical finding → skipped
+  if (result === 'duplicate') process.stdout.write(`finding ${rec.id} is a duplicate of one already recorded — skipped (dedup)\n`)
+  else process.stdout.write(`finding ${rec.id} (${rec.type}/${rec.severity}) recorded\n`)
 }
 
 // ── self-check: 20 concurrent child appends with newline + backslash payloads ──
@@ -140,8 +181,20 @@ function selftest() {
     assert.ok(objs.every(o => o.reproduction.includes('\n')), 'multi-line reproduction newline lost')
     assert.ok(objs.every(o => o.reproduction.includes('USER\\|PASS')), 'backslash content lost')
     assert.ok(objs.every(o => o.details.includes('\n')), 'inline-newline details flattened')
-    try { fs.unlinkSync(tmp); fs.unlinkSync(repro) } catch {}
-    console.log('ok — 20/20 concurrent appends strict-parse clean; newlines + backslashes preserved')
+    // dedup-on-write: emit the SAME finding 5× → only 1 line lands
+    const dupFile = path.join(os.tmpdir(), `emit-dedup-${process.pid}.jsonl`)
+    try { fs.unlinkSync(dupFile) } catch {}
+    const dupKids = []
+    for (let i = 0; i < 5; i++) {
+      dupKids.push(cp.spawn('node', [__filename, '--file', dupFile, '--agent', 'SENTRY', '--type', 'confirmed',
+        '--severity', 'medium', '--details', 'Unauthenticated Flow Execution', '--reproduction', 'POST /api/v1/flow'], { stdio: 'ignore' }))
+    }
+    Promise.all(dupKids.map(k => new Promise(r => k.on('exit', r)))).then(() => {
+      const dl = fs.readFileSync(dupFile, 'utf8').split('\n').filter(Boolean)
+      assert.strictEqual(dl.length, 1, `dedup: expected 1 line for 5 identical emits, got ${dl.length}`)
+      try { fs.unlinkSync(tmp); fs.unlinkSync(repro); fs.unlinkSync(dupFile) } catch {}
+      console.log('ok — 20/20 concurrent appends clean; newlines + backslashes preserved; dedup collapses 5 identical → 1')
+    }).catch(e => { console.error('dedup selftest FAILED:', e.message); process.exit(1) })
   }).catch(e => { console.error('selftest FAILED:', e.message); process.exit(1) })
 }
 
@@ -150,4 +203,4 @@ if (require.main === module) {
   else main(process.argv.slice(2))
 }
 
-module.exports = { buildRecord, normSeverity, normType, lockedAppend }
+module.exports = { buildRecord, normSeverity, normType, lockedAppend, lockedAppendUnique, findingKey }
