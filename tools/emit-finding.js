@@ -10,8 +10,10 @@
 // structurally impossible, and an O_EXCL lock serializes the append so writes never interleave.
 //
 // Usage (one call per finding):
-//   node tools/emit-finding.js --task <id> --agent <NAME> --type confirmed|suspected|surface \
-//     --url <url> --severity critical|high|medium|low|info --confidence high|medium|low \
+//   node tools/emit-finding.js --task <id> --agent <NAME> --title "<one-line title>" \
+//     --type confirmed|suspected|surface --url <url> --confidence high|medium|low \
+//     --cvss "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"   (sets score + severity band) \
+//     --severity critical|high|medium|low|info   (fallback when --cvss is absent) \
 //     --details <text> --impact <text> --reproduction-file <path>   (or --reproduction <inline>) \
 //     [--payloads-file <path>] [--auth ...] [--relation ...] [--parent ...] \
 //     [--tested a,b,c] [--not-tested d,e]
@@ -128,12 +130,29 @@ function resolveFile(args) {
   return path.join(INTEL, `live-findings-${task}.jsonl`)
 }
 
+// Parse + score a CVSS 3.1 vector via the shared calculator (ui/cvss.js, node-mode).
+// Returns the canonical vector, numeric score, and severity band, or null if absent/bad.
+function cvssFrom(vector) {
+  if (!vector || vector === true) return null
+  try {
+    const { cvss31, sevFromScore, parseVector } = require('../ui/cvss')
+    const { score, vector: canon } = cvss31(parseVector(String(vector)))
+    return { cvss_vector: canon, cvss_score: score, band: String(sevFromScore(score)).toLowerCase() }
+  } catch { return null }
+}
+
 function buildRecord(args) {
+  // A supplied CVSS vector is authoritative for the severity band (the number IS the
+  // argument); --severity is the fallback when no vector is given.
+  const cvss = cvssFrom(args.cvss)
   const rec = {
     id: 'F-' + crypto.randomUUID().slice(0, 8),
     agent: String(args.agent || 'AGENT').toUpperCase(),
+    title: args.title && args.title !== true ? String(args.title).slice(0, 200) : '',
     type: normType(args.type),
-    severity: normSeverity(args.severity),
+    severity: cvss ? cvss.band : normSeverity(args.severity),
+    cvss_vector: cvss ? cvss.cvss_vector : '',
+    cvss_score: cvss ? cvss.cvss_score : null,
     url: args.url && args.url !== true ? String(args.url) : '',
     confidence: String(args.confidence || 'medium').toLowerCase(),
     details: args.details && args.details !== true ? String(args.details) : '',
