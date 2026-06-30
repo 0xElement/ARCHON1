@@ -33,6 +33,14 @@ services:
     volumes:
       - ./var/intel:/app/var/intel                  # the single data layer
       - ${HOME}/.claude:/root/.claude               # Linux host: carries the login file; macOS/Windows: settings only
+    # The image HEALTHCHECK probes HTTP (it's for the dashboard); the daemon serves
+    # no HTTP, so probe its process liveness instead — else it shows a false "unhealthy".
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.kill(1,0)"]   # PID 1 = the daemon; throws if it's gone
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   dashboard:
