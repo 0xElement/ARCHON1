@@ -1,0 +1,7 @@
+# Keep release archives (git archive / `npm run pack:release`) clean. node_modules,
+# .git and .env.local are already untracked (gitignored) so git archive omits them;
+# these export-ignores drop dev-only tracked files from the shipped ZIP.
+_audit-tree.txt export-ignore
+.github/ export-ignore
+.gitattributes export-ignore
+.dockerignore export-ignore

@@ -21,7 +21,8 @@
     "pretest": "node scripts/setup-local.js || true",
     "test": "node test/run-all.js",
     "test:ui": "bash scripts/e2e.sh",
-    "test:bun": "bun test"
+    "test:bun": "bun test",
+    "pack:release": "git archive --format=zip -o archon-release.zip HEAD && echo 'clean release ZIP -> archon-release.zip (no node_modules / .git / .env.local)'"
   },
   "keywords": [
     "pentest",
