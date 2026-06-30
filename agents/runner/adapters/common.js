@@ -72,6 +72,16 @@ function buildSpawnEnv(opts = {}) {
   // rather than assuming root, so OAuth resolves for non-root/OSS installs.
   env.HOME = process.env.HOME || os.homedir()
 
+  // USER / LOGNAME — the username. On macOS the Claude OAuth credential lives in the
+  // KEYCHAIN (not a ~/.claude file), and the claude CLI uses USER to locate that
+  // keychain item — without it a spawned agent reports "Not logged in" even when the
+  // user IS logged in. Confirmed empirically: HOME+PATH+USER authenticates; HOME+PATH
+  // alone fails. Both are the non-secret username (Linux daemons may set LOGNAME, not
+  // USER), so forward whichever is present. This is the fix for subscription auth in a
+  // spawned agent on macOS.
+  if (process.env.USER) env.USER = process.env.USER
+  if (process.env.LOGNAME) env.LOGNAME = process.env.LOGNAME
+
   // PATH — needed to locate sub-executables (node, npx, etc.)
   if (process.env.PATH) env.PATH = process.env.PATH
 
@@ -80,6 +90,15 @@ function buildSpawnEnv(opts = {}) {
 
   // CLAUDE_CONFIG_DIR — non-standard but honoured by the CLI
   if (process.env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR
+
+  // CLAUDE_CODE_OAUTH_TOKEN — long-lived SUBSCRIPTION OAuth token (`claude setup-token`).
+  // REQUIRED for the headless daemon: agents are spawned with this stripped allowlist,
+  // through which the interactive Keychain/Claude-Code-session login is NOT reachable
+  // (a bare `claude` here reports "Not logged in"). This token is the env-portable way
+  // to carry the subscription into the spawned CLI. It is a subscription credential,
+  // NOT an API key, so it is forwarded regardless of omitApiKey / the subscription-only
+  // lock and never registers as metered-key auth.
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN
 
   // IS_SANDBOX — claude running as root requires IS_SANDBOX=1 for bypassPermissions; non-sensitive flag
   if (process.env.IS_SANDBOX) env.IS_SANDBOX = process.env.IS_SANDBOX
