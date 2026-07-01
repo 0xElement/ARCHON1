@@ -18,7 +18,7 @@ whose findings merge into one de-duplicated report.
 
 > ⚠️ **Authorized testing only.** Only test systems you own or have explicit written permission to
 > assess. ARCHON fails *closed* on missing scope and never fires impact-proving exploits by default,
-> but **you** are responsible for staying within scope and the law. See [Safety & scope](#-safety--scope).
+> but **you** are responsible for staying within scope and the law.
 
 ---
 
@@ -128,6 +128,41 @@ lead agent that plans the work and a set of specialists that each own one vulner
 separate group of universal agents verifies, judges, and reports. This division is deliberate. A
 single prompt asked to "find every bug" spreads itself thin, whereas a specialist asked only about
 SQL injection on a known stack goes far deeper.
+
+```
+        OPERATOR dispatches a target (URL, source, or both)
+                              │
+                              ▼
+             ┌───────────────────────────────────┐
+             │   LEAD   ·   ATLAS / CURATOR       │   fingerprint the stack,
+             │   plans a stack specific walk      │   rank the attack plan
+             └────────────────┬──────────────────┘
+                              │  dispatches specialists in parallel waves
+        ┌─────────┬───────────┼───────────┬───────────┬─────────┐
+        ▼         ▼           ▼           ▼           ▼         ▼
+      SCOUT     VIPER       DRILL       RELAY       WARDEN    GATEWAY   …each owns
+      recon      XSS        SQLi        SSRF         IDOR       API      one domain
+        │         │           │           │           │         │
+        └─────────┴───────────┴─────┬─────┴───────────┴─────────┘
+                                    │  every finding, the moment it is found
+                                    ▼
+             ┌───────────────────────────────────┐
+             │   TRIAGER   ·   streaming triage   │   validate → drop duplicates →
+             │   one finding at a time            │   merge related → CVSS 3.1 → full writeup
+             └────────────────┬──────────────────┘
+                              ▼
+             ┌───────────────────────────────────┐
+             │   AUDITOR   verify (fresh probes)  │   no replayable evidence → demoted
+             │   ARBITER   consensus on High +    │
+             └────────────────┬──────────────────┘
+                              ▼
+                 ⏸   FINDINGS BOARD  ·  awaiting triage
+                              │  you confirm / reject / set CVSS / annotate
+                              ▼
+             ┌───────────────────────────────────┐
+             │   SCRIBE   ·   writes ONE report   │
+             └───────────────────────────────────┘
+```
 
 ### The agents
 
