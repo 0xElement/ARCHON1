@@ -112,13 +112,25 @@ function squads() {
   return out
 }
 
+let _procCache = { at: 0, up: false }
 function daemonUp() {
-  // heuristic: heartbeat or tasks file touched recently, OR a node event-bus proc
+  // heuristic: heartbeat fresh (a task is actively running), OR a node event-bus
+  // proc is alive (daemon up but idle — no task ⇒ no heartbeat, so the proc check
+  // is the only signal). Without the proc check an idle daemon reads as "standby".
   try {
     const hb = path.join(INTEL, 'task-heartbeats.json')
     if (fs.existsSync(hb) && (Date.now() - fs.statSync(hb).mtimeMs) < 120000) return true
   } catch {}
-  return false
+  // pgrep is cheap but the UI polls every ~2.5s — cache the result for 4s.
+  const now = Date.now()
+  if (now - _procCache.at < 4000) return _procCache.up
+  let up = false
+  try {
+    const out = require('child_process').execFileSync('pgrep', ['-f', 'event-bus.js'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    up = out.split('\n').some(pid => pid && String(pid) !== String(process.pid))
+  } catch { up = false } // pgrep no-match exits 1 ⇒ down
+  _procCache = { at: now, up }
+  return up
 }
 
 function state() {
@@ -507,8 +519,16 @@ function findingsForSingleTask(id, label) {
 
   const out = []
   const seenUrls = new Set()
-  // 1) AUDITOR-validated findings (the trusted set) — minus non-findings (disproven / "none found").
-  for (const f of validated.filter(f => (!f.taskId || String(f.taskId) === id) && isRealFinding(f))) {
+  // The board shows ONLY findings that fully passed the pipeline: validated → triaged →
+  // WRITTEN UP (findings-detail present). A validated-but-not-yet-written finding is NOT
+  // shown — that's what removes the "half-baked findings" confusion and makes each card
+  // land with full details. As the WRITER completes findings one-by-one, they appear here.
+  // Fallback: if this task has NO findings-detail at all (older run, or writer never ran),
+  // show the validated set so the board isn't blank for legacy reports.
+  const _hasDetail = detail && Object.keys(detail).length > 0
+  // 1) AUDITOR-validated findings (the trusted set) — minus non-findings, and (when enrichment
+  //    has run) minus any not yet written up by the WRITER.
+  for (const f of validated.filter(f => (!f.taskId || String(f.taskId) === id) && isRealFinding(f) && (!_hasDetail || detail[f.id]))) {
     const d = detail[f.id] || {}
     const poc = d.poc || f.reproduction_method || f.reproduction || ''
     if (f.url) seenUrls.add(_normUrl(f.url))
@@ -531,7 +551,12 @@ function findingsForSingleTask(id, label) {
       poc, validation: d.validation || f.reproduction_result || '',
       impact: d.impact || f.impact || '',
       remediation: d.remediation || f.remediation || f.fix || f.recommendation || '',
-      rawRequest: d.raw_request || f.raw_request || f.http_request || synthRawRequest(f.method, f.url, poc),
+      // Static / white-box findings have a source location instead of a live request. Only
+      // synthesize an HTTP request when there's actually a live URL — a code finding has none.
+      rawRequest: d.raw_request || f.raw_request || f.http_request || (f.url ? synthRawRequest(f.method, f.url, poc) : ''),
+      file: d.file || f.file || '', line: d.line || f.line || null,
+      codeBlock: d.code_block || d.codeBlock || f.code_block || f.vulnerable_code || '',
+      confirmation: f.confirmation || d.confirmation || '',
       judge: (judgeBy[f.id] && (judgeBy[f.id].verdict || judgeBy[f.id].judgement)) || '',
       enriched: !!detail[f.id], triage: triage[f.id] || null, source: 'validated',
     })

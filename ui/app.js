@@ -130,8 +130,22 @@ function phaseSteps(task) {
   const prog = Math.max(0, Math.min(100, task.progress || 0))
   const done = ['completed', 'done'].includes(task.status) ? phases.length : Math.floor(prog / 100 * phases.length)
   const running = task.status === 'in-progress'
+  const stateOf = idx => idx < done ? 'done' : (running && idx === done ? 'active' : '')
+  // Triage-hub layout: recon · exploit · validate · chain sit on a rail that FEEDS a continuous
+  // `triage` node below — triage runs the whole scan, fed one-by-one by every phase above it.
+  // The rail flows (animates) while the run is live. Linear squads (code-review) keep the stepper.
+  if (phases.includes('triage')) {
+    const flow = phases.filter(p => p !== 'triage')
+    const tIdx = phases.indexOf('triage')
+    const tState = tIdx < done ? 'done' : (running ? 'live' : '')
+    return `<div class="stepper hub">
+      <div class="flowrow">${flow.map((p, idx) => `<span class="ph ${stateOf(idx)}"><b>${esc(p)}</b></span>`).join('')}</div>
+      <div class="bus ${running ? 'flowing' : ''}"></div>
+      <div class="hubrow"><span class="triage ${tState}">triage</span></div>
+    </div>`
+  }
   return `<div class="stepper">${phases.map((p, idx) =>
-    `<div class="step ${idx < done ? 'done' : (running && idx === done ? 'active' : '')}">${esc(p)}</div>`).join('')}</div>`
+    `<div class="step ${stateOf(idx)}">${esc(p)}</div>`).join('')}</div>`
 }
 
 /* ── task card ── */
@@ -501,7 +515,24 @@ function openFindingPage(key) {
   const sec = (k, val, mono) => `<div class="fsec"><div class="fk">${k}</div>${val ? (mono ? `<pre class="fv mono">${esc(val)}</pre>` : `<div class="fv">${esc(val)}</div>`) : '<div class="fv dim">— not provided · use “Enrich details”</div>'}</div>`
   const steps = Array.isArray(f.testSteps) && f.testSteps.length
     ? `<div class="fsec"><div class="fk">Reproduction steps</div><ol class="fsteps">${f.testSteps.map(s => `<li>${esc(String(s).replace(/^step\s*\d+\s*[:.\-]\s*/i, ''))}</li>`).join('')}</ol></div>`
-    : sec('Test steps / PoC', f.poc, true)
+    : ''
+  // POC block — CURL Request (+ raw HTTP request for "modify the request below" cases). The
+  // response is intentionally omitted; the "Observed that …" step is the proof, and dumping
+  // full responses bloats the report.
+  const pocRow = (label, val) => val ? `<div class="pocrow"><div class="fk sub">${label}</div><pre class="fv mono">${esc(val)}</pre></div>` : ''
+  // Source location line: live URL for runtime findings, file:line for source findings.
+  const locSec = f.url
+    ? sec('Vulnerable URL', (f.method ? f.method + ' ' : '') + f.url)
+    : (f.file ? sec('Source location', f.file + (f.line ? ':' + f.line : '')) : '')
+  // Static / white-box: show the VULNERABLE CODE BLOCK (file:line + snippet) — no HTTP request.
+  const codeSec = f.codeBlock
+    ? `<div class="fsec pocsec"><div class="fk poc">Vulnerable code${f.file ? ` · ${esc(f.file)}${f.line ? ':' + f.line : ''}` : ''}</div><pre class="fv mono">${esc(f.codeBlock)}</pre></div>`
+    : ''
+  // POC (CURL Request, no response) — ONLY for findings with a live URL. Static code review
+  // needs none; the vulnerable code block above is the proof.
+  const pocBlock = f.url && (f.poc || f.rawRequest)
+    ? `<div class="fsec pocsec"><div class="fk poc">POC</div>${pocRow('CURL Request', f.poc)}${f.rawRequest && f.rawRequest !== f.poc ? pocRow('HTTP Request', f.rawRequest) : ''}</div>`
+    : (!f.codeBlock && !f.url && f.poc ? `<div class="fsec pocsec"><div class="fk poc">POC</div>${pocRow('Command', f.poc)}</div>` : '')
   const tags = [
     f.cvss != null ? `<span class="fcvss">CVSS ${f.cvss}</span>` : '',
     f.cwe ? `<span class="fcwe">${esc(f.cwe)}</span>` : '',
@@ -509,11 +540,10 @@ function openFindingPage(key) {
   ].filter(Boolean).join(' ')
   $('#fdInfo').innerHTML = `<h3>${esc(f.id)} · ${esc(f.agent || '')} ${tags}</h3>
     ${sec('Description', f.description)}
-    ${sec('Vulnerable URL', (f.method ? f.method + ' ' : '') + f.url)}
+    ${locSec}
     ${steps}
-    ${sec('Validation result', f.validation, true)}
-    ${f.poc && steps !== sec('Test steps / PoC', f.poc, true) ? sec('Command / PoC', f.poc, true) : ''}
-    ${sec('HTTP raw request', f.rawRequest, true)}
+    ${codeSec}
+    ${pocBlock}
     ${sec('Impact', f.impact)}
     ${sec('Remediation', f.remediation)}`
   $$('#fdVerdict button').forEach(b => b.classList.toggle('on', (v.verdict || 'confirmed') === b.dataset.fv))
