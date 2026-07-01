@@ -14,13 +14,24 @@ total, and the scorecard also lists any extra findings that did not map to a gro
 
 ## Setup
 
-1. Start Juice Shop in Docker and confirm it answers at http://localhost:3000:
+1. Start Juice Shop in Docker:
 
    ```
    docker run -d --name juice-shop -p 3000:3000 bkimminich/juice-shop
    ```
 
-2. Start the ARCHON daemon in a separate shell:
+2. Target the host IP, not localhost. The scan tooling (naabu and nmap) is unreliable against
+   the loopback address and anything running in a container cannot reach the host as localhost,
+   so use the machine LAN IP. Find it and confirm Juice Shop answers there:
+
+   ```
+   ipconfig getifaddr en0            # macOS, prints something like REDACTED-HOST
+   curl -s -o /dev/null -w "%{http_code}\n" http://<host-ip>:3000
+   ```
+
+   Use `http://<host-ip>:3000` as the target everywhere below.
+
+3. Start the ARCHON daemon in a separate shell:
 
    ```
    node event-bus.js
