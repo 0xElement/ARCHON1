@@ -51,7 +51,13 @@ const cleanup = () => {
     JSON.stringify({ id: 'A-2', severity: 'high', title: 'High finding', cvss_score: 7.5, url: 'http://t/admin', method: 'GET', taskId: TID }),
     JSON.stringify({ id: 'A-3', severity: 'info', title: 'Info finding', taskId: TID }),
   ].join('\n') + '\n')
-  fs.writeFileSync(F(`findings-detail-${TID}.json`), JSON.stringify({ 'A-1': { description: 'desc here', impact: 'impact here', remediation: 'fix here', raw_request: 'RAW REQ', poc: 'poc steps' } }))
+  // The board shows ONLY findings the WRITER has written up (findings-detail present). Enrich
+  // all 3 so they appear; A-2 deliberately has no raw_request so the synth-fallback still fires.
+  fs.writeFileSync(F(`findings-detail-${TID}.json`), JSON.stringify({
+    'A-1': { description: 'desc here', impact: 'impact here', remediation: 'fix here', raw_request: 'RAW REQ', poc: 'poc steps' },
+    'A-2': { description: 'high desc', impact: 'admin takeover', remediation: 'authz check' },
+    'A-3': { description: 'info desc' },
+  }))
   let res = d.findingsForTask(TID)
   ok('findings: 3 total', res.total === 3, 'got ' + res.total)
   ok('findings: counts', res.counts.High === 1 && res.counts.Medium === 1 && res.counts.Info === 1, JSON.stringify(res.counts))
