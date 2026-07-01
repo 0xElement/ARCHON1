@@ -1,0 +1,22 @@
+{
+  "target": "OWASP Juice Shop",
+  "url": "http://localhost:3000",
+  "note": "Vulnerability classes documented in OWASP Juice Shop that a black box pentest is expected to surface. ARCHON findings are matched to a class by CWE, by OWASP tag, or by keywords in the title and description. This scores class level coverage, not individual Juice Shop challenge names.",
+  "classes": [
+    { "id": "sqli", "name": "SQL Injection (login bypass, product search)", "cwe": ["CWE-89"], "keywords": "sql injection|sqli|union select|or 1=1|blind sql" },
+    { "id": "xss", "name": "Cross Site Scripting (DOM, reflected, stored)", "cwe": ["CWE-79"], "keywords": "xss|cross site scripting|<script|onerror=|<iframe" },
+    { "id": "broken_auth", "name": "Broken authentication, weak or default credentials, no rate limit", "cwe": ["CWE-287", "CWE-307", "CWE-521", "CWE-798", "CWE-620"], "keywords": "broken auth|weak password|default cred|rate limit|brute force|password reset|account lockout" },
+    { "id": "access_control", "name": "Broken access control and IDOR", "cwe": ["CWE-639", "CWE-284", "CWE-285", "CWE-863", "CWE-269", "CWE-566"], "keywords": "idor|access control|authoriz|other user|another user|basket|privilege escal|admin section|forced browsing" },
+    { "id": "sensitive_data", "name": "Sensitive data and information exposure (errors, backups, /ftp files)", "cwe": ["CWE-200", "CWE-209", "CWE-538", "CWE-548", "CWE-215"], "keywords": "sensitive data|information disclosure|information exposure|exposed|backup file|/ftp|error message|stack trace|directory listing|confidential" },
+    { "id": "path_traversal", "name": "Path traversal and LFI (/ftp poison null byte)", "cwe": ["CWE-22", "CWE-98", "CWE-73"], "keywords": "path traversal|directory traversal|local file inclusion|lfi|poison null byte|arbitrary file read" },
+    { "id": "jwt", "name": "JWT weaknesses (none algorithm, forged token)", "cwe": ["CWE-347", "CWE-345", "CWE-290"], "keywords": "jwt|json web token|none algorithm|forged token|unsigned token|token signature" },
+    { "id": "csrf", "name": "Cross Site Request Forgery", "cwe": ["CWE-352"], "keywords": "csrf|cross site request forgery" },
+    { "id": "open_redirect", "name": "Unvalidated or open redirect", "cwe": ["CWE-601"], "keywords": "open redirect|unvalidated redirect" },
+    { "id": "ssrf", "name": "Server Side Request Forgery", "cwe": ["CWE-918"], "keywords": "ssrf|server side request forgery" },
+    { "id": "xxe", "name": "XML External Entity", "cwe": ["CWE-611", "CWE-827"], "keywords": "xxe|xml external entity" },
+    { "id": "security_misconfig", "name": "Security misconfiguration, missing headers, CORS", "cwe": ["CWE-16", "CWE-693", "CWE-942", "CWE-1021", "CWE-1004"], "keywords": "security header|missing header|content security policy|\\bcsp\\b|hsts|x-frame-options|clickjack|cors|misconfiguration|cookie flag" },
+    { "id": "injection_other", "name": "Other injection (NoSQL, command, code)", "cwe": ["CWE-77", "CWE-78", "CWE-943", "CWE-94", "CWE-917"], "keywords": "nosql injection|command injection|code injection|os command|expression injection|server side template" },
+    { "id": "vulnerable_components", "name": "Vulnerable or outdated components", "cwe": ["CWE-1104", "CWE-1035", "CWE-937"], "keywords": "outdated|vulnerable component|known cve|vulnerable dependency|end of life" },
+    { "id": "input_validation", "name": "Improper input validation and business logic abuse", "cwe": ["CWE-20", "CWE-840", "CWE-472"], "keywords": "input validation|business logic|negative quantity|price manipulation|coupon|parameter tampering|mass assignment" }
+  ]
+}
