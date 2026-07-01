@@ -1,6 +1,6 @@
 # ARCHON Black Box Benchmark
 
-**Target:** OWASP Juice Shop  ·  `http://REDACTED-HOST:3000`  ·  2026-07-01
+**Target:** OWASP Juice Shop  ·  `http://<target-host>:3000`  ·  2026-07-01
 
 > Snapshot taken while the run was still executing. It is regenerated for the final numbers once the run reaches operator triage.
 
@@ -17,10 +17,10 @@ class coverage   ████████████████░░░░░
 
 | Metric | Value |
 |---|---|
-| Confirmed findings on the board | **40** |
-| Critical / High / Medium | 23 / 9 / 8 |
+| Confirmed findings on the board | **41** |
+| Critical / High / Medium | 24 / 9 / 8 |
 | Vulnerability classes covered | **10 of 15** (67%) |
-| Additional findings beyond the classes | 30 |
+| Additional findings beyond the classes | 31 |
 
 ```mermaid
 pie showData title Vulnerability class coverage
@@ -30,11 +30,11 @@ pie showData title Vulnerability class coverage
 
 ## Findings by severity
 
-ARCHON confirmed **40** findings, weighted heavily toward high impact issues.
+ARCHON confirmed **41** findings, weighted heavily toward high impact issues.
 
 ```mermaid
 pie showData title Findings by severity
-  "Critical" : 23
+  "Critical" : 24
   "High" : 9
   "Medium" : 8
 ```
@@ -64,8 +64,8 @@ confirmed finding for it. Matching is by CWE, OWASP tag, or keyword.
 
 ## What ARCHON found
 
-ARCHON covered **10 of 15** classes and reported **40**
-confirmed findings, 30 of them beyond a single example per class. The depth matters:
+ARCHON covered **10 of 15** classes and reported **41**
+confirmed findings, 31 of them beyond a single example per class. The depth matters:
 it did not simply tick a box per class, it independently reproduced multiple distinct instances,
 including SQL injection authentication bypass, union based injection in product search, JWT
 algorithm confusion and the alg none bypass, stored cross site scripting, mass assignment leading
@@ -83,6 +83,6 @@ ARCHON did not surface a confirmed finding for 5 classes: open_redirect, ssrf, x
 The headline number is class level coverage, not a count of the roughly one hundred individual
 Juice Shop challenges. A class counts as covered when at least one confirmed finding maps to it, so
 the score stays stable across Juice Shop versions and rewards genuine discovery rather than the
-exact challenge names. The 30 additional findings show that within the covered
+exact challenge names. The 31 additional findings show that within the covered
 classes ARCHON went several instances deep, which is closer to how a real assessment reads than a
 single proof of concept per category.

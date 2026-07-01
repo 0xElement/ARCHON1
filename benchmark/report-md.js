@@ -22,6 +22,8 @@ const INTEL = require('../paths').INTEL_ROOT
 const tasks = (() => { try { const t = JSON.parse(fs.readFileSync(path.join(INTEL, 'tasks.json'), 'utf8')); return Array.isArray(t) ? t : (t.tasks || []) } catch { return [] } })()
 const task = tasks.find(t => String(t.id) === taskId) || {}
 const url = (String(task.goal || '').match(/https?:\/\/[^\s]+/) || [GT.url])[0]
+// Never leak a real host or IP in the committed report — show a generic target label.
+const displayUrl = url.replace(/\/\/[^/:\s]+/, '//<target-host>')
 const board = dashboard.findingsForTask(taskId)
 const findings = board.findings || []
 const counts = board.counts || {}
@@ -47,7 +49,7 @@ const rows = GT.classes.map(c => {
 
 const md = `# ARCHON Black Box Benchmark
 
-**Target:** OWASP Juice Shop  ·  \`${url}\`  ·  ${date}
+**Target:** OWASP Juice Shop  ·  \`${displayUrl}\`  ·  ${date}
 ${complete ? '' : '\n> Snapshot taken while the run was still executing. It is regenerated for the final numbers once the run reaches operator triage.\n'}
 ARCHON was pointed at a fresh OWASP Juice Shop instance with no prior knowledge and asked to
 perform a full black box web application penetration test. Juice Shop is a deliberately

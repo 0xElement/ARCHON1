@@ -25,7 +25,7 @@ total, and the scorecard also lists any extra findings that did not map to a gro
    so use the machine LAN IP. Find it and confirm Juice Shop answers there:
 
    ```
-   ipconfig getifaddr en0            # macOS, prints something like REDACTED-HOST
+   ipconfig getifaddr en0            # macOS, prints your host LAN IP
    curl -s -o /dev/null -w "%{http_code}\n" http://<host-ip>:3000
    ```
 
