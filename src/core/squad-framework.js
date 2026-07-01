@@ -134,7 +134,11 @@ const SQUAD_TYPES = {
     chainAnalysis: true,
     arbiterVerification: true,
     costBudget: 50,
-    phases: ['recon', 'exploit', 'validate', 'chain', 'report', 'verify'],
+    // Card phases reflect what the operator actually sees. The run gates at TRIAGE (findings
+    // are validated → triaged → written, then shown on the Findings tab); the report is
+    // written on-demand AFTER the operator triages, so a "report" phase on the card is
+    // misleading (it looks stuck on reporting). End at triage.
+    phases: ['recon', 'exploit', 'validate', 'chain', 'triage'],
     reportFormat: 'pentest-report',
     priorityOrder: ['secrets', 'rce', 'injection', 'auth', 'crypto', 'config'],
     reportDirs: [(__roots.INTEL_ROOT + '/pentest')],

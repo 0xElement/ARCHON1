@@ -242,11 +242,37 @@ function writeValidatedFindingsFile(records, taskId, { intelDir = INTEL_DIR } = 
 
 // Main entry point: end-to-end build + write. Fail-soft: throws on critical
 // errors (caller decides whether to surface). Returns {path, count, records}.
+//
+// MERGE, don't clobber (2026-07 fix): the validation specialist SENTRY independently
+// reproduces findings and writes them to VALIDATED-FINDINGS DURING Phase 2. The AUDITOR then
+// reviews the REST and logs a FEW new CONFIRMED verdicts (+ KILLs duplicates) — it does NOT
+// re-log every SENTRY finding as its own CONFIRMED line. The old code overwrote the file with
+// ONLY AUDITOR's verdicts, discarding all of SENTRY's confirmed findings (observed: 14 real →
+// 2 on the board). So we READ the existing set and layer AUDITOR's confirms on top (dedup by
+// id). We deliberately do NOT apply AUDITOR's KILLs here: every KILL was "DUPLICATE of
+// SENTRY-xxx", and a title match would wrongly delete the CANONICAL SENTRY finding it points
+// at — the Phase 3.052 triager does the real dedup/merge downstream.
 function buildAndWriteForTask(taskId, opts = {}) {
   if (!taskId) throw new Error('buildAndWriteForTask: taskId required')
-  const records = buildFromActivityLog(taskId, opts)
-  const { path: outPath, count } = writeValidatedFindingsFile(records, taskId, opts)
-  return { path: outPath, count, records }
+  const auditorRecords = buildFromActivityLog(taskId, opts) // AUDITOR's NEW confirmed verdicts
+  const intelDir = opts.intelDir || INTEL_DIR
+  const outPath = path.join(intelDir, `VALIDATED-FINDINGS-${taskId}.jsonl`)
+  const existing = []
+  try {
+    if (fs.existsSync(outPath)) for (const l of fs.readFileSync(outPath, 'utf-8').split('\n')) {
+      const s = l.trim(); if (!s) continue
+      try { existing.push(JSON.parse(s)) } catch { /* skip a corrupt line, keep the rest */ }
+    }
+  } catch { /* no existing file → AUDITOR's set is the whole set */ }
+  const byId = new Map()
+  for (const r of [...existing, ...auditorRecords]) {
+    if (!r || typeof r !== 'object') continue
+    const key = String(r.id || r.title || JSON.stringify(r)).toLowerCase().trim()
+    if (!byId.has(key)) byId.set(key, r) // existing (SENTRY) wins ties; AUDITOR ids are distinct
+  }
+  const merged = [...byId.values()]
+  const { path: p, count } = writeValidatedFindingsFile(merged, taskId, opts)
+  return { path: p, count, records: merged, auditorAdded: auditorRecords.length, existingKept: existing.length }
 }
 
 module.exports = {

@@ -7,8 +7,11 @@ no file:line, no internal mechanism claims you can't back with traffic.
 > Writing tips
 > - Everything you assert must be visible in a request/response you include. If you can't show
 >   it, don't claim it.
-> - Use **generic placeholders** in steps (`<host>`, `<token>`, `<id>`); put real captured
->   values in "Observed".
+> - Use the **actual tested host and full vulnerable URL** in every step — the real target you
+>   hit (e.g. `http://192.0.2.10/capture`), so the repro is copy-paste runnable. NEVER write
+>   `<host>`, `example.com`, or `attacker.com`. Only a genuinely per-session secret (an auth
+>   token / CSRF nonce) may remain a `<token>` placeholder, with the real captured value shown
+>   in "Observed".
 > - Prove a **control** (the secure case) right next to the **bug**. The contrast is the whole
 >   proof when you can't read the code.
 > - Infer the cause cautiously and label it as inference ("behavior suggests …"), never as
@@ -42,7 +45,7 @@ What had to be true to reproduce (an account, a target object ID, a feature togg
 observe, a victim who clicks). Note how you obtained each.
 
 ## Steps to Reproduce
-Replace `<host>`, `<token>`, `<id>`, … Copy-pasteable, minimal.
+Use the **real tested host + full URL** in every request (only per-session secrets stay as `<token>`). Copy-pasteable, minimal.
 
 **Step 1 (baseline/setup).** How you reached the testable state.
 

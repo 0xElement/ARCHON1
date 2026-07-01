@@ -40,6 +40,18 @@ const WEB_PORTS = new Set([80, 443, 8080, 8000, 8443, 3000, 5000, 8888, 9000, 80
 // Common port → service name, for inferring service when nmap -sV gets no version detail
 // over a lossy link (naabu confirmed the port is open; we still want sensible labels + web URLs).
 const PORT_SVC = { 21: 'ftp', 22: 'ssh', 23: 'telnet', 25: 'smtp', 53: 'dns', 80: 'http', 110: 'pop3', 111: 'rpcbind', 135: 'msrpc', 139: 'netbios-ssn', 143: 'imap', 389: 'ldap', 443: 'https', 445: 'microsoft-ds', 993: 'imaps', 995: 'pop3s', 1433: 'ms-sql', 1521: 'oracle', 2049: 'nfs', 3000: 'http', 3306: 'mysql', 3389: 'rdp', 5000: 'http', 5432: 'postgresql', 5900: 'vnc', 6379: 'redis', 8000: 'http', 8080: 'http', 8443: 'https', 8888: 'http', 9000: 'http', 9200: 'http', 11211: 'memcached', 27017: 'mongodb' }
+// naabu is the source of truth for the OPEN-PORT SET — it survives the lossy VPN, while
+// nmap -sV's per-port probes get dropped and under-report (e.g. reporting only 53 when
+// naabu found 53,21,22,80). UNION: keep EVERY naabu port; use nmap's {service,product,
+// version} where it confirmed that port, else infer the service from the port number.
+// This stops nmap's under-count from dropping a real port — especially 80/443 (the web
+// service). Ports sorted ascending for a stable, readable panel.
+function mergeNaabuNmap(naabuPorts, nmapPorts) {
+  const byPort = new Map((nmapPorts || []).map(p => [p.port, p]))
+  return (naabuPorts || []).slice().sort((a, b) => a - b).map(p =>
+    byPort.get(p) || { port: p, proto: 'tcp', state: 'open', service: PORT_SVC[p] || '', product: '', version: '' })
+}
+
 // every web service → a URL the pipeline should crawl/test (default ports drop the :port)
 function httpServicesOf(host, ports) {
   const urls = []
@@ -105,20 +117,23 @@ async function runNmapScan(target, { timeoutMs = 8 * 60 * 1000, ip } = {}) {
     : ['-sV', '-p-', '--min-rate', '3000', '-T4', '--open', '-oX', '-', host]
   return new Promise(resolve => {
     execFile('nmap', args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
-      let ports = parseNmapXml(stdout)
-      // Fallback: nmap found nothing but naabu DID → trust naabu's ports (infer service by port).
-      if (!ports.length && usedNaabu) {
-        ports = naabuPorts.map(p => ({ port: p, proto: 'tcp', state: 'open', service: PORT_SVC[p] || '', product: '', version: '' }))
-        return resolve({ ok: true, host, scannedAt: new Date().toISOString(),
-          command: `naabu -tp 1000 → nmap -sV (no version detail over lossy link; using naabu ports ${naabuPorts.join(',')})`,
-          ports, httpServices: httpServicesOf(host, ports) })
+      const nmapPorts = parseNmapXml(stdout)
+      // naabu ran the discovery → it OWNS the open-port set; nmap only ENRICHES with
+      // service/version. Union so a dropped nmap probe can NEVER drop a naabu-confirmed
+      // port (the old code took nmap's set whenever it found ≥1, losing 80/the web port).
+      if (usedNaabu) {
+        const ports = mergeNaabuNmap(naabuPorts, nmapPorts)
+        const cmd = nmapPorts.length < naabuPorts.length
+          ? `naabu -tp 1000 (authoritative: ${naabuPorts.length} ports) → nmap -sV -Pn enriched ${nmapPorts.length}; rest port-inferred`
+          : `naabu -tp 1000 → nmap -sV -Pn -p ${naabuPorts.join(',')}`
+        return resolve({ ok: true, host, scannedAt: new Date().toISOString(), command: cmd, ports, httpServices: httpServicesOf(host, ports) })
       }
-      if (!ports.length && err) {
+      // naabu absent → nmap -p- WAS the discovery scan; its result stands.
+      if (!nmapPorts.length && err) {
         return resolve({ ok: false, host, error: err.killed ? `timeout after ${Math.round(timeoutMs / 60000)}min` : err.message, ports: [], httpServices: [] })
       }
       resolve({ ok: true, host, scannedAt: new Date().toISOString(),
-        command: usedNaabu ? `naabu -tp 1000 → nmap -sV -Pn -p ${naabuPorts.join(',')}` : 'nmap ' + args.join(' '),
-        ports, httpServices: httpServicesOf(host, ports) })
+        command: 'nmap ' + args.join(' '), ports: nmapPorts, httpServices: httpServicesOf(host, nmapPorts) })
     })
   })
 }
@@ -139,7 +154,7 @@ function nmapPromptBlock(r, nmapFilePath) {
   return `\n## AUTHORITATIVE NMAP — HEART TRUTH (read FIRST, test EVERY service)\nA full -p- -sV service scan ALREADY RAN on the host. This is ground truth — every open port/service:\n${rows}${web}\nDO NOT re-run a full port scan (no \`nmap -p-\`, no \`-T2/--max-rate\` sweeps) — it is DONE and wastes ~25 min. Only run a targeted \`nmap -sV -sC -p <known-port>\` on a specific service if you need deeper version/script detail. Test EVERY service above (FTP, SSH, web on any port, APIs, DBs) — do NOT limit yourself to the single URL in your task. Raw scan: cat ${nmapFilePath} 2>/dev/null\n`
 }
 
-module.exports = { runNmapScan, runNaabu, extractHost, parseNmapXml, httpServicesOf, nmapSummary, nmapPromptBlock }
+module.exports = { runNmapScan, runNaabu, extractHost, parseNmapXml, mergeNaabuNmap, httpServicesOf, nmapSummary, nmapPromptBlock }
 
 // self-check: parse a representative nmap XML (run directly)
 if (require.main === module) {
@@ -158,5 +173,12 @@ if (require.main === module) {
   assert.deepStrictEqual(web, ['http://10.0.0.1:3000'], `web services: ${JSON.stringify(web)}`)
   assert.strictEqual(extractHost('http://10.0.0.1/foo'), '10.0.0.1')
   assert.strictEqual(extractHost('10.0.0.1:3000'), '10.0.0.1')
-  console.log('ok — nmap XML parse + httpServices + host extraction')
+  // regression (task d3db): naabu found 4 ports, nmap -sV confirmed only 53 over the lossy
+  // link → all 4 MUST survive (esp. 80/web), nmap detail kept where present, rest inferred.
+  const merged = mergeNaabuNmap([53, 22, 21, 80], [{ port: 53, proto: 'tcp', state: 'open', service: 'domain', product: '', version: '' }])
+  assert.deepStrictEqual(merged.map(p => p.port), [21, 22, 53, 80], `all naabu ports kept, sorted: ${JSON.stringify(merged.map(p => p.port))}`)
+  assert.strictEqual(merged.find(p => p.port === 53).service, 'domain', 'nmap detail kept for confirmed port 53')
+  assert.strictEqual(merged.find(p => p.port === 80).service, 'http', 'unconfirmed port 80 → service inferred')
+  assert.deepStrictEqual(httpServicesOf('10.0.0.1', merged), ['http://10.0.0.1'], 'the dropped web port 80 is now a crawlable URL')
+  console.log('ok — nmap XML parse + httpServices + host extraction + naabu∪nmap merge')
 }

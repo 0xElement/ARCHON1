@@ -6,8 +6,10 @@ not apply; never leave a placeholder unfilled.
 
 > Writing tips
 > - Title = one sentence: *what breaks*, *for whom*, *what the impact is*. No internal IDs.
-> - Use **generic placeholders** in the repro steps (`<host>`, `<token>`, `<id>`) — the
->   triager does not have your lab. Put real values only in the "Observed (live)" block.
+> - Use the **real tested host and full URL** in the repro steps (the actual target that was
+>   tested), so the steps are runnable — never `<host>`, `example.com`, or `attacker.com`. Only
+>   a per-session secret (auth token / CSRF nonce) may stay a `<token>` placeholder; put its
+>   real captured value in the "Observed (live)" block.
 > - Trace to the **deepest enforcing gate**. A weak controller gate + a strong service/policy
 >   re-check is NOT a bug. The binding check is the deepest one.
 > - Prove a **control** (the secure case) next to the **bug** (the broken case). The contrast
@@ -65,7 +67,7 @@ is a bug, not by-design.
 ```
 
 ## Steps to Reproduce
-Replace `<host>`, `<token>`, `<id>`, … Keep it copy-pasteable.
+Use the **real tested host + full URL** (only per-session secrets stay as `<token>`). Keep it copy-pasteable.
 
 ### Part A — setup (one-time, legitimate)
 Steps a legitimate actor performs to create the starting state.

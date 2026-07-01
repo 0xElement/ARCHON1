@@ -3390,8 +3390,11 @@ function spawnAgent(agentName, taskId, message, sessionSuffix, modelOverride, op
     try {
       const res = await bridgeSpawnAgent({
         ...ctx,
-        // no time limit — agents run to natural completion (only user-cancel stops them)
-        timeoutMs: AGENT_NO_LIMIT_MS,
+        // Default: no time limit (recon/AUDITOR/SCRIBE run to natural completion). A
+        // caller MAY pass opts.timeoutMs to hard-cap a specific agent — specialists do,
+        // so one runaway shell command (e.g. `nmap -p-`) can't stall the whole wave
+        // barrier for ~90 min. On timeout the run rejects → code 143 → the barrier frees.
+        timeoutMs: opts.timeoutMs || AGENT_NO_LIMIT_MS,
         onChildHandle: (handle) => {
           childHandle = handle
           registerTaskChild(taskId, handle)
@@ -3824,7 +3827,13 @@ Project: ${projectId || 'none'}
 1. Read your identity: exec: cat ${agentPaths.soulPath('auditor')}
 2. Read your skill (7-Question Gate + Never-Submit List): exec: cat ${agentPaths.skillsDir('auditor')}/finding-validation/SKILL.md
 3. Read chain-builder workflow: exec: cat ${agentPaths.skillsDir('auditor')}/finding-validation/workflows/chain-builder.md
-4. Read all suspected findings: exec: grep '${taskId}' ${agentPaths.INTEL_ROOT}/ACTIVITY-LOG.jsonl | grep -i 'suspected\\|finding'
+4. Read the DISTINCT suspected findings — already deduplicated from the raw emits (the
+   specialists emit the same issue 100s of times), ONE line per real finding, worst severity
+   first. You MUST run the 7-Question Gate on EVERY line and emit a CONFIRMED or KILLED
+   verdict for EACH — do not skip any, do not stop after a few:
+     exec: cat ${agentPaths.INTEL_ROOT}/SUSPECTED-FINDINGS-${taskId}.jsonl 2>/dev/null
+   If that file is empty or missing, fall back to the raw log:
+     exec: grep '${taskId}' ${agentPaths.INTEL_ROOT}/ACTIVITY-LOG.jsonl | grep -i 'suspected\\|finding'
 5. Read your lessons: exec: cat ${agentPaths.lessonsPath('auditor')} 2>/dev/null
 
 ## MANDATORY: Run 7-Question Gate on EVERY finding. One wrong = KILL.
@@ -4580,13 +4589,20 @@ async function dispatchPentestParallel(dispatch) {
   }
 
   // Spawn with retry on rate limit
+  // Specialists get a hard per-attempt timeout so one runaway shell command (e.g. a full
+  // `nmap -p-` over a lossy VPN) can't hold the wave barrier open for ~90 min while every
+  // other specialist sits done. On timeout the spawn settles as code 143 and the wave
+  // advances. Recon (SCOUT/RANGER) stays uncapped — its crawl legitimately runs long.
+  const SPECIALIST_TIMEOUT_MS = 20 * 60 * 1000 // 20 min/attempt; tune via this constant
   async function spawnWithRetry(agentName, prompt, suffix, maxRetries = 1) {
+    const _spawnOpts = PENTEST_RECON.includes(String(agentName).toLowerCase())
+      ? {} : { timeoutMs: SPECIALIST_TIMEOUT_MS }
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const model = getAvailableModel(agentName)
       if (attempt > 0) {
         log(`   ♻️ Retry ${attempt}/${maxRetries} for ${agentName.toUpperCase()}`)
       }
-      const result = await spawnAgent(agentName, taskId, prompt, suffix, model)
+      const result = await spawnAgent(agentName, taskId, prompt, suffix, model, _spawnOpts)
 
       // Rate limit → wait and retry
       if (result.code !== 0 && result.code !== 1 && quotaManager.isRateLimitError(result.output || result.error || '')) {
@@ -5404,6 +5420,17 @@ async function dispatchPentestParallel(dispatch) {
     updateProgress(25, `Phase 2 Wave 1: ${wave1Agents.length} specialists running in parallel`)
 
     // Record wave assignments for episode metadata
+    // ── Phase 2.7: Streaming triage — start the background triager BEFORE the waves, so it
+    // validates + writes each finding the moment a specialist reports it (findings land on the
+    // Findings tab mid-scan) and the operator watches every agent "talk to" the triager live.
+    // Flag-gated: when 2.7 is disabled this stays null and the classic batch flow runs unchanged.
+    let _streamer = null, _streamedConfirmed = 0
+    if (phaseEnabled('2.7', squad)) {
+      _streamer = startStreamingTriage(taskId, squad, projectId || '', targetUrl)
+      log(`📥 Phase 2.7: Streaming triage ONLINE — findings triaged live as agents report them`)
+      logActivity('TRIAGER', `📥 Streaming triage ONLINE — validating findings live`, { type: 'triage-flow', squad, taskId, projectId: projectId || '', details: 'Every specialist now streams findings to the triager one-by-one; confirmed findings appear on the Findings tab during the scan.' })
+    }
+
     wave1Agents.forEach(a => { _agentWaveMap[a] = 1; _agentReflexionMap[a] = false })
 
     const _waveConc = _agentConcurrency(squad)
@@ -5705,6 +5732,17 @@ async function dispatchPentestParallel(dispatch) {
       log(`⚠️ Phase 2.9 contradiction detector error (non-fatal): ${contradErr.message}`)
     }
 
+    // Phase 2 done → drain the streaming triager (finish any in-flight findings). If it
+    // validated ≥1 finding live, THOSE are the validated set — skip the batch AUDITOR +
+    // Phase 3.05 below (they'd redo the work and overwrite VALIDATED-FINDINGS). If it produced
+    // nothing (disabled / bug), fall through to the classic batch AUDITOR so a run never ends
+    // with zero findings because of the streamer.
+    if (_streamer) {
+      try { _streamedConfirmed = await _streamer.stop() } catch (e) { log(`⚠️ streaming-triage drain (non-fatal): ${e.message}`) }
+      log(`📥 Phase 2.7 complete: streaming triage validated ${_streamedConfirmed} finding(s) live`)
+      logActivity('TRIAGER', `📥 Streaming triage complete — ${_streamedConfirmed} finding(s) on the board`, { type: 'triage-flow', squad, taskId, projectId: projectId || '', details: _streamedConfirmed > 0 ? 'Validated + written live during the scan.' : 'Nothing confirmed live — falling back to batch validation.' })
+    }
+
     // ── PHASE 3: Validation (AUDITOR) ──
     log(`🔄 Phase 3: AUDITOR validating all suspected findings`)
     logEvent('PHASE_START', { taskId, phase: 'validation-3', agents: ['AUDITOR'] })
@@ -5714,9 +5752,36 @@ async function dispatchPentestParallel(dispatch) {
     })
     updateProgress(70, 'Phase 3: AUDITOR validating findings')
 
-    const auditorPrompt = buildauditorValidationPrompt(taskTitle, taskId, projectId || '', squad, targetUrl, taskGoal || '')
-    const auditorResult = await spawnAgent(PENTEST_VALIDATOR, taskId, auditorPrompt, `task-${taskId}-auditor-validate`, modelOverride)
-    trackCosts([auditorResult])
+    // Pre-AUDITOR dedup: specialists emit the SAME finding 100–270× (fire→observe→mutate
+    // loops) plus progress noise, so a raw grep of live-findings hands AUDITOR thousands of
+    // lines and it validates only a couple — real High/Critical findings (RCE, cmd-injection)
+    // never get a verdict and never reach the board. Collapse to ONE line per DISTINCT finding
+    // (worst-severity first, capped) → SUSPECTED-FINDINGS-<taskId>.jsonl and point AUDITOR
+    // there. Fail-soft: on any error the file is absent and the prompt falls back to the grep.
+    try {
+      const { dedupeSuspected } = require('./src/pipeline/suspected-dedup')
+      const { parseFindingsJsonl } = require('./src/pipeline/loose-jsonl')
+      const _lfFile = `${agentPaths.INTEL_ROOT}/live-findings-${taskId}.jsonl`
+      if (fs.existsSync(_lfFile)) {
+        const _d = dedupeSuspected(parseFindingsJsonl(fs.readFileSync(_lfFile, 'utf8')))
+        if (_d.findings.length) {
+          fs.writeFileSync(`${agentPaths.INTEL_ROOT}/SUSPECTED-FINDINGS-${taskId}.jsonl`, _d.findings.map(f => JSON.stringify(f)).join('\n') + '\n')
+          log(`🧮 Pre-AUDITOR dedup: ${_d.total} raw emits → ${_d.distinct} distinct finding(s)${_d.capped ? ` (capped ${_d.capped})` : ''} for validation`)
+        }
+      }
+    } catch (e) { log(`⚠️ Pre-AUDITOR dedup failed (non-fatal; AUDITOR falls back to grep): ${e.message}`) }
+
+    // Skip the batch AUDITOR when streaming triage already validated the findings live —
+    // otherwise it redoes the work and Phase 3.05 overwrites the streamed VALIDATED-FINDINGS.
+    const _skipBatchAudit = _streamedConfirmed > 0
+    let auditorResult = { code: 0 }
+    if (_skipBatchAudit) {
+      log(`⏭️ Phase 3: skipping batch AUDITOR — streaming triage already validated ${_streamedConfirmed} finding(s) live`)
+    } else {
+      const auditorPrompt = buildauditorValidationPrompt(taskTitle, taskId, projectId || '', squad, targetUrl, taskGoal || '')
+      auditorResult = await spawnAgent(PENTEST_VALIDATOR, taskId, auditorPrompt, `task-${taskId}-auditor-validate`, modelOverride)
+      trackCosts([auditorResult])
+    }
 
     log(`✅ Phase 3 complete: AUDITOR validation done`)
     logEvent('PHASE_DONE', { taskId, phase: 'validation' })
@@ -5741,8 +5806,13 @@ async function dispatchPentestParallel(dispatch) {
     // findings + ACTIVITY-LOG as fallback context for SCRIBE.
     try {
       const __auditorBuilder = require('./agents/auditor-validated-builder')
-      const __bw = __auditorBuilder.buildAndWriteForTask(taskId)
-      log(`📋 Phase 3.05: Built ${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl from AUDITOR ACTIVITY-LOG verdicts (${__bw.count} CONFIRMED records)`)
+      // Don't rebuild from AUDITOR verdicts when streaming triage owns VALIDATED-FINDINGS —
+      // buildAndWriteForTask OVERWRITES the file, and with no AUDITOR verdicts it would write 0,
+      // wiping the streamed findings. Keep the streamed set as-is.
+      const __bw = _skipBatchAudit
+        ? { count: _streamedConfirmed, path: `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl` }
+        : __auditorBuilder.buildAndWriteForTask(taskId)
+      log(`📋 Phase 3.05: ${_skipBatchAudit ? `streaming triage owns VALIDATED-FINDINGS (${__bw.count} records) — builder skipped` : `Built ${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl from AUDITOR ACTIVITY-LOG verdicts (${__bw.count} CONFIRMED records)`}`)
       logActivity('NEXUS', `📋 Phase 3.05: Per-task VALIDATED-FINDINGS built (${__bw.count} CONFIRMED)`, {
         type: 'phase-complete', squad, taskId, projectId: projectId || '',
         details: `Path: ${__bw.path}, Source: AUDITOR ACTIVITY-LOG entries, Filter: CONFIRMED only`,
@@ -6680,17 +6750,24 @@ The output MUST validate against the schema. You cannot emit prose — only the 
     // partial cost so the caller's accounting stays correct; the caller sees the
     // 'awaiting-triage' status and skips grading/done.
     if (dispatch.meta && dispatch.meta.triageGate) {
-      log(`⏸️ Triage gate ON — findings ready, report deferred until operator triage`)
+      // Reflect the ACTUAL validated-finding count. Labeling a run that produced 0 CONFIRMED
+      // (e.g. a stalled/killed specialist wave) as "findings ready" is misleading — say so,
+      // and hint that the run is incomplete rather than done.
+      let _vfCount = 0
+      try { const _vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`; if (fs.existsSync(_vf)) _vfCount = fs.readFileSync(_vf, 'utf8').trim().split('\n').filter(Boolean).length } catch {}
+      const _ready = _vfCount > 0 ? `${_vfCount} finding(s) ready` : 'NO findings validated — run may be incomplete'
+      log(`⏸️ Triage gate ON — ${_ready}, report deferred until operator triage`)
       logEvent('PHASE_DONE', { taskId, phase: 'findings-ready' })
-      logActivity('NEXUS', `⏸️ AWAITING TRIAGE — findings ready, report gated`, {
+      logActivity('NEXUS', `⏸️ AWAITING TRIAGE — ${_ready}`, {
         type: 'awaiting-triage', squad, taskId, projectId: projectId || '',
-        details: 'Triage the findings in the Findings tab, then click Generate report.',
+        details: _vfCount > 0 ? 'Triage the findings in the Findings tab, then click Generate report.'
+          : 'Phase 3 validated 0 findings — check the run for a stalled or killed specialist wave before triaging.',
       })
       try {
         const tasks = readJSON(TASKS_FILE); const t = tasks.find(t => String(t.id) === String(taskId))
-        if (t) { t.status = 'awaiting-triage'; t.progress = 90; t.statusMessage = 'Awaiting triage'; t.costs = allCosts; t.totalCost = Math.round(totalCost * 10000) / 10000; t.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, tasks) }
+        if (t) { t.status = 'awaiting-triage'; t.progress = 90; t.statusMessage = _vfCount > 0 ? `Awaiting triage — ${_vfCount} finding(s)` : 'Awaiting triage — 0 findings (run may be incomplete)'; t.costs = allCosts; t.totalCost = Math.round(totalCost * 10000) / 10000; t.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, tasks) }
       } catch (e) { log(`⚠️ triage-gate status write failed: ${e.message}`) }
-      updateProgress(90, 'Awaiting triage — findings ready')
+      updateProgress(90, _vfCount > 0 ? `Awaiting triage — ${_vfCount} finding(s) ready` : 'Awaiting triage — 0 findings (run may be incomplete)')
       return { totalCost, allCosts }
     }
 
@@ -8699,6 +8776,100 @@ Write ONLY that file. Reply one line: triaged N→M findings.`
   } catch (e) { log(`⚠️ triager could not rewrite VALIDATED-FINDINGS (keeping original): ${e.message}`) }
 }
 
+// Shared reproduction-step format — manual, action-oriented steps a human tester follows by
+// hand (open / log in / inject into <field> / save / observe), class-aware, ending in an
+// "Observed that …" step. The POC (curl request + response) is written into separate fields.
+const REPRO_STEP_FORMAT = `NUMBERED, action-oriented MANUAL reproduction steps a human tester follows by hand — each step a concrete ACTION using the REAL tested URL/host; the FINAL step is always an "Observed that …" of the result. Write the steps to match THIS vuln class:
+  - Open redirect  → ["Step 1: Open the following link in the browser: <full URL including the payload>.", "Step 2: Observed that the browser is redirected to the injected URL <target>."]
+  - Stored/Reflected XSS → ["Step 1: Go to <url> and log in as <user> / <pass> (or self-register).", "Step 2: Go to <feature> and inject the payload <payload> into the <field> field.", "Step 3: Save/submit.", "Step 4: Observed that the injected payload executes."]
+  - SQLi / injection / auth → ["Step 1: In the HTTP request below, replace the <auth token / parameter> with the payload.", "Step 2: Send the request and observed that the payload executes (e.g. a 5s time delay / DB error / another user data returned)."]
+  - otherwise → concrete tester actions on the real endpoint, ending with an "Observed that …" step.`
+
+// ── Streaming triage (Phase 2.7) — per-finding validate + write, ONE at a time ──
+// The prompt for a single streamed finding: the TRIAGER validates it (is it real? does the
+// captured evidence prove it?) and EITHER drops it OR writes the full board-ready finding —
+// using the REAL tested URL/host (never a placeholder). Output goes to perFile as strict JSON.
+function buildStreamTriagePrompt(id, f, taskId, targetUrl, EX, perFile) {
+  const agent = (f.agent || f.original_agent || 'AGENT').toUpperCase()
+  const evidence = `Captured evidence (USE VERBATIM — never invent a different result):\n- request/command fired: ${String(f.reproduction || f.reproduction_method || f.proof || '(none captured)').slice(0, 1400)}\n- response/output observed: ${String(f.reproduction_result || '(none captured)').slice(0, 1400)}`
+  return `You are TRIAGER. Read your identity: cat ${agentPaths.soulPath('triager')}
+${agent} just reported ONE suspected finding mid-scan. VALIDATE it, then EITHER drop it OR write it up — one finding, now.
+
+THE FINDING (id ${id}, from ${agent}):
+- title: ${f.title || f.details || ''}
+- url: ${f.url || ''}   method: ${f.method || ''}
+- agent notes: ${String(f.details || f.notes || '').slice(0, 1200)}
+- claimed severity: ${f.severity || ''}
+${evidence}
+
+STEP 1 — VALIDATE (be ruthless about false positives). Is this a REAL, evidence-backed vulnerability?
+  If the evidence does NOT prove a real issue (no proof, "not found", duplicate of a control, pure info) →
+  write STRICT JSON to ${perFile}:  { "drop": true, "reason": "<one line why>" }  and reply: dropped ${id}.
+
+STEP 2 — if REAL, write the complete finding. Match the gold format: cat the closest example in ${EX}/ (idor/xss/rce/access-control/static-sqli). Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
+  USE THE REAL TARGET — every step/PoC uses the actual tested URL/host (${f.url || targetUrl || 'the tested target'}) verbatim; NEVER \`<host>\`, \`example.com\`, or \`attacker.com\`.
+  test_steps: ${REPRO_STEP_FORMAT}
+  POC fields: poc = the exact CURL REQUEST (copy-paste runnable, the only POC shown); raw_request = the raw HTTP request for "modify the request below" cases; validation = ONE short line of what was observed (evidence only — not printed in the report).
+  Write STRICT JSON to ${perFile} (ONLY that file):
+  { "${id}": { "title":"", "severity":"Critical|High|Medium|Low|Info", "description":"… ending with **Root cause:** …", "cwe":"CWE-…", "cvss_vector":"CVSS:3.1/…", "cvss_score":0.0, "test_steps":["Step 1: <action>","Step 2: <action>","Step N: Observed that <result>"], "raw_request":"", "validation":"", "impact":"", "remediation":"", "poc":"" } }
+  A field with no evidence → "UNPROVEN — <what's missing>", never filler. Reply: wrote ${id}.`
+}
+
+// Background worker: tail live-findings WHILE Phase 2 runs and hand each new DISTINCT finding
+// to the triager one-by-one → it lands on the Findings tab mid-scan. Emits a visible
+// "AGENT → TRIAGE → verdict" conversation. Fail-soft; returns { stop } (stop drains + returns
+// the confirmed count). Only started when Phase 2.7 is enabled (else the old batch flow runs).
+function startStreamingTriage(taskId, squad, projectId, targetUrl) {
+  const { nextBatch } = require('./src/pipeline/streaming-triage')
+  const { parseFindingsJsonl } = require('./src/pipeline/loose-jsonl')
+  const liveFile = `${agentPaths.INTEL_ROOT}/live-findings-${taskId}.jsonl`
+  const detailFile = `${agentPaths.INTEL_ROOT}/findings-detail-${taskId}.json`
+  const valFile = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
+  const EX = `${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples`
+  const seen = new Set()
+  let running = true, idn = 0, confirmed = 0
+  const flow = (agent, msg, details) => logActivity(agent, msg, { type: 'triage-flow', squad, taskId, projectId: projectId || '', details: details || '' })
+
+  async function triageOne(f) {
+    const id = `T-${++idn}`
+    const agent = (f.agent || f.original_agent || 'AGENT').toUpperCase()
+    const title = String(f.details || f.title || f.finding || '').split(/[:.\n]/)[0].slice(0, 70)
+    flow(agent, `📤 → TRIAGE: ${title}`, `${agent} handed a finding to the triager for validation + write-up.`)
+    const perFile = `${agentPaths.INTEL_ROOT}/finding-detail-${taskId}-${id}.json`
+    try { fs.unlinkSync(perFile) } catch {}
+    try { await spawnAgent('triager', taskId, buildStreamTriagePrompt(id, f, taskId, targetUrl, EX, perFile), `task-${taskId}-stream-${id}`, null, { timeoutMs: 5 * 60 * 1000 }) }
+    catch (e) { flow('TRIAGER', `⚠️ triage error: ${title} (${e.message})`); return }
+    let one = null; try { one = JSON.parse(fs.readFileSync(perFile, 'utf8')); fs.unlinkSync(perFile) } catch {}
+    if (!one || one.drop || !one[id]) {
+      flow('TRIAGER', `🗑️ dropped: ${title}${one && one.reason ? ` — ${String(one.reason).slice(0, 80)}` : ''}`, 'Not a real/proven finding — not shown on the board.')
+      return
+    }
+    const d = one[id]
+    // merge the writeup into findings-detail (single writer: streamer concurrency = 1)
+    const detail = {}; try { Object.assign(detail, JSON.parse(fs.readFileSync(detailFile, 'utf8'))) } catch {}
+    detail[id] = d
+    try { writeAtomic(detailFile, JSON.stringify(detail, null, 2)) } catch (e) { log(`⚠️ streaming-triage detail write: ${e.message}`); return }
+    // append a VALIDATED record so the board (VALIDATED ∩ enriched) shows it live
+    const rec = { id, title: d.title || title, severity: d.severity || f.severity || 'Medium', validation_status: 'CONFIRMED', original_agent: agent, url: f.url || d.url || '', method: f.method || '', cvss_vector: d.cvss_vector || '', cvss_score: (typeof d.cvss_score === 'number' ? d.cvss_score : null), cwe: d.cwe || '', taskId: String(taskId), source: 'streaming-triage' }
+    try { fs.appendFileSync(valFile, JSON.stringify(rec) + '\n') } catch (e) { log(`⚠️ streaming-triage validated write: ${e.message}`) }
+    confirmed++
+    flow('TRIAGER', `✅ → board: ${rec.title} (${rec.severity})`, `Validated + written — now #${confirmed} on the Findings tab.`)
+  }
+
+  async function tick() {
+    if (!fs.existsSync(liveFile)) return
+    let recs = []; try { recs = parseFindingsJsonl(fs.readFileSync(liveFile, 'utf8')) } catch { return }
+    const fresh = nextBatch(recs, seen)
+    for (const f of fresh) await triageOne(f) // one-by-one, in emit order (a stop() drains the current tick)
+  }
+
+  const loop = (async () => {
+    while (running) { try { await tick() } catch (e) { log(`⚠️ streaming-triage tick (non-fatal): ${e.message}`) } await new Promise(r => setTimeout(r, 15000)) }
+    try { await tick() } catch {} // final drain after Phase 2
+  })()
+  return { stop: async () => { running = false; await loop; return confirmed } }
+}
+
 // ── Enrich findings with report-quality structure for the triage view ──
 // Has the WRITER produce description/impact/remediation/raw_request/poc per finding →
 // findings-detail-<taskId>.json (merged by the dashboard's /api/findings).
@@ -8733,21 +8904,26 @@ THE FINDING (id ${f.id}):
 - claimed severity: ${f.severity || ''}   cvss_vector (if any): ${f.cvss_vector || ''}
 ${evidence}
 
+USE THE REAL TARGET — this report must be directly runnable. Every request, step, and PoC MUST use
+the actual tested URL/host from THIS finding (${f.url || f.parent || 'the tested target'}) verbatim.
+NEVER write \`<host>\`, \`example.com\`, or \`attacker.com\` — the example files show FORMAT only; copy
+their structure, never their placeholder hostnames. A "Vulnerable URL" of \`<host>\`/\`attacker.com\` is a FAIL.
+
 Produce ALL fields (use Markdown in the prose fields so the card renders nicely):
 - description: 2-4 sentences on THIS issue, ENDING with a bold "**Root cause:** …" line.
 - cwe: the most specific CWE id (e.g. CWE-639, CWE-78, CWE-79).
 - cvss_vector: the FULL CVSS:3.1 vector matching the REAL proven impact (proven RCE → C:H/I:H/A:H; IDOR read → C:H/I:N; never all-N on a real bug). The severity follows this vector.
 - cvss_score: the number that vector computes to.
-- test_steps: NUMBERED control-vs-bug PoC — the CONTROL (secure/expected case) then the BUG (broken case).
-- raw_request: the exact request/command that triggers it — verbatim from reproduction_method.
-- validation: the response/output that PROVES it — verbatim captured bytes from reproduction_result.
+- test_steps: ${REPRO_STEP_FORMAT}
+- raw_request: the raw HTTP request a tester sends (used for the "SQLi-style" steps that say "in the HTTP request below…").
+- validation: ONE short line of what was observed (evidence only — the report does NOT print the response, so keep this to a single line; the "Observed that …" step is the proof).
 - impact: the concrete attacker gain.
 - remediation: the specific correct fix at the right layer.
-- poc: the exact curl/command to reproduce.
+- poc: the exact CURL REQUEST — a single copy-paste-runnable curl command against the real target (this is the only "POC" shown in the report).
 A field with no evidence → "UNPROVEN — <what's missing>", never filler.
 
 Write STRICT JSON to ${perFile} (ONLY that file):
-{ "${f.id}": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "test_steps":["Step 1 (control): …","Step 2 (bug): …"], "raw_request":"", "validation":"", "impact":"", "remediation":"", "poc":"" } }
+{ "${f.id}": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "test_steps":["Step 1: <action>","Step 2: <action>","Step N: Observed that <result>"], "raw_request":"", "validation":"", "impact":"", "remediation":"", "poc":"" } }
 Reply one line: wrote ${f.id}.`
     try { await spawnAgent('writer', taskId, prompt, `task-${taskId}-writer-${f.id}`, null) }
     catch (e) { log(`⚠️ writer ${f.id} failed: ${e.message}`); return }
