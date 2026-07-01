@@ -73,6 +73,8 @@ You can also drive the benchmark from the dashboard instead of the command line:
 | `score.js` | The pure scoring engine. Unit tested in `test/benchmark-score.test.js`. |
 | `run-benchmark.js` | The command line runner: dispatch, wait, score, write results. |
 | `score-task.js` | Score a run you already dispatched (from the portal) by its task id. |
+| `report-md.js` | Generate a markdown benchmark report for a run (`node benchmark/report-md.js <taskId>`), written to `RESULTS-blackbox.md`. |
+| `RESULTS-blackbox.md` | The latest black box benchmark result against Juice Shop. |
 
 ## Notes
 
