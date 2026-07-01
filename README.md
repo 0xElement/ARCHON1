@@ -27,6 +27,7 @@ whose findings merge into one de-duplicated report.
 - [Why ARCHON](#why-archon)
 - [Features](#features)
 - [How it works](#how-it-works)
+- [How the agents and triage work](#how-the-agents-and-triage-work)
 - [Engagement modes](#engagement-modes)
 - [The squads](#the-squads)
 - [Quickstart](#quickstart)
@@ -68,7 +69,7 @@ of a single prompt:
 | | |
 |---|---|
 | 🎯 **Black-box** | Recon → stack fingerprint → ranked attack plan → parallel specialist waves (fire → observe → mutate → re-fire), WAF-adaptive. |
-| 🔬 **White-box** | Source-only review: inventories → app blueprint → feature mapping → per-class assessment → AUDITOR reverse-check. Review classes are **auto-selected from the discovered surface** (all 23 catalog classes available), not a fixed default. |
+| 🔬 **White-box** | Reads the actual code: inventories → app blueprint → feature mapping → per-class assessment → AUDITOR reverse-check. Pattern recognition surfaces candidates, then each is **reviewed in context** to confirm the data flow reaches a sink, and reported at file and line with the vulnerable code block as proof. Review classes are **auto-selected from the discovered surface** (all 23 catalog classes available). |
 | 🔗 **Merged engagement** | Run both; findings aggregate and a single report **de-duplicates** the same vuln seen from source and over the wire. |
 | 🧪 **Independent verification** | AUDITOR re-probes findings; the **evidence contract** demotes anything without replayable proof; chain-verifier replays multi-step exploits via curl. |
 | 🏷️ **Honest confirmation status** | Each finding is tagged `RUNTIME_CONFIRMED` (proven live) vs `SOURCE_CONFIRMED` (proven in code only) vs `NEEDS_LIVE_VALIDATION` / `DISPROVEN` — a source read is never dressed up as a live proof. |
@@ -120,12 +121,65 @@ contributors.
 
 ---
 
+## How the agents and triage work
+
+ARCHON is organised as squads of specialist agents coordinated by a durable daemon. Each squad has a
+lead agent that plans the work and a set of specialists that each own one vulnerability domain. A
+separate group of universal agents verifies, judges, and reports. This division is deliberate. A
+single prompt asked to "find every bug" spreads itself thin, whereas a specialist asked only about
+SQL injection on a known stack goes far deeper.
+
+### The agents
+
+The lead agent (ATLAS for a live pentest, CURATOR for a source review) fingerprints the target, ranks
+a stack specific attack plan, and dispatches the specialists in parallel waves. Each specialist reports
+findings as it works, with a minimal payload and the evidence it captured. Three universal agents then
+take over. AUDITOR independently verifies every reported finding with fresh probes and refuses to
+forward anything it cannot reproduce. ARBITER runs a consensus judgement on the highest severity findings. SCRIBE writes
+the final report, and only after you have triaged.
+
+### Streaming triage
+
+Triage is continuous rather than a single step at the end. The moment a specialist reports a finding it
+is handed to the triager, one finding at a time. The triager validates the finding, removes duplicates
+and merges related issues into one canonical entry, scores it with CVSS 3.1, and writes the complete
+finding: title, CWE, a description with the root cause, reproduction steps, a proof of concept, impact,
+and remediation. Only findings that pass this full pipeline reach the Findings board, each already
+written to report quality. Raw or unvalidated agent claims never appear there, which removes the noise
+and duplication a naive scanner produces. On the run card you can watch every agent hand its findings to
+the triager live, and the board fills in one clean finding at a time.
+
+The run then stops at "awaiting triage" and waits for you. You confirm or reject each finding, adjust
+CVSS or severity, and add notes. Only when you choose to generate the report does SCRIBE assemble it
+from the confirmed set.
+
+### Static and white box: real code review, not only pattern matching
+
+For a source review ARCHON reads the actual code. It inventories the codebase, builds an application
+blueprint, maps features to the routes and functions that implement them, and traces user controlled
+input from entry point to sink. Pattern recognition surfaces candidate weaknesses, for example a raw SQL
+string built from a request parameter, a template rendered with autoescaping disabled, or a missing
+authorization check on a privileged route. Every candidate is then reviewed in context to confirm the
+data flow genuinely reaches a dangerous sink, so a pattern alone is never enough to raise a finding. The
+result is reported at file and line with the vulnerable code block shown as the proof, which is why a
+static finding needs no HTTP request.
+
+ARCHON does not stop at the pattern. It performs its own testing to confirm what the code review found.
+In a white box engagement the target is running as well as readable, so PROBER takes each source finding
+and validates it against the live deployment. A bug proven both ways is labelled clearly, and cross view
+deduplication merges the source view and the runtime view of the same issue into one entry that carries
+both the file and line trace and the live reproduction. Every finding states its confirmation status
+honestly: RUNTIME_CONFIRMED when it was proven live, SOURCE_CONFIRMED when it was proven in code only.
+A source read is never presented as a live exploit.
+
+---
+
 ## Engagement modes
 
 | Mode | Input | What runs |
 |---|---|---|
 | **Black-box** | URL | Live pentest: recon → fingerprint → ATLAS attack plan → specialist waves firing payloads → AUDITOR → judge → SCRIBE. |
-| **Static / white-box** | source dir | Source review only (no payloads): inventories → blueprint → feature mapping → per-class assessment → AUDITOR → SCRIBE. |
+| **Static / white-box** | source dir | Reads the code, no payloads fired: inventories → blueprint → feature mapping → per-class assessment → AUDITOR → SCRIBE. Pattern recognition finds candidates, each is confirmed in context, and findings are reported at file and line with the vulnerable code block as proof (no HTTP request needed). |
 | **Combined (merged)** | URL + source dir | Black-box *and* white-box iterations run as one engagement; PROBER runtime-validates source findings against the live URL; `cross-view-dedup` merges both into one report. |
 
 An **engagement** holds N independent iterations (the white-box + black-box pair, plus any focused
