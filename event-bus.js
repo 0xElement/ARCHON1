@@ -1694,7 +1694,6 @@ function writePostTaskMemory(agentName, taskId, taskTitle, squad, grade, cost, g
 - **Date:** ${dateStr}
 - **Task ID:** ${taskId}
 - **Grade:** ${grade}%
-- **Cost:** $${(cost || 0).toFixed(4)}
 - **Agent:** ${agentName}
 - **Squad:** ${squad}
 
@@ -3444,7 +3443,7 @@ function spawnAgent(agentName, taskId, message, sessionSuffix, modelOverride, op
         const cacheStr = (cost.cacheHitRate !== undefined && cost.tokens?.cacheRead > 0)
           ? ` (cache: ${cost.cacheHitRate}% hit, ${cost.tokens.cacheRead} read / ${cost.tokens.cacheWrite || 0} written)`
           : (cost.tokens?.cacheWrite > 0 ? ` (cache: warming, ${cost.tokens.cacheWrite} written)` : '')
-        log(`  💰 ${agentName.toUpperCase()} cost: $${cost.totalCost.toFixed(4)}${cacheStr}`)
+        log(`  🧮 ${agentName.toUpperCase()} usage: ${(cost.tokens?.total || 0).toLocaleString()} tokens${cacheStr}`)
         // (2026-04-20 #3) Langfuse span end — no-op if tracing disabled.
         try {
           const dur = Date.now() - (spawnTime || Date.now())
@@ -4517,12 +4516,10 @@ async function dispatchPentestParallel(dispatch) {
     let changed = false
     for (const r of results) {
       if (r.cost) {
+        // Internal token accounting only (drives the runaway safety cap). ARCHON runs on the
+        // Claude subscription, so there is no per-agent dollar cost to display.
         totalCost += (r.cost.totalCost || 0)
         allCosts.push({ agent: r.agentName.toUpperCase(), ...r.cost, timestamp: new Date().toISOString() })
-        logActivity(r.agentName.toUpperCase(), `💰 Cost: $${r.cost.totalCost.toFixed(4)}`, {
-          type: 'cost', squad, taskId, projectId: projectId || '',
-          details: `Model: ${r.cost.model}\nTokens: ${(r.cost.tokens?.total || 0).toLocaleString()}\nTotal: $${r.cost.totalCost.toFixed(4)}`
-        })
         changed = true
       }
     }
@@ -5252,12 +5249,6 @@ async function dispatchPentestParallel(dispatch) {
         }
       } catch {}
 
-      log(`💰 Total pentest task cost (early exit): $${totalCost.toFixed(4)}`)
-      logActivity('NEXUS', `💰 Total pentest task cost (early exit): $${totalCost.toFixed(4)}`, {
-        type: 'cost-total', squad, taskId, projectId: projectId || '',
-        details: `Total: $${totalCost.toFixed(4)} (early exit — 0 endpoints)\n${allCosts.map(c => `${c.agent}: $${c.totalCost.toFixed(4)}`).join('\n')}`
-      })
-
       delete _taskMissedSignals[taskId]
       return { totalCost, allCosts }
     }
@@ -5469,8 +5460,8 @@ async function dispatchPentestParallel(dispatch) {
     {
       const budget = getCostBudget(squad)
       if (totalCost > budget) {
-        log(`💰 BUDGET EXCEEDED after wave 1: $${totalCost.toFixed(2)} > $${budget} limit`)
-        logActivity('NEXUS', `💰 Budget exceeded — skipping wave 2 specialists`, { type: 'budget-exceeded', squad, taskId })
+        log(`🛑 Run cap reached after wave 1 — skipping the remaining waves`)
+        logActivity('NEXUS', `🛑 Run cap reached: skipping wave 2 specialists`, { type: 'run-cap', squad, taskId })
         _enforceBudgetCap(taskId, squad, totalCost, budget, taskTitle)
         budgetExceeded = true
       }
@@ -5552,8 +5543,8 @@ async function dispatchPentestParallel(dispatch) {
       // Budget check after wave 2
       const budget = getCostBudget(squad)
       if (totalCost > budget) {
-        log(`💰 BUDGET EXCEEDED after wave 2: $${totalCost.toFixed(2)} > $${budget} limit`)
-        logActivity('NEXUS', `💰 Budget exceeded — skipping conditional specialists`, { type: 'budget-exceeded', squad, taskId })
+        log(`🛑 Run cap reached after wave 2 — skipping conditional specialists`)
+        logActivity('NEXUS', `🛑 Run cap reached: skipping conditional specialists`, { type: 'run-cap', squad, taskId })
         _enforceBudgetCap(taskId, squad, totalCost, budget, taskTitle)
         budgetExceeded = true
       }
@@ -6860,11 +6851,6 @@ The output MUST validate against the schema. You cannot emit prose — only the 
       }
     } catch {}
 
-    log(`💰 Total pentest task cost: $${totalCost.toFixed(4)}`)
-    logActivity('NEXUS', `💰 Total pentest task cost: $${totalCost.toFixed(4)}`, {
-      type: 'cost-total', squad, taskId, projectId: projectId || '',
-      details: `Total: $${totalCost.toFixed(4)}\n${allCosts.map(c => `${c.agent}: $${c.totalCost.toFixed(4)}`).join('\n')}`
-    })
 
     delete _taskMissedSignals[taskId]
     return { totalCost, allCosts }
@@ -9139,9 +9125,6 @@ async function dispatchToAgent(dispatch) {
           if (r && r.cost) {
             totalCostLocal += (r.cost.totalCost || 0)
             allCostsLocal.push({ agent: r.agentName?.toUpperCase() || 'UNKNOWN', ...r.cost, timestamp: new Date().toISOString() })
-            logActivity(r.agentName?.toUpperCase() || 'UNKNOWN', `💰 Cost: $${(r.cost.totalCost || 0).toFixed(4)}`,
-              { type: 'cost', squad, taskId, projectId: projectId || '',
-                details: `Model: ${r.cost.model}\nTotal: $${(r.cost.totalCost || 0).toFixed(4)}` })
           }
         }
       }
@@ -9992,8 +9975,8 @@ Execute now! Start by reading your skills, then begin the assessment.`
       // Calculate cost
       const cost = calculateCost(output)
       if (cost) {
-        log(`💰 ${leader} cost: $${cost.totalCost.toFixed(4)}`)
-        
+        // Internal token accounting only — ARCHON runs on the Claude subscription, so there is
+        // no per-task dollar cost to display anywhere.
         try {
           const tasks = readJSON(TASKS_FILE)
           const task = tasks.find(t => t.id === taskId)
@@ -10004,12 +9987,7 @@ Execute now! Start by reading your skills, then begin the assessment.`
             task.totalCost = Math.round(task.totalCost * 10000) / 10000
             writeJSON(TASKS_FILE, tasks)
           }
-        } catch (e) { log(`⚠️ Failed to save cost: ${e.message}`) }
-        
-        logActivity(leader, `💰 Task cost: $${cost.totalCost.toFixed(4)}`, {
-          type: 'cost', squad, taskId, projectId: dispatch.projectId || '',
-          details: `Model: ${cost.model}\nTotal: $${cost.totalCost.toFixed(4)}`
-        })
+        } catch (e) { log(`⚠️ Failed to save token usage: ${e.message}`) }
       }
       
       // Small delay to ensure all activity log entries are flushed before grading

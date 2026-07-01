@@ -3,7 +3,6 @@
 const $ = (s, r = document) => r.querySelector(s)
 const $$ = (s, r = document) => [...r.querySelectorAll(s)]
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-const money = n => typeof n === 'number' ? '$' + n.toFixed(n < 1 ? 4 : 2) : '—'
 const fmtTime = ts => { try { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) } catch { return '' } }
 
 let SQUADS = [], SQUAD_BY = {}
@@ -164,7 +163,6 @@ function taskCard(t) {
   const tick2 = phases.length ? (t.statusMessage || '') : ''
   const metric = (k, v, cls = '') => `<div class="metric"><span class="mk">${k}</span><span class="mv ${cls}">${v}</span></div>`
   const metrics = [
-    typeof t.totalCost === 'number' ? metric('cost', money(t.totalCost), 'cost') : '',
     t.cacheHitRate ? metric('cache', t.cacheHitRate + '%') : '',
     t.tokens ? metric('output', (t.tokens.output || 0).toLocaleString()) : '',
   ].filter(Boolean).join('')
@@ -224,14 +222,12 @@ function render(s) {
 
   const active = s.tasks.filter(t => t.status === 'in-progress').length
   const done = s.tasks.filter(t => ['completed', 'done'].includes(t.status)).length
-  const totalCost = s.tasks.reduce((a, t) => a + (t.totalCost || 0), 0)
   const queued = s.queue.filter(d => d.status === 'pending').length
   $('#stats').innerHTML = [
     ['acc', active, 'active tasks'],
     ['cyan', queued, 'queued'],
     ['ok', done, 'completed'],
     ['violet', s.tasks.length, 'total tasks'],
-    ['mag', '$' + totalCost.toFixed(2), 'total spend'],
   ].map(([cls, n, l]) => `<div class="stat ${cls}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('')
   $('#ovSub').textContent = `${SQUADS.filter(x => x.id !== 'universal').length} squads · live ${fmtTime(s.now)}`
   $('#ovActivity').innerHTML = actList(s.activity.slice(0, 16))
@@ -316,16 +312,17 @@ function renderTaskOverview() {
   if (!t) { $('#td-overview').innerHTML = '<div class="empty">Run not found.</div>'; return }
   const running = t.status === 'in-progress'
   const agentNames = t.costByAgent ? Object.keys(t.costByAgent) : (t.assignee ? [t.assignee] : [])
+  // Agents that ran + their model (runs on the Claude subscription, so no per-agent dollar cost).
   let costRows = ''
   if (t.costByAgent && Object.keys(t.costByAgent).length) {
-    costRows = '<table class="costtable"><tr><th>Agent</th><th>Model</th><th class="num">Cost</th></tr>' +
-      Object.entries(t.costByAgent).map(([a, c]) => { const cm = (t.costs || []).find(x => x.agent === a); return `<tr><td><span class="mini-av">${avatar(a, 20)} ${esc(a)}</span></td><td style="color:var(--fg-dim)">${esc(cm ? cm.model : '')}</td><td class="num">${money(c)}</td></tr>` }).join('') + '</table>'
+    costRows = '<table class="costtable"><tr><th>Agent</th><th>Model</th></tr>' +
+      Object.keys(t.costByAgent).map((a) => { const cm = (t.costs || []).find(x => x.agent === a); return `<tr><td><span class="mini-av">${avatar(a, 20)} ${esc(a)}</span></td><td style="color:var(--fg-dim)">${esc(cm ? cm.model : '')}</td></tr>` }).join('') + '</table>'
   }
   const prog = ['completed', 'done'].includes(t.status) ? 100 : (t.progress || 0)
   $('#td-overview').innerHTML = `<div class="grid cols-2">
     <div class="card">
       <h3>Run</h3>
-      <div class="kv"><span>squad <b>${esc(String(t.squad || '').replace(/-squad$/, ''))}</b></span><span>lead <b>${esc(t.assignee || '')}</b></span>${typeof t.totalCost === 'number' ? `<span>cost <b class="cost">${money(t.totalCost)}</b></span>` : ''}${t.cacheHitRate ? `<span>cache <b>${t.cacheHitRate}%</b></span>` : ''}</div>
+      <div class="kv"><span>squad <b>${esc(String(t.squad || '').replace(/-squad$/, ''))}</b></span><span>lead <b>${esc(t.assignee || '')}</b></span>${t.cacheHitRate ? `<span>cache <b>${t.cacheHitRate}%</b></span>` : ''}</div>
       <div class="pbar" style="margin-top:14px"><div class="pfill" style="width:${Math.max(2, Math.min(100, prog))}%"></div></div>
       ${phaseSteps(t)}
       ${t.statusMessage ? `<div class="hint">${esc(t.statusMessage)}</div>` : ''}
@@ -648,7 +645,7 @@ function renderSquads() {
     <div class="banner"><span class="name">${esc(sq.id)}</span></div>
     <div class="body">
       ${sq.leader !== '—' ? `<div class="lead">${avatar(sq.leader, 26)} <b>${esc(sq.leader)}</b><span style="color:var(--fg-dim);font-size:11px">leads</span></div>` : '<div class="lead"><b style="color:var(--fg-mut)">cross-squad</b></div>'}
-      <div class="type">${esc(sq.type || '')}${sq.costBudget ? ' · budget $' + sq.costBudget : ''} · ${sq.agents.length} personas</div>
+      <div class="type">${esc(sq.type || '')} · ${sq.agents.length} personas</div>
       ${sq.phases.length ? `<div class="stepper" style="margin:4px 0 14px">${sq.phases.map(p => `<div class="step">${esc(p)}</div>`).join('')}</div>` : ''}
       <div class="chips">${sq.agents.map(a => `<span class="chip">${esc(a)}</span>`).join('')}</div>
     </div>
