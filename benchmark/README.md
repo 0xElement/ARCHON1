@@ -38,13 +38,30 @@ The runner checks the target is reachable and the daemon is up, dispatches a ful
 pentest, waits for the run to reach awaiting triage, prints a coverage scorecard, and writes
 `benchmark/results-<taskId>.json`.
 
+## Run from the portal
+
+You can also drive the benchmark from the dashboard instead of the command line:
+
+1. Open the portal at http://localhost:4000 and dispatch a black box pentest against
+   `http://localhost:3000`.
+2. Watch the run on the card and let it reach awaiting triage.
+3. Score it by task id (copy the id from the run card):
+
+   ```
+   node benchmark/score-task.js <taskId>
+   ```
+
+   This reads that run's findings and prints the same coverage scorecard, then writes
+   `benchmark/results-<taskId>.json`. No second dispatch and no waiting.
+
 ## Files
 
 | File | Purpose |
 |---|---|
 | `juice-shop-ground-truth.json` | The vulnerability classes expected in Juice Shop, with the CWE and keyword rules used to match ARCHON findings. |
 | `score.js` | The pure scoring engine. Unit tested in `test/benchmark-score.test.js`. |
-| `run-benchmark.js` | The live runner: dispatch, wait, score, write results. |
+| `run-benchmark.js` | The command line runner: dispatch, wait, score, write results. |
+| `score-task.js` | Score a run you already dispatched (from the portal) by its task id. |
 
 ## Notes
 
