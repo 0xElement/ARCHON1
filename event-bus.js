@@ -8720,10 +8720,14 @@ async function runTriagerForTask(taskId) {
   if (!fs.existsSync(vf)) { log(`🧹 triager: no validated findings for ${taskId}`); return }
   const orig = readFindingsFile(vf)
   if (orig.length <= 1) { log(`🧹 triager: ${orig.length} finding — nothing to dedup/merge for ${taskId}`); return }
+  // Code-review findings carry file/line/code_block and no url → use the source template
+  // (keep the vulnerable code block, never fabricate a curl PoC). Live findings keep the curl template.
+  const { isSourceFindingSet } = require('./src/pipeline/finding-shape')
+  const _isSource = isSourceFindingSet(orig)
   const outFile = `${agentPaths.INTEL_ROOT}/TRIAGED-FINDINGS-${taskId}.jsonl`
   try { fs.unlinkSync(outFile) } catch {}
   const corr = `${agentPaths.INTEL_ROOT}/correlation-${taskId}.json`
-  const prompt = `You are TRIAGER. Read your identity: cat ${agentPaths.soulPath('triager')}
+  const livePrompt = `You are TRIAGER. Read your identity: cat ${agentPaths.soulPath('triager')}
 Deduplicate + MERGE the validated findings into the canonical set. Do NOT invent or drop real issues.
 
 Read ${vf} — one JSON finding per line (id, title, severity, url, details, impact, cvss_vector, original_agent).
@@ -8741,6 +8745,29 @@ Rules:
 Write the canonical set as JSONL (one finding per line) to ${outFile}. Each line:
 {"id":"<keep one id>","title":"…","severity":"Critical|High|Medium|Low|Info","cvss_vector":"CVSS:3.1/…","url":"…","details":"…","impact":"…","original_agent":"…","validation_status":"CONFIRMED","reproduction_method":"…","reproduction_result":"…","taskId":"${taskId}","merged_from":["id1","id2"],"source":"triager"}
 Write ONLY that file. Reply one line: triaged N→M findings.`
+  // Code-review (static / white-box source) template: findings are source locations, NOT live
+  // requests. Preserve file/line/code_block; NEVER fabricate a url or curl PoC. Merge by vuln
+  // class + source root cause (same sink reached from many call sites = one finding).
+  const sourcePrompt = `You are TRIAGER. Read your identity: cat ${agentPaths.soulPath('triager')}
+Deduplicate + MERGE the validated CODE-REVIEW findings into the canonical set. Do NOT invent or drop real issues.
+
+Read ${vf} — one JSON finding per line (id, title, severity, file, line, code_block, cwe, details, impact, cvss_vector, original_agent). These are SOURCE findings — there is no live URL.
+${fs.existsSync(corr) ? `Also read the correlation seed (exact-duplicate groups): cat ${corr}` : ''}
+Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
+
+Rules:
+- DROP empty / "n/a" / non-findings (no real vuln, no evidence).
+- The SAME sink/flaw reached from multiple call sites, or reported by multiple agents, → ONE finding.
+- MERGE related issues (same vuln class + same root cause, e.g. one unsanitized helper used by
+  several features) into one, keeping the clearest file:line + code block. When unsure, keep separate.
+- Each survivor: a defensible CVSS:3.1 vector + a title matching its real impact. Keep the strongest
+  evidence (file:line + the vulnerable code block) from each merged member; list ids in "merged_from".
+- NEVER write a url, curl, or HTTP request — the proof is the vulnerable code block at file:line.
+
+Write the canonical set as JSONL (one finding per line) to ${outFile}. Each line:
+{"id":"<keep one id>","title":"…","severity":"Critical|High|Medium|Low|Info","cwe":"CWE-…","cvss_vector":"CVSS:3.1/…","file":"<source path>","line":<number>,"code_block":"<the vulnerable snippet>","details":"…","impact":"…","original_agent":"…","validation_status":"CONFIRMED","reproduction_method":"<file:line trace>","reproduction_result":"<evidence>","taskId":"${taskId}","merged_from":["id1","id2"],"source":"triager"}
+Write ONLY that file. Reply one line: triaged N→M findings.`
+  const prompt = _isSource ? sourcePrompt : livePrompt
   log(`🧹 Phase 3.052 TRIAGER: deduping/merging ${orig.length} findings for ${taskId}`)
   logActivity('NEXUS', `🧹 Phase 3.052 TRIAGER: dedup + merge`, { type: 'triage', taskId, details: `Deduplicating + merging ${orig.length} validated findings into the canonical set.` })
   try { await spawnAgent('triager', taskId, prompt, `task-${taskId}-triager`, null) }
@@ -8877,6 +8904,10 @@ async function enrichFindingsForTask(taskId) {
   // silently skipped some) and lets each finding carry its own captured evidence.
   const findings = readFindingsFile(vf).filter(_isRealFinding)
   if (!findings.length) { log(`✍️ writer: no real findings for ${taskId}`); return }
+  // Code-review (static / white-box source) findings get the code-block writeup — vulnerable
+  // snippet at file:line, no curl/HTTP request. Live findings keep the curl PoC template.
+  const { isSourceFindingSet } = require('./src/pipeline/finding-shape')
+  const _isSourceEnrich = isSourceFindingSet(findings)
   const detail = {}; try { Object.assign(detail, JSON.parse(fs.readFileSync(outFile, 'utf8'))) } catch {}
   log(`✍️ WRITER: ${taskId} — writing ${findings.length} findings one-at-a-time (queued, evidence-attached)`)
   logActivity('NEXUS', `✍️ WRITER: writing ${findings.length} complete findings`, { type: 'enrich-findings', taskId, details: `One finding at a time → guaranteed coverage. Each gets title/CWE/CVSS/description/control-vs-bug PoC/HTTP req+resp/impact/remediation + its captured evidence, following the example templates.` })
@@ -8885,7 +8916,7 @@ async function enrichFindingsForTask(taskId) {
     const perFile = `${agentPaths.INTEL_ROOT}/finding-detail-${taskId}-${f.id}.json`
     try { fs.unlinkSync(perFile) } catch {}
     const evidence = `Captured evidence (USE IT VERBATIM — do not invent or paraphrase a different result):\n- reproduction_method (the request/command fired): ${String(f.reproduction_method || f.proof || '(none captured)').slice(0, 1400)}\n- reproduction_result (the response/output observed): ${String(f.reproduction_result || '(none captured)').slice(0, 1400)}`
-    const prompt = `You are WRITER. Read your identity: cat ${agentPaths.soulPath('writer')}
+    const liveWriterPrompt = `You are WRITER. Read your identity: cat ${agentPaths.soulPath('writer')}
 Write ONE complete, professional finding. NEVER invent — every claim traces to the evidence below.
 Match the gold-standard format that fits this class: ls ${EX}/ ; cat the closest example (idor/xss/rce/access-control/static-sqli).
 Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
@@ -8918,6 +8949,40 @@ A field with no evidence → "UNPROVEN — <what's missing>", never filler.
 Write STRICT JSON to ${perFile} (ONLY that file):
 { "${f.id}": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "test_steps":["Step 1: <action>","Step 2: <action>","Step N: Observed that <result>"], "raw_request":"", "validation":"", "impact":"", "remediation":"", "poc":"" } }
 Reply one line: wrote ${f.id}.`
+    // Code-review template: the proof is the vulnerable CODE BLOCK at file:line — no curl, no
+    // HTTP request, no live-target steps. Read the source to quote the exact vulnerable lines.
+    const sourceWriterPrompt = `You are WRITER. Read your identity: cat ${agentPaths.soulPath('writer')}
+Write ONE complete, professional STATIC code-review finding. NEVER invent — every claim traces to the source below.
+Match the gold format: cat ${EX}/static-sqli (the source-finding example: file:line + vulnerable code block, no HTTP).
+Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
+
+THE FINDING (id ${f.id}):
+- title: ${f.title || ''}
+- source location: ${f.file || ''}${f.line ? ':' + f.line : ''}
+- known vulnerable code: ${String(f.code_block || f.vulnerable_code || '(read it from the file:line above)').slice(0, 1200)}
+- agent notes/details: ${String(f.details || f.notes || '').slice(0, 1500)}
+- claimed severity: ${f.severity || ''}   cwe (if any): ${f.cwe || ''}   cvss_vector (if any): ${f.cvss_vector || ''}
+
+This is a SOURCE review — there is NO live target. Do NOT write a url, curl command, raw HTTP request,
+or "open the browser" steps. The proof is the vulnerable code. Read ${f.file || 'the source file'} around
+line ${f.line || '?'} and quote the exact vulnerable lines in code_block.
+
+Produce ALL fields (Markdown in the prose fields):
+- description: 2-4 sentences on THIS issue, ENDING with a bold "**Root cause:** …" line.
+- cwe: the most specific CWE id.
+- cvss_vector: the FULL CVSS:3.1 vector matching the real impact; severity follows it. For source-only
+  (not runtime-proven) reflect that in the vector where appropriate.
+- cvss_score: the number that vector computes to.
+- code_block: the exact vulnerable source lines (verbatim from ${f.file || 'the file'}), a short snippet.
+- data_flow: 1-3 lines tracing untrusted input → the vulnerable sink (file:line → file:line).
+- impact: the concrete attacker gain if this code is reached.
+- remediation: the specific correct fix at the right layer, referencing the code.
+A field with no evidence → "UNPROVEN — <what's missing>", never filler.
+
+Write STRICT JSON to ${perFile} (ONLY that file):
+{ "${f.id}": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "code_block":"", "data_flow":"", "impact":"", "remediation":"" } }
+Reply one line: wrote ${f.id}.`
+    const prompt = _isSourceEnrich ? sourceWriterPrompt : liveWriterPrompt
     try { await spawnAgent('writer', taskId, prompt, `task-${taskId}-writer-${f.id}`, null) }
     catch (e) { log(`⚠️ writer ${f.id} failed: ${e.message}`); return }
     try { const one = JSON.parse(fs.readFileSync(perFile, 'utf8')); Object.assign(detail, one); fs.unlinkSync(perFile) }
@@ -9153,11 +9218,30 @@ async function dispatchToAgent(dispatch) {
       const codeReviewDispatcher = freshRequire('./src/dispatch/code-review-dispatcher')
       const crResult = await codeReviewDispatcher.runCodeReview(dispatch, {
         spawnAgent, trackCosts: trackCostsLocal, updateProgress: updateProgressLocal,
-        log, logActivity,
+        log, logActivity, _isTaskCancelled,
       })
+      // Cancel parity with black-box: if the operator cancelled, stop here — keep status
+      // 'cancelled', no normalize/enrich/report/'done' (mirrors the parallel-phases path).
+      if (_isTaskCancelled(taskId) || (crResult && crResult.cancelled)) {
+        log(`🛑 ${taskId} was cancelled — skipping normalize/enrich/report`)
+        try { runningTasks.delete(taskId) } catch {}
+        setTimeout(() => processQueue(), 1500)
+        return
+      }
       // White-box adapter: materialize VALIDATED-FINDINGS-<taskId>.jsonl so this
       // code-review iteration aggregates into the engagement + merged report. Fail-soft.
       await normalizeCodeReviewFindings(taskId, crResult && crResult.outputDir, (dispatch.meta && dispatch.meta.deployUrl) || '')
+      // Findings-tab parity with black-box: run the SAME shared triager (dedup/merge + CVSS,
+      // via the source template) then enrich findings-detail (code block / file:line) — all
+      // in-pipeline, so the board shows clean, deduped, fully-written findings automatically
+      // instead of waiting for a manual report-gen. Both fail-soft; skipped when no findings.
+      try {
+        const _vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
+        if (fs.existsSync(_vf) && fs.readFileSync(_vf, 'utf8').trim()) {
+          try { await runTriagerForTask(taskId) } catch (e) { log(`⚠️ cr triager ${taskId} failed (non-fatal): ${e.message}`) }
+          await enrichFindingsForTask(taskId)
+        }
+      } catch (e) { log(`⚠️ cr auto-enrich ${taskId} failed (non-fatal): ${e.message}`) }
       // White-box source-guided LAUNCH (Autonomous OS). Driven ENTIRELY by the
       // PERSISTED deferral signal (engagement.deferredPentestDispatch +
       // pending-source-guidance) — NOT a flag re-read (Issue 3), so a flag/env skew

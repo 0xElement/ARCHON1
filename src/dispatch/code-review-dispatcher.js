@@ -392,10 +392,16 @@ Reply one line: features covered, findings by confirmation status + severity, to
 
 // ── main ──────────────────────────────────────────────────────────────────────
 async function runCodeReview(dispatch, deps) {
-  const { spawnAgent, trackCosts, updateProgress, log, logActivity } = deps
+  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled } = deps
   const { taskId, projectId, squad } = dispatch
   const meta = dispatch.meta || {}
   const sourceDir = meta.sourceDir
+  // Cancellation parity with the black-box pipeline: the operator's ■ Cancel writes a
+  // signal that the daemon turns into task.status='cancelled'. Poll it at every phase
+  // boundary so a cancelled white-box run halts between waves instead of grinding on
+  // (running agents are already killed by spawnAgent's shared watchdog). Fail-soft.
+  const cancelled = () => { try { return typeof _isTaskCancelled === 'function' && _isTaskCancelled(taskId) } catch { return false } }
+  const bail = (where) => { log(`🛑 code-review cancelled — halting before ${where}`); return { cancelled: true } }
 
   const runPhase = (p) => !Array.isArray(meta.phasesOnly) || meta.phasesOnly.length === 0 || meta.phasesOnly.includes(p)
   const outDir = meta.outputDir || `${__roots.INTEL_ROOT}/code-review/${taskId}`
@@ -445,6 +451,7 @@ async function runCodeReview(dispatch, deps) {
   // Produces app-blueprint.md (architecture / auth model / shared infra / data flow)
   // that discovery + every feature mapper read first — surfaces cross-feature vulns
   // (shared serializer, global middleware, one auth gate) that per-feature passes miss.
+  if (cancelled()) return bail('Phase 0b blueprint')
   if (runPhase('blueprint')) {
     updateProgress(13, 'Phase 0b: CURATOR app blueprint')
     logActivity('CURATOR', `🧭 Phase 0b: app blueprint (architecture / auth / shared infra / data flow)`, { taskId, squad, projectId: projectId || '' })
@@ -478,6 +485,7 @@ async function runCodeReview(dispatch, deps) {
   }
 
   // Phase 1 — per-feature mapping (one agent per feature, RAM-safe waves)
+  if (cancelled()) return bail('Phase 1 mapping')
   if (runPhase('mapping')) {
     updateProgress(25, `Phase 1: mapping ${features.length} features (waves of ${WAVE})`)
     logActivity('CURATOR', `🗺️ Phase 1: ${features.length} feature-mapping agents`, { taskId, squad, projectId: projectId || '', details: features.map(f => f.slug).join(', ') })
@@ -490,6 +498,7 @@ async function runCodeReview(dispatch, deps) {
   }
 
   // Phase 1c — consolidation
+  if (cancelled()) return bail('Phase 1c consolidation')
   if (runPhase('consolidate')) {
     updateProgress(55, 'Phase 1c: CURATOR consolidation')
     const cRes = await spawnAgent('curator', taskId, consolidationPrompt(taskId, outDir, features), `task-${taskId}-consolidate`, null)
@@ -499,6 +508,7 @@ async function runCodeReview(dispatch, deps) {
   // Phase 2 — vuln assessment (top-N features × each class, routed to specialists)
   const p2Features = features.slice(0, maxPhase2)
   if (maxPhase2 < features.length) log(`ℹ️ Phase 2 capped to top ${maxPhase2}/${features.length} features (raise meta.maxPhase2 for full coverage)`)
+  if (cancelled()) return bail('Phase 2 assessment')
   if (runPhase('phase2')) {
     updateProgress(62, `Phase 2: ${p2Features.length} features × ${vulnClasses.length} classes`)
     const jobs = []
@@ -515,6 +525,7 @@ async function runCodeReview(dispatch, deps) {
   // glob routes them through AUDITOR Phase 2v + the evidence contract (NOVEL/source-
   // only ⇒ NEEDS-LIVE, never CONFIRMED) with zero verifier/reporter edits. SHADOW ⇒
   // a non-globbed sibling that AUDITOR/SCRIBE never read (report byte-stable).
+  if (cancelled()) return bail('Phase 3 freehand')
   if (FH_MODE !== 'off' && runPhase('freehand')) {
     const fhDir = FH_MODE === 'active' ? `${outDir}/phase2/freehand` : `${outDir}/phase3-freehand-shadow`
     fs.mkdirSync(fhDir, { recursive: true })
@@ -530,6 +541,7 @@ async function runCodeReview(dispatch, deps) {
   }
 
   // Phase 2v — AUDITOR verify (+ PROBER runtime if deployUrl)
+  if (cancelled()) return bail('Phase 2v verify')
   if (runPhase('verify')) {
     if (deployUrl) {
       updateProgress(82, 'Phase 2v: PROBER runtime validation')
@@ -544,6 +556,7 @@ async function runCodeReview(dispatch, deps) {
   }
 
   // Phase 3 — SCRIBE report
+  if (cancelled()) return bail('Phase 3 report')
   if (runPhase('report')) {
     updateProgress(94, 'Phase 3: SCRIBE final report')
     const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl), `task-${taskId}-scribe`, null)

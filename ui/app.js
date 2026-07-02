@@ -205,7 +205,8 @@ function render(s) {
   $('#footMeta').innerHTML = `intel ▸<br>${esc(s.intel.replace(/^.*?(var\/intel.*)$/, '…/$1'))}`
   $('#cTasks').textContent = s.tasks.length
   $('#cReports').textContent = s.reports.length
-  // if the detail page is open, keep its overview / live logs current
+  // if the detail page is open, keep its header (status + Cancel) and overview / live logs current
+  if (currentView === 'task') updateTdHeader((s.tasks || []).find(x => String(x.id) === String(tdTaskId)))
   if (currentView === 'task' && tdSub === 'overview') renderTaskOverview()
   if (currentView === 'task' && tdSub === 'log') renderTaskLogs()
   // findings tab: refresh live ONLY while the run is in-progress (no triage yet to clobber),
@@ -229,7 +230,7 @@ function render(s) {
     ['ok', done, 'completed'],
     ['violet', s.tasks.length, 'total tasks'],
   ].map(([cls, n, l]) => `<div class="stat ${cls}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('')
-  $('#ovSub').textContent = `${SQUADS.filter(x => x.id !== 'universal').length} squads · live ${fmtTime(s.now)}`
+  $('#ovSub').textContent = `${SQUADS.filter(x => x.id !== 'universal' && !x.hidden).length} squads · live ${fmtTime(s.now)}`
   $('#ovActivity').innerHTML = actList(s.activity.slice(0, 16))
   $('#activityFull').innerHTML = actList(s.activity)
 
@@ -287,8 +288,7 @@ async function openTaskPage(taskId) {
   const t = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(taskId)) || { id: taskId }
   $('#tdTitle').textContent = t.title || taskId
   $('#tdId').textContent = taskId
-  $('#tdStatus').textContent = t.status || ''
-  $('#tdStatus').className = 'badge ' + statusClass(t.status)
+  updateTdHeader(t)
   const sub = t.status === 'in-progress' ? 'log'
     : t.status === 'awaiting-triage' ? 'findings'
     : (reportForTask(t) ? 'report' : 'overview')
@@ -306,6 +306,20 @@ function setTdSub(sub) {
 }
 $$('#tdTabs button').forEach(b => b.onclick = () => setTdSub(b.dataset.td))
 $('#tdBack').onclick = () => show(tdBackTo || 'tasks')
+// Keep the run-page header (status badge + Cancel) current on every tab. The Cancel button
+// lives in the header so it's reachable while running no matter which tab you landed on
+// (in-progress opens on Logs) — same for black-box and code-review.
+function updateTdHeader(t) {
+  if (!t) return
+  $('#tdStatus').textContent = t.status || ''
+  $('#tdStatus').className = 'badge ' + statusClass(t.status)
+  const cb = $('#tdCancelHdr'); if (cb) cb.style.display = t.status === 'in-progress' ? '' : 'none'
+}
+$('#tdCancelHdr').onclick = async () => {
+  const cb = $('#tdCancelHdr'); cb.disabled = true
+  const r = await api('POST', '/api/cancel', { taskId: tdTaskId })
+  toast(r && !r.error ? 'Cancel sent' : 'Cancel failed', tdTaskId, r && !r.error ? 'ok' : 'err')
+}
 
 function renderTaskOverview() {
   const t = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(tdTaskId))
@@ -425,8 +439,15 @@ function renderIterBar() {
   const chips = multi ? `<span class="iter-lbl">Iterations</span>` +
     `<button class="iter-chip ${fnFilter === '' ? 'on' : ''}" data-iter="">All · ${fnFindings.length}</button>` +
     fnIterations.map(it => `<button class="iter-chip ${fnFilter === it.taskId ? 'on' : ''}" data-iter="${esc(it.taskId)}">${esc(it.label || 'run')} · ${it.count}</button>`).join('') : ''
-  $('#fnIterBar').innerHTML = `${chips}<button class="btn sm primary" id="fnRunAnother" style="margin-left:auto">＋ Run another test</button>`
-  $('#fnRunAnother').onclick = () => { const f = $('#fnIterForm'); f.style.display = f.style.display === 'none' ? 'block' : 'none' }
+  // "Run another test" spawns a live pentest iteration (needs a target URL + engagement), so
+  // it applies to black-box and white-box (both route through the pentest engine) but NOT to a
+  // standalone static review — there is no live target to re-test. Hiding it there is correct,
+  // not a parity gap, and avoids the button erroring with "engagement not found".
+  const curT = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(fnTaskId))
+  const canIterate = curT && /pentest/.test(String(curT.squad || ''))
+  const runBtn = canIterate ? `<button class="btn sm primary" id="fnRunAnother" style="margin-left:auto">＋ Run another test</button>` : ''
+  $('#fnIterBar').innerHTML = `${chips}${runBtn}`
+  const ra = $('#fnRunAnother'); if (ra) ra.onclick = () => { const f = $('#fnIterForm'); f.style.display = f.style.display === 'none' ? 'block' : 'none' }
   $$('#fnIterBar .iter-chip').forEach(c => c.onclick = () => { fnFilter = c.dataset.iter; renderIterBar(); renderFindings() })
 }
 // lifecycle pill: agent-confirmed (amber) → validated (green) → scored (green + CVSS) → suspected (grey)
@@ -639,8 +660,8 @@ $('#amApply').onclick = async () => {
 
 /* ── squads ── */
 function renderSquads() {
-  $('#cSquads').textContent = SQUADS.filter(s => s.id !== 'universal').length
-  $('#squadList').innerHTML = SQUADS.map(sq => `<div class="squad" style="--sq:${squadHue(sq.id)}">
+  $('#cSquads').textContent = SQUADS.filter(s => s.id !== 'universal' && !s.hidden).length
+  $('#squadList').innerHTML = SQUADS.filter(s => !s.hidden).map(sq => `<div class="squad" style="--sq:${squadHue(sq.id)}">
     <div class="banner"><span class="name">${esc(sq.id)}</span></div>
     <div class="body">
       ${sq.leader !== '—' ? `<div class="lead">${avatar(sq.leader, 26)} <b>${esc(sq.leader)}</b><span style="color:var(--fg-dim);font-size:11px">leads</span></div>` : '<div class="lead"><b style="color:var(--fg-mut)">cross-squad</b></div>'}
@@ -651,7 +672,7 @@ function renderSquads() {
   </div>`).join('')
 
   const sel = $('#fSquad')
-  sel.innerHTML = SQUADS.filter(s => s.id !== 'universal').map(s => `<option value="${esc(s.id)}">${esc(s.id)} — leader ${esc(s.leader)}</option>`).join('')
+  sel.innerHTML = SQUADS.filter(s => s.id !== 'universal' && !s.hidden).map(s => `<option value="${esc(s.id)}">${esc(s.id)} — leader ${esc(s.leader)}</option>`).join('')
   updateDispatchInfo()
 }
 const isCR = () => $('#fSquad').value === 'code-review'

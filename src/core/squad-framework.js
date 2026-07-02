@@ -156,7 +156,9 @@ const SQUAD_TYPES = {
     chainAnalysis: true,
     arbiterVerification: true,
     costBudget: 50,
-    phases: ['blueprint', 'trace', 'deploy', 'validate', 'chain', 'report', 'verify'],
+    // Ordered to match the real code-review pipeline (see code-review-dispatcher.js) so the
+    // portal stepper tracks progress honestly: inventory → blueprint → map → assess → verify → report.
+    phases: ['inventory', 'blueprint', 'map', 'assess', 'verify', 'report'],
     reportFormat: 'code-review-report',
     priorityOrder: ['access-control', 'account-takeover', 'xss', 'sqli', 'ssrf', 'rce'],
     reportDirs: [(__roots.INTEL_ROOT + '/code-review')],

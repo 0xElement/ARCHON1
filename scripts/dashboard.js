@@ -97,9 +97,15 @@ function squads() {
   }
   const out = []
   for (const [id, cfg] of Object.entries(SQUAD_TYPES)) {
-    if (!OFFSEC.has(id)) continue // portal is offensive-security-only — hide stocks & non-offsec squads (presentation filter; backend logic untouched)
+    // The dispatch dropdown is offensive-security-only (default: pentest). code-review is NOT a
+    // dispatch option — it runs under the hood as the white-box/static engine — but the SPA
+    // still needs its phase metadata so code-review run cards render a proper stepper. Surface
+    // it flagged `hidden`; keep other non-offsec squads (stocks, etc.) filtered out entirely.
+    const dispatchable = OFFSEC.has(id)
+    if (!dispatchable && id !== 'code-review') continue
     out.push({
       id,
+      hidden: !dispatchable, // present for SQUAD_BY (stepper/phases) but not offered for dispatch
       leader: (cfg.leaderAgent || '').toUpperCase(),
       type: cfg.type,
       dispatchType: cfg.dispatchType,
