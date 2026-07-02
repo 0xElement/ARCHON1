@@ -139,11 +139,16 @@ class AttackGraph {
   /**
    * Find paths with cost tracking (cost-weighted BFS)
    */
-  findPaths(startId, endId, maxDepth = 5, maxCost = 20.0) {
+  findPaths(startId, endId, maxDepth = 5, maxCost = 20.0, maxPaths = 40, maxIterations = 20000) {
     const paths = []
     const queue = [{ path: [startId], totalCost: 0 }]
-
-    while (queue.length > 0) {
+    // Hard caps. A graph built from many findings has an exponential number of simple paths,
+    // so this all-paths BFS must be bounded on BOTH the paths kept and the total queue work.
+    // Without them it pegs the CPU and never returns (observed: a 76-finding run wedged the
+    // daemon at ~97% CPU for hours). The cheapest paths surface first once sorted below, so a
+    // cap costs no useful chains in practice.
+    let iterations = 0
+    while (queue.length > 0 && paths.length < maxPaths && iterations++ < maxIterations) {
       const { path: currentPath, totalCost } = queue.shift()
       const currentNode = currentPath[currentPath.length - 1]
 
@@ -177,9 +182,14 @@ class AttackGraph {
     const assets = [...this.nodes.entries()].filter(([_, n]) => n.type === NODE_TYPES.ASSET).map(([id]) => id)
     const impacts = [...this.nodes.entries()].filter(([_, n]) => n.type === NODE_TYPES.IMPACT).map(([id]) => id)
     const chains = []
-
+    // Bound total work: |assets| x |impacts| pairs, each enumerating paths, explodes on a large
+    // finding set. Cap the pairs examined and the chains kept so chain analysis always returns.
+    const MAX_PAIRS = 200, MAX_CHAINS = 400
+    let pairs = 0
+    outer:
     for (const asset of assets) {
       for (const impact of impacts) {
+        if (++pairs > MAX_PAIRS || chains.length > MAX_CHAINS) break outer
         const pathResults = this.findPaths(asset, impact, 6, 20.0)
         for (const { path, totalCost } of pathResults) {
           const nodes = path.map(id => this.nodes.get(id))
