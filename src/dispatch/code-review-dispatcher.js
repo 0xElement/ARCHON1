@@ -489,9 +489,13 @@ async function runCodeReview(dispatch, deps) {
   if (runPhase('mapping')) {
     updateProgress(25, `Phase 1: mapping ${features.length} features (waves of ${WAVE})`)
     logActivity('CURATOR', `🗺️ Phase 1: ${features.length} feature-mapping agents`, { taskId, squad, projectId: projectId || '', details: features.map(f => f.slug).join(', ') })
+    // Bump progress as each feature maps so the bar moves continuously and task.lastUpdate stays
+    // fresh (the stuck-task watchdog keys off it) — a large codebase can spend a long time here.
+    let mapped = 0
     const results = await runWaves(features, WAVE, async (feature, idx) => {
       const agent = MAPPER_POOL[idx % MAPPER_POOL.length]
       const r = await spawnAgent(agent, taskId, featureMapPrompt(agent, feature, taskId, sourceDir, outDir, invDir), `task-${taskId}-map-${feature.slug}`, null)
+      updateProgress(25 + Math.round(28 * (++mapped) / features.length), `Phase 1: mapped ${mapped}/${features.length} features`)
       return r
     })
     trackCosts(results)
@@ -513,9 +517,14 @@ async function runCodeReview(dispatch, deps) {
     updateProgress(62, `Phase 2: ${p2Features.length} features × ${vulnClasses.length} classes`)
     const jobs = []
     for (const cls of vulnClasses) for (const feature of p2Features) jobs.push({ cls, feature })
+    // Bump progress per assessment job (feature × class) — keeps the bar moving and lastUpdate
+    // fresh across what is usually the longest phase, however many jobs the codebase warrants.
+    let assessed = 0
     const results = await runWaves(jobs, WAVE, async ({ cls, feature }) => {
       const agent = CLASS[cls].agent
-      return spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
+      const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
+      updateProgress(62 + Math.round(16 * (++assessed) / jobs.length), `Phase 2: assessed ${assessed}/${jobs.length} (feature × class)`)
+      return r
     })
     trackCosts(results)
   }

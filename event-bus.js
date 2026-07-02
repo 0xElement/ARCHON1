@@ -10731,15 +10731,21 @@ function runStuckTaskWatchdog() {
       const isRunning = runningAgents.has(String(task.assignee || '').toUpperCase())
       if (isRunning) continue // still running, fine
 
-      // Check last activity log entry for this task (fast path via per-task log)
+      // Liveness signal = the FRESHEST of two sources:
+      //   (1) the per-task activity log (logActivity — only written at phase boundaries), and
+      //   (2) task.lastUpdate (updateProgress — moves on every phase AND, for code review, on
+      //       every wave). A long code review (duration scales with the codebase) can go 45min+
+      //       between activity-log entries yet still be actively progressing; using lastUpdate
+      //       too means a run that is genuinely advancing is never mis-declared "stuck".
       const taskEntries = readTaskActivity(String(task.id))
-
-      // Use e.ts (actual field name in activity log), fallback to e.timestamp for compat
-      const lastActivity = taskEntries.length > 0
+      const activityTs = taskEntries.length > 0
         ? Math.max(...taskEntries.map(e => new Date(e.ts || e.timestamp || 0).getTime()))
-        : (task.startedAt ? new Date(task.startedAt).getTime()
-          : task.createdAt ? new Date(task.createdAt).getTime()
-          : now) // fallback to now = never stuck
+        : 0
+      const progressTs = task.lastUpdate ? new Date(task.lastUpdate).getTime() : 0
+      const fallbackTs = task.startedAt ? new Date(task.startedAt).getTime()
+        : task.createdAt ? new Date(task.createdAt).getTime()
+        : now // fallback to now = never stuck
+      const lastActivity = Math.max(activityTs, progressTs) || fallbackTs
 
       const timeSinceActivity = now - lastActivity
 
