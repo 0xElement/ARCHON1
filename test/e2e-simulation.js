@@ -210,6 +210,14 @@ try {
   const tp = F('tasks.json')
   const arr = JSON.parse(fs.readFileSync(tp, 'utf8'))
   const list = Array.isArray(arr) ? arr : (arr.tasks || [])
+  // SAFETY: this rewrites the real tasks.json — don't do that while a live run is writing it
+  // (a manual sim should not run against an active engagement). Force with ARCHON_SIM_FORCE=1.
+  const live = list.filter(t => t && t.status === 'in-progress')
+  if (live.length && process.env.ARCHON_SIM_FORCE !== '1') {
+    console.error(`\n⛔ Refusing to register the sim task: ${live.length} in-progress task(s) are live: ${live.map(t => t.id).join(', ')}.`)
+    console.error(`   Re-run with ARCHON_SIM_FORCE=1 to override.\n`)
+    process.exit(2)
+  }
   const filtered = list.filter(t => String(t.id) !== TID && t.title !== 'unitTest' && t.source !== 'e2e-simulation')
   filtered.push({ id: TID, title: 'unitTest', status: 'done', squad: 'pentest-squad', assignee: 'ATLAS',
     goal: `unitTest end-to-end simulation — ${TARGET}`, createdAt: now(), startedAt: now(), lastUpdate: now(),
