@@ -159,6 +159,22 @@ function sweepOrphanedDeferrals(deps = {}) {
   const writeInbox = deps.writeInbox
   if (!writeInbox) return []
   const launched = []
+  // The deferral + 'pending-source-guidance' flags are set at dispatch-creation time and are
+  // ALSO both true while the code review is still running (they're only cleared by the CR
+  // completion hook). So the sweep must additionally confirm the CR actually FINISHED before
+  // launching — otherwise a daemon restart mid-review fires the pentest un-guided and loses the
+  // source→live correlation. Gate on the whitebox iteration's task being terminal-done, or its
+  // AUDITOR verdicts existing (a zero-finding CR is still 'done' and legitimately has no
+  // VALIDATED-FINDINGS, so we must NOT gate on that file).
+  let tasksRaw = null
+  try { tasksRaw = _readJson(path.join(intelRoot, 'tasks.json')) } catch {}
+  const tasks = Array.isArray(tasksRaw) ? tasksRaw : (tasksRaw && tasksRaw.tasks) || []
+  const crFinished = (crIt) => {
+    if (!crIt) return false
+    const t = tasks.find(x => String(x.id) === String(crIt.taskId))
+    if (t && ['done', 'completed'].includes(String(t.status || '').toLowerCase())) return true
+    try { return fs.existsSync(path.join(intelRoot, 'code-review', String(crIt.taskId), 'phase2', 'AUDITOR-VERDICTS.md')) } catch { return false }
+  }
   let files = []
   try { files = fs.readdirSync(intelRoot).filter(f => /^engagement-.*\.json$/.test(f)) } catch { return [] }
   for (const f of files) {
@@ -169,6 +185,7 @@ function sweepOrphanedDeferrals(deps = {}) {
       if (it && it.status && it.status !== 'pending-source-guidance') continue
       const engId = eng.engagementId || f.replace(/^engagement-/, '').replace(/\.json$/, '')
       const crIt = (eng.iterations || []).find(i => i.kind === 'whitebox')
+      if (!crFinished(crIt)) continue // code review still running (or unknown) — let its completion hook launch it
       const r = maybeLaunchSourceGuidedPentest(crIt ? crIt.taskId : '', { intelRoot, engagementId: engId, writeInbox })
       if (r.launched) launched.push(engId)
     } catch { /* fail-soft per engagement */ }

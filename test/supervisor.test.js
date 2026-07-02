@@ -51,7 +51,7 @@ const now = Date.now()
   fs.writeFileSync(path.join(tmp, 'dispatch-queue.json'), JSON.stringify([{ id: 'd1', taskId: 't-3-cc', status: 'processing', processedAt: new Date(now - 20 * 60000).toISOString() }]))
   // stale heartbeat (+ no live agent) = genuinely stuck. A FRESH heartbeat would mean a healthy long
   // run (e.g. a code review mid-phase) and must NOT be flagged — covered by case 3c below.
-  fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({ 't-3-cc': new Date(now - 20 * 60000).toISOString() }))
+  fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({ 't-3-cc': new Date(now - 40 * 60000).toISOString() }))
   const snap = runHealthPass({ intel: tmp, now, execSync: () => '' })
   ok('queue_integrity flags stuck processing', snap.checks.find(c => c.name === 'queue_integrity').ok === false)
   ok('snapshot.queue.stuckProcessing = 1', snap.queue.stuckProcessing === 1)

@@ -8703,7 +8703,9 @@ function _isRealFinding(f) {
   const t = String(f.title || '').toLowerCase()
   const sev = String(f.severity || '').toLowerCase()
   if (sev === 'n/a' || sev === 'na' || sev === 'none') return false
-  if (/\bdisproven\b|\bdisproved\b|no .{0,12}attack surface|not exploitable|\bnot found\b|no .{0,25}found|false[- ]positive/.test(t)) return false
+  // Non-finding phrasings only — anchored so a legit "No CSRF token found" / "No rate limiting"
+  // (a MISSING security control IS a real finding) is kept, while "No vulnerabilities found" is dropped.
+  if (/\bdisproven\b|\bdisproved\b|\bnot exploitable\b|\bnot vulnerable\b|false[- ]positive|\bno (?:known )?(?:vulnerabilit(?:y|ies)|issues?|findings?|weakness(?:es)?|flaws?|problems?)\b|\bno .{0,20}attack surface\b|\bnothing (?:found|to report)\b/.test(t)) return false
   return true
 }
 
@@ -9189,6 +9191,7 @@ async function dispatchToAgent(dispatch) {
   // (2026-04-23) code-review squad routes through code-review-dispatcher module.
   // White-box source code review — 6 framework specialists + PROBER runtime validator.
   if (dispatchType === 'code-review') {
+    let _crHb = null // phase-heartbeat interval (declared here so the finally can always clear it)
     try {
       const allCostsLocal = []
       let totalCostLocal = 0
@@ -9215,6 +9218,19 @@ async function dispatchToAgent(dispatch) {
           })
         } catch {}
       }
+      // Phase heartbeat: re-stamp task.lastUpdate every 3min so a long single-agent phase
+      // (blueprint / consolidate / AUDITOR verify / SCRIBE on a big codebase) never looks
+      // "stuck" to the watchdog. A code review's duration scales with the code — this keeps a
+      // slow-but-healthy run alive without weakening genuine hung-task detection (a truly hung
+      // run stops advancing progress AND stops beating). unref'd + cleared in finally.
+      _crHb = setInterval(() => {
+        try {
+          const ts = readJSON(TASKS_FILE) || []
+          const t = ts.find(x => String(x.id) === String(taskId))
+          if (t && t.status === 'in-progress') updateProgressLocal(t.progress || 4, t.statusMessage)
+        } catch {}
+      }, 3 * 60 * 1000)
+      if (_crHb.unref) _crHb.unref()
       const codeReviewDispatcher = freshRequire('./src/dispatch/code-review-dispatcher')
       const crResult = await codeReviewDispatcher.runCodeReview(dispatch, {
         spawnAgent, trackCosts: trackCostsLocal, updateProgress: updateProgressLocal,
@@ -9258,6 +9274,15 @@ async function dispatchToAgent(dispatch) {
           await enrichFindingsForTask(taskId)
         }
       } catch (e) { log(`⚠️ cr auto-enrich ${taskId} failed (non-fatal): ${e.message}`) }
+      // A cancel/fail can land DURING post-processing (normalize/triager/enrich take real time).
+      // If the task went terminal meanwhile, do NOT launch the deferred pentest and do NOT mark
+      // it 'done' — that would resurrect a cancelled run and fire an unwanted pentest at the box.
+      if (_isTaskCancelled(taskId)) {
+        log(`🛑 ${taskId} went terminal during post-processing — not launching pentest, not marking done`)
+        try { runningTasks.delete(taskId) } catch {}
+        setTimeout(() => processQueue(), 1500)
+        return
+      }
       // White-box source-guided LAUNCH (Autonomous OS). Driven ENTIRELY by the
       // PERSISTED deferral signal (engagement.deferredPentestDispatch +
       // pending-source-guidance) — NOT a flag re-read (Issue 3), so a flag/env skew
@@ -9276,7 +9301,8 @@ async function dispatchToAgent(dispatch) {
       try {
         const tasks = readJSON(TASKS_FILE)
         const task = tasks.find(t => String(t.id) === String(taskId))
-        if (task) {
+        // never clobber a terminal state (cancelled/failed) back to 'done' (last-write race guard)
+        if (task && !['cancelled', 'failed'].includes(String(task.status || '').toLowerCase())) {
           task.status = 'done'
           task.progress = 100
           task.totalCost = Math.round(totalCostLocal * 10000) / 10000
@@ -9291,7 +9317,7 @@ async function dispatchToAgent(dispatch) {
       log(`❌ code-review dispatch error: ${e.message}`)
       try { runningTasks.delete(taskId) } catch {}
       setTimeout(() => processQueue(), 2000)
-    }
+    } finally { try { if (_crHb) clearInterval(_crHb) } catch {} }
     return
   }
 
@@ -11003,9 +11029,16 @@ function startWatcher() {
     try {
       const tasks = readJSON(TASKS_FILE) || []
       const beats = {}
-      const now = new Date().toISOString()
+      const nowMs = Date.now()
       for (const t of tasks) {
-        if (t && t.status === 'in-progress') beats[String(t.id)] = now
+        if (!t || t.status !== 'in-progress') continue
+        // Stamp the task's REAL last-progress time (freshest of task.lastUpdate and its activity
+        // log) — NOT an unconditional 'now'. A healthy task keeps advancing progress (per phase +
+        // wave + the code-review phase-heartbeat) so it stays fresh; a genuinely hung task stops
+        // advancing, so its heartbeat goes stale and the supervisor can actually detect it.
+        let ms = t.lastUpdate ? new Date(t.lastUpdate).getTime() : 0
+        try { const ents = readTaskActivity(String(t.id)); if (ents.length) ms = Math.max(ms, ...ents.map(e => new Date(e.ts || e.timestamp || 0).getTime())) } catch {}
+        beats[String(t.id)] = new Date(ms || nowMs).toISOString()
       }
       // Atomic write to side-channel — no tasks.json mutation, no race.
       writeAtomic(HEARTBEAT_FILE, JSON.stringify(beats, null, 2))

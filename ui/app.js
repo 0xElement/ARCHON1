@@ -546,6 +546,8 @@ function openFindingPage(key) {
   const codeSec = f.codeBlock
     ? `<div class="fsec pocsec"><div class="fk poc">Vulnerable code${f.file ? ` · ${esc(f.file)}${f.line ? ':' + f.line : ''}` : ''}</div><pre class="fv mono">${esc(f.codeBlock)}</pre></div>`
     : ''
+  // Static taint trace (untrusted input → vulnerable sink) — the most valuable part of a source finding.
+  const dfSec = f.dataFlow ? sec('Data flow', f.dataFlow) : ''
   // POC (CURL Request, no response) — ONLY for findings with a live URL. Static code review
   // needs none; the vulnerable code block above is the proof.
   const pocBlock = f.url && (f.poc || f.rawRequest)
@@ -561,6 +563,7 @@ function openFindingPage(key) {
     ${locSec}
     ${steps}
     ${codeSec}
+    ${dfSec}
     ${pocBlock}
     ${sec('Impact', f.impact)}
     ${sec('Remediation', f.remediation)}`

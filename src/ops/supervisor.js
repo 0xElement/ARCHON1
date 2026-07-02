@@ -13,7 +13,11 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const STREAM_LIVE_MS = 120000   // an agent stream touched <120s ago = the agent is alive
-const HEARTBEAT_STALE_MS = 150000 // in-progress task heartbeat older than this = suspect
+// The heartbeat now reflects REAL last-progress (event-bus runTaskHeartbeat stamps the freshest of
+// task.lastUpdate + activity log), so this is "no forward progress for this long". 30min tolerates a
+// legit slow single-agent phase (AUDITOR/SCRIBE on a big codebase, or a long pentest specialist wave)
+// while still catching a genuinely hung task. Must exceed the largest healthy no-progress gap.
+const HEARTBEAT_STALE_MS = 30 * 60 * 1000
 const STUCK_PROCESSING_MS = 15 * 60 * 1000
 
 function _readJSON(p, fb) { try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return fb } }
@@ -182,7 +186,7 @@ if (require.main === module) {
     { id: 'd2', taskId: 't-3-cc', status: 'processing', processedAt: new Date(now - 20 * 60000).toISOString() },
   ]))
   fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({
-    't-2-bb': new Date(now - 20 * 60000).toISOString(), // stale
+    't-2-bb': new Date(now - 40 * 60000).toISOString(), // stale (> 30min HEARTBEAT_STALE_MS)
     't-3-cc': new Date(now).toISOString(),              // fresh → alive
   }))
   fs.writeFileSync(path.join(tmp, 'streams', `scout-t-1-aa.stream`), 'x') // fresh = zombie agent

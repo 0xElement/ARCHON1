@@ -448,8 +448,10 @@ function createDispatch(body) {
       eng.deferredPentestDispatch = req
       const it = (eng.iterations || []).find(i => i.kind === 'blackbox'); if (it) it.status = 'pending-source-guidance'
       fs.writeFileSync(engFile, JSON.stringify(eng, null, 2))
-    } catch { /* fail-soft: fall through to a normal dispatch below */ }
-    return { taskId, assignee: req.assignee, squad: req.squad, deferred: true }
+      // Only report 'deferred' once the deferral is actually persisted — otherwise fall through
+      // to the normal dispatch below so the pentest still runs (never silently dropped).
+      return { taskId, assignee: req.assignee, squad: req.squad, deferred: true }
+    } catch { /* fail-soft: deferral not saved — fall through to a normal (un-deferred) dispatch */ }
   }
   writeInbox('inbox/task-actions', req)
   return { taskId, assignee: req.assignee, squad: req.squad }
@@ -490,7 +492,9 @@ function isRealFinding(f) {
   const t = String(f.title || '').toLowerCase()
   const sev = String(f.severity || '').toLowerCase()
   if (sev === 'n/a' || sev === 'na' || sev === 'none') return false
-  if (/\bdisproven\b|\bdisproved\b|no .{0,12}attack surface|not exploitable|\bnot found\b|no .{0,25}found|false[- ]positive/.test(t)) return false
+  // Non-finding phrasings only — anchored so a legit "No CSRF token found" / "No rate limiting"
+  // (a MISSING security control IS a real finding) is kept, while "No vulnerabilities found" is dropped.
+  if (/\bdisproven\b|\bdisproved\b|\bnot exploitable\b|\bnot vulnerable\b|false[- ]positive|\bno (?:known )?(?:vulnerabilit(?:y|ies)|issues?|findings?|weakness(?:es)?|flaws?|problems?)\b|\bno .{0,20}attack surface\b|\bnothing (?:found|to report)\b/.test(t)) return false
   return true
 }
 function readJsonl(file) {
@@ -582,6 +586,7 @@ function findingsForSingleTask(id, label) {
       rawRequest: d.raw_request || f.raw_request || f.http_request || (f.url ? synthRawRequest(f.method, f.url, poc) : ''),
       file: d.file || f.file || '', line: d.line || f.line || null,
       codeBlock: d.code_block || d.codeBlock || f.code_block || f.vulnerable_code || '',
+      dataFlow: d.data_flow || d.dataFlow || f.data_flow || '', // static taint trace (untrusted input → sink)
       confirmation: f.confirmation || d.confirmation || '',
       judge: (judgeBy[f.id] && (judgeBy[f.id].verdict || judgeBy[f.id].judgement)) || '',
       enriched: !!detail[f.id], triage: triage[f.id] || null, source: 'validated',
