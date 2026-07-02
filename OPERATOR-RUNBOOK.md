@@ -141,9 +141,6 @@ where IDOR and privilege-escalation findings come from. One account = no cross-r
 testing, so add at least two (e.g. `normal` + `admin`, or two `normal` users) if the
 target owner provided them.
 
-**Scan strategy → Skip initial recon** — leave **unchecked** for a normal run. Check
-it only when you already know the attack surface and want agents to go straight to
-authenticated functionality testing (saves time, but you lose surface/WAF discovery).
 
 **Vulnerability focus** — the chips: **Access control / IDOR, Auth, SQLi,
 Command injection, XSS, SSRF, SSTI, XXE, CSRF, LFI, API, Business logic**, plus a
@@ -173,12 +170,16 @@ On dispatch the daemon writes the engagement artifacts and runs the pipeline:
 3. **Phase 0 — scope hard-block.** Out-of-scope hosts are rejected here (fail-closed:
    no scope config = blocked). Nothing downstream can touch them.
 4. **Recon** (SCOUT, RANGER) — auth surface, WAF, attack surface mapping.
-   *(Skipped if you checked Skip-recon.)*
 5. **Specialists** — one per vuln class, authenticating with your test accounts,
    testing each role for cross-role authz.
 6. **AUDITOR** independently verifies findings → **ARBITER** judges/calibrates
    confidence → **SCRIBE** writes the final report. If the judge can't run, the
    report is stamped **VERIFICATION INCOMPLETE** rather than shipping un-vetted.
+
+> **White-box (URL + source dir):** the live pentest does **not** start on dispatch. The source
+> **code review runs first** (CURATOR pipeline), and its findings then **aim a source-guided live
+> pentest** that verifies each candidate against the running target before AUDITOR/ARBITER/SCRIBE
+> and the cross-view merge. A **static** run (source only) stops after the code review.
 
 Monitor from the dashboard: **Tasks** (status/progress), **Activity** (live agent
 actions), **Reports** (output when SCRIBE finishes). Reports and run state are
@@ -239,7 +240,7 @@ signal; the re-plan intel itself is always produced.
 | Host rejected at Phase 0 | host not in scope / out-of-scope match | Add to **In scope**; check wildcard spelling |
 | Boot says "claude CLI not found" / agents fail | `claude` not installed or not logged in | Install the Claude CLI, run `claude` to log in (OAuth), or set `KURU_CLAUDE_BIN` to its path |
 | No IDOR/authz findings | only one test account given | Add a second role under **Test accounts** |
-| Findings look thin | recon skipped or wrong scope | Uncheck Skip-recon; verify URL + scope |
+| Findings look thin | wrong scope or too-narrow focus | Verify URL + scope; widen the vuln-class focus |
 | Report flagged "VERIFICATION INCOMPLETE" | judge (ARBITER) couldn't run | Re-run; High/Critical findings are un-vetted until it does |
 | Gate tests red | framework integrity issue | Fix gates before trusting any report (§1) |
 | Can't find a past run | generic Title | Use identifying Titles (§4) |

@@ -200,13 +200,14 @@ data flow genuinely reaches a dangerous sink, so a pattern alone is never enough
 result is reported at file and line with the vulnerable code block shown as the proof, which is why a
 static finding needs no HTTP request.
 
-ARCHON does not stop at the pattern. It performs its own testing to confirm what the code review found.
-In a white box engagement the target is running as well as readable, so PROBER takes each source finding
-and validates it against the live deployment. A bug proven both ways is labelled clearly, and cross view
-deduplication merges the source view and the runtime view of the same issue into one entry that carries
-both the file and line trace and the live reproduction. Every finding states its confirmation status
-honestly: RUNTIME_CONFIRMED when it was proven live, SOURCE_CONFIRMED when it was proven in code only.
-A source read is never presented as a live exploit.
+ARCHON does not stop at the pattern. In a white box engagement it verifies what the code review found
+against the running target. The code review runs first, and its candidates then aim a source guided live
+pentest: each suspected sink is confirmed against the deployed application rather than fired blindly, and
+PROBER also runtime validates source findings during the review. A bug proven both ways is labelled
+clearly, and cross view deduplication merges the source view and the runtime view of the same issue into
+one entry that carries both the file and line trace and the live reproduction. Every finding states its
+confirmation status honestly: RUNTIME_CONFIRMED when it was proven live, SOURCE_CONFIRMED when it was
+proven in code only. A source read is never presented as a live exploit.
 
 ---
 
@@ -239,7 +240,7 @@ outdated components. Reproduce it with the harness in [`benchmark/`](./benchmark
 |---|---|---|
 | **Black-box** | URL | Live pentest: recon → fingerprint → ATLAS attack plan → specialist waves firing payloads → AUDITOR → judge → SCRIBE. |
 | **Static / white-box** | source dir | Reads the code, no payloads fired: inventories → blueprint → feature mapping → per-class assessment → AUDITOR → SCRIBE. Pattern recognition finds candidates, each is confirmed in context, and findings are reported at file and line with the vulnerable code block as proof (no HTTP request needed). |
-| **Combined (merged)** | URL + source dir | Black-box *and* white-box iterations run as one engagement; PROBER runtime-validates source findings against the live URL; `cross-view-dedup` merges both into one report. |
+| **White-box (combined)** | URL + source dir | The code review runs **first**; its findings then aim a **source-guided** live pentest that verifies each candidate against the running target (PROBER also runtime-validates during the review). `cross-view-dedup` merges the source and runtime views into one report. |
 
 An **engagement** holds N independent iterations (the white-box + black-box pair, plus any focused
 re-runs you add). Findings aggregate across iterations and one report is generated over all of them.
@@ -272,7 +273,8 @@ findings against a deploy URL).
 ### Universal agents (`_universal/agents/`)
 
 **AUDITOR** (independent verifier) · **ARBITER** (confidence judge / publication gate) ·
-**SCRIBE** (final reporter) · **COMMAND** (coordination).
+**SCRIBE** (final reporter) · **COMMAND** (coordination) · **TRIAGER** (dedup + merge, owns the
+Findings board) · **WRITER** (per-finding writeup).
 
 ---
 
@@ -373,7 +375,7 @@ ARCHON/
 ├── squads/                   # persona content (SOUL.md + skills) per squad
 │   ├── pentest/agents/<name>/
 │   └── code-review/agents/<name>/
-├── _universal/agents/        # AUDITOR · ARBITER · SCRIBE · COMMAND
+├── _universal/agents/        # AUDITOR · ARBITER · SCRIBE · COMMAND · TRIAGER · WRITER
 ├── agents/                   # runtime agent logic
 │   ├── runner/               # runAgent() chokepoint + sdk/cli adapters + bridge
 │   ├── squads/<sq>/squad.json# operational config (enabledPhases, caps)
@@ -432,8 +434,9 @@ npm run test:ui  # browser e2e (Playwright) — drives the portal + dispatch/tri
 npm run test:bun # the few bun-only suites (node:test async semantics)
 ```
 
-`npm test` is the product gate (currently green: **124 passed, 0 failed**) and runs **fully offline**
-— no test touches the public internet (HTTP-dependent suites start a local fixture server). A handful
+`npm test` is the product gate (green — the `run-all.js` unit suites pass, framework-internal
+suites are skipped) and runs **fully offline** — no test touches the public internet (HTTP-dependent
+suites start a local fixture server). A handful
 of deeper framework-internal suites are kept in `test/` but skipped by the gate (they target a full
 multi-squad / PM2 deployment); run them individually with `node test/<file>`. New `src/pipeline/*`
 modules ship with a matching `test/*.test.js`.

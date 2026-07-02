@@ -58,8 +58,10 @@ ARCHON runs on the **Claude subscription via OAuth** (the `claude` CLI, pointed 
 | Add a vulnerability class / patterns | `common/patterns/` → `PATTERN_AUTHORING_GUIDE.md` |
 | Add or change a specialist agent | `squads/<sq>/agents/<name>/` → `AGENT_AUTHORING_GUIDE.md` |
 | Add an autonomy/methodology module | `src/pipeline/` → `PLUGIN_SDK.md` |
+| Change the black-box pipeline | `event-bus.js` (`dispatchPentestParallel`) + `src/pipeline/` |
+| Change the white-box / static engine | `src/dispatch/code-review-dispatcher.js` (squad: `squads/code-review/agents/<name>/`); source→live correlation in `src/dispatch/whitebox-correlation.js` |
 | Change root/path resolution | `paths.js` (the one chokepoint) |
-| Change model selection | `src/routing/model-router.js` + `model-config.js` |
+| Change model selection | `src/routing/model-router.js` + `agents/model-config.js` |
 | Understand the pipeline | `CLAUDE.md` + `docs/ORCHESTRATION.md` |
 
 ## Releasing

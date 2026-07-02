@@ -5,6 +5,14 @@ Status reflects the current `main`.
 
 ## Now (recently landed)
 
+- **Static / white-box parity** — static and white-box run the same portal flow as black-box
+  (live phase stepper, always-visible cancel, the shared dedup/merge triager + WRITER writing the
+  Findings board with the code-review template: vulnerable code block + `file:line`, no curl). Only
+  the agents swap by test type.
+- **Source-guided white-box verify (default)** — a white-box run does the source code review
+  **first**, then automatically launches a **source-guided** live pentest that verifies those
+  candidates against the target (`whitebox-correlation`), merged into one report — instead of two
+  parallel passes.
 - **Honest confirmation status** — `SOURCE_CONFIRMED` vs `RUNTIME_CONFIRMED` (+
   `NEEDS_LIVE_VALIDATION` / `DISPROVEN`), derived in `finding-schema.js`. A
   source-only review no longer presents a code-read finding as live-proven.
@@ -69,7 +77,9 @@ proving itself in shadow.
 ## Later / ideas
 
 - Per-engagement learning loop (lessons feeding the next strategist plan).
-- Richer white-box ⇄ black-box correlation (source root-cause ↔ live proof linking).
+- Deeper white-box ⇄ black-box correlation — the default cross-view de-dup + SOURCE→LIVE
+  source-guided verify already ship; graduate the still-flagged typed correlation-records and
+  the LIVE→SOURCE root-cause back-linking.
 - Community squad/catalog marketplace (see `PLUGIN_SDK.md`).
 
 ---

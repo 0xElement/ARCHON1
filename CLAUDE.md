@@ -20,8 +20,9 @@ CLI). Two squads:
 | code-review | CURATOR | MARSHAL, CIPHER, QUILL, BEACON, BREAKER, SIPHON · PROBER (runtime validator) | White-box source review |
 
 Universal agents (`_universal/agents/`): **AUDITOR** (independent verifier), **ARBITER** (confidence
-judge), **SCRIBE** (final reporter), **COMMAND** (coordination). **NEXUS** is the daemon itself
-(`event-bus.js`), not a persona.
+judge), **SCRIBE** (final reporter), **COMMAND** (coordination), **TRIAGER** (dedup/merge + the
+Findings board), **WRITER** (per-finding writeup). **NEXUS** is the daemon itself (`event-bus.js`),
+not a persona.
 
 ## Top-level files
 
@@ -34,7 +35,7 @@ judge), **SCRIBE** (final reporter), **COMMAND** (coordination). **NEXUS** is th
 | `agents/runner/` | `agent-runner.js` = chokepoint `runAgent(spec)` → `{text,usage,model,raw}`; **default adapter `sdk`** (subscription OAuth), `ADAPTER=cli` rollback; `adapters/common.js` = env allowlist; `run-agent-bridge.js` = legacy `{code,output,cost,model}` shape for the spawnAgent retry path. |
 | `src/dispatch/code-review-dispatcher.js` | White-box engine: inventories → App Blueprint → feature mapping → per-class assessment → AUDITOR → SCRIBE. |
 | `src/core/squad-framework.js` | `SQUAD_TYPES` registry (pentest + code-review). |
-| `src/routing/model-router.js` / `model-config.js` | Family→model mapping + per-agent selection. Never hardcode model strings — use `modelRouter.resolve(agentName)`. |
+| `src/routing/model-router.js` + `agents/model-config.js` | Per-agent model selection (`modelRouter.getModelForAgent(agentName, opts)`; family aliases via `modelRouter.resolveFamily(family)`). The family→model map is `<INTEL_ROOT>/model-config.json`; `agents/model-config.js` is the MODEL_PROFILE override shim. Never hardcode model strings. |
 | `src/pipeline/` | Autonomy + methodology modules: `env-fingerprint`, `attack-planner`, `exploit-prover`, `outcome-classifier`, `cross-view-dedup`, `pentest-phases`, `chain-verifier`, `attack-graph`. |
 | `src/core/coverage-map.js` + `common/taxonomy/owasp_wstg.yaml` | WSTG A-Z coverage map → specialist charters. |
 | `src/pipeline/evidence-contract.js` | "No replayable evidence → not CONFIRMED" (enforced at `agents/auditor-validated-builder.js`). |
@@ -76,7 +77,7 @@ is **fail-closed**. Both are non-negotiable for an OSS exploit tool.
 - **Atomic writes**: `writeAtomic(file, data)` + `withFileLock(file, fn)` (`acquireLock`, stale-steal 10s)
   for `tasks.json` / `dispatch-queue.json` / `ACTIVITY-LOG.jsonl`. Never bare `fs.writeFileSync` on these.
 - **`logActivity('AGENT', '…', { type, squad, taskId, projectId })`** — agent UPPERCASE, type for filtering.
-- **Never hardcode model strings** — `modelRouter.resolve(agentName)`.
+- **Never hardcode model strings** — `modelRouter.getModelForAgent(agentName, opts)` (family aliases via `modelRouter.resolveFamily(family)`).
 - **Evidence contract** — a CONFIRMED finding needs replayable evidence (reproduction / proof /
   nonce-confirmed PoC) or it's demoted to NEEDS-LIVE. Enforced in `auditor-validated-builder.js`.
 - **Dossier selection** — published report = the canonical author's file (security squads → SCRIBE).
