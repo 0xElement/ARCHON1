@@ -44,15 +44,29 @@ const now = Date.now()
   ok('snapshot.tasks.zombie = 1', snap.tasks.zombie === 1)
 }
 
-// 3. stuck 'processing' queue entry (no live agent) → flagged not-ok
+// 3. stuck 'processing' queue entry (no live agent AND stale heartbeat = dead) → flagged not-ok
 {
   const tmp = fixture()
-  fs.writeFileSync(path.join(tmp, 'tasks.json'), JSON.stringify([{ id: 't-3-cc', status: 'in-progress', startedAt: new Date(now).toISOString() }]))
+  fs.writeFileSync(path.join(tmp, 'tasks.json'), JSON.stringify([{ id: 't-3-cc', status: 'in-progress', startedAt: new Date(now - 30 * 60000).toISOString() }]))
   fs.writeFileSync(path.join(tmp, 'dispatch-queue.json'), JSON.stringify([{ id: 'd1', taskId: 't-3-cc', status: 'processing', processedAt: new Date(now - 20 * 60000).toISOString() }]))
-  fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({ 't-3-cc': new Date(now).toISOString() }))
+  // stale heartbeat (+ no live agent) = genuinely stuck. A FRESH heartbeat would mean a healthy long
+  // run (e.g. a code review mid-phase) and must NOT be flagged — covered by case 3c below.
+  fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({ 't-3-cc': new Date(now - 20 * 60000).toISOString() }))
   const snap = runHealthPass({ intel: tmp, now, execSync: () => '' })
   ok('queue_integrity flags stuck processing', snap.checks.find(c => c.name === 'queue_integrity').ok === false)
   ok('snapshot.queue.stuckProcessing = 1', snap.queue.stuckProcessing === 1)
+}
+
+// 3c. a HEALTHY long run: processing >15min, no live agent, but FRESH heartbeat → NOT stuck.
+// (This is the code-review-mid-phase / SDK-adapter case that previously false-flagged.)
+{
+  const tmp = fixture()
+  fs.writeFileSync(path.join(tmp, 'tasks.json'), JSON.stringify([{ id: 't-3-live', status: 'in-progress', startedAt: new Date(now - 30 * 60000).toISOString() }]))
+  fs.writeFileSync(path.join(tmp, 'dispatch-queue.json'), JSON.stringify([{ id: 'd1', taskId: 't-3-live', status: 'processing', processedAt: new Date(now - 20 * 60000).toISOString() }]))
+  fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({ 't-3-live': new Date(now).toISOString() }))
+  const snap = runHealthPass({ intel: tmp, now, execSync: () => '' })
+  ok('healthy long run (fresh heartbeat) not flagged stuck', snap.checks.find(c => c.name === 'queue_integrity').ok === true)
+  ok('snapshot.queue.stuckProcessing = 0 for fresh-heartbeat run', snap.queue.stuckProcessing === 0)
 }
 
 // 3b. terminal-task queue entry left 'processing' → auto-reconciled to completed

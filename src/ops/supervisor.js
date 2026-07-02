@@ -84,11 +84,19 @@ function runHealthPass(ctx = {}) {
     const updates = {}; for (const d of reconcilable) updates[String(d.taskId)] = terminal[String(d.taskId)]
     try { ctx.reconcileQueue(updates); for (const d of reconcilable) fixes.push(`queue ${d.id} → ${updates[String(d.taskId)]} (task terminal)`) } catch {}
   }
-  // (b) REPORT: genuinely stuck — 'processing' >15min, task NOT terminal, no live agent (processQueue reclaims).
+  // (b) REPORT: genuinely stuck — 'processing' >15min, task NOT terminal, AND the task looks dead
+  //     (no live agent AND a stale heartbeat). A long but HEALTHY run trips the first two: a code
+  //     review can spend >15min in a single phase, and its SDK-adapter agents are not counted as
+  //     OS children (live=0). Such a run still writes a FRESH heartbeat, so heartbeat freshness —
+  //     not just the live-agent count — must clear it, mirroring the heartbeat_integrity criterion.
   const stuckProcessing = queue.filter(d => {
     if (d.status !== 'processing' || terminal[String(d.taskId)]) return false
     const procMs = d.processedAt ? Date.parse(d.processedAt) : 0
-    return procMs && (now - procMs) > STUCK_PROCESSING_MS && !(live[String(d.taskId)] > 0)
+    if (!procMs || (now - procMs) <= STUCK_PROCESSING_MS) return false
+    if (live[String(d.taskId)] > 0) return false
+    const hbMs = heartbeats[String(d.taskId)] ? Date.parse(heartbeats[String(d.taskId)]) : 0
+    if (hbMs && (now - hbMs) < HEARTBEAT_STALE_MS) return false // fresh heartbeat ⇒ alive, not stuck
+    return true
   })
   add('queue_integrity', stuckProcessing.length === 0,
     stuckProcessing.length ? `${stuckProcessing.length} stuck 'processing' entr(ies) >15min — processQueue recovery should reclaim`
@@ -163,19 +171,28 @@ if (require.main === module) {
   // a cancelled task WITH a fresh agent stream = zombie
   fs.writeFileSync(path.join(tmp, 'tasks.json'), JSON.stringify([
     { id: 't-1-aa', status: 'cancelled' },
-    { id: 't-2-bb', status: 'in-progress', startedAt: new Date(now).toISOString() },
+    { id: 't-2-bb', status: 'in-progress', startedAt: new Date(now).toISOString() },   // genuinely dead
+    { id: 't-3-cc', status: 'in-progress', startedAt: new Date(now - 30 * 60000).toISOString() }, // healthy long run
   ]))
   fs.writeFileSync(path.join(tmp, 'dispatch-queue.json'), JSON.stringify([
-    // stuck 'processing' for an in-progress task with NO live agent stream
+    // t-2-bb: processing >15min, no live agent, STALE heartbeat = genuinely stuck (flag it)
     { id: 'd1', taskId: 't-2-bb', status: 'processing', processedAt: new Date(now - 20 * 60000).toISOString() },
+    // t-3-cc: processing >15min, no live agent, but FRESH heartbeat = healthy long run (e.g. a code
+    // review mid-phase whose SDK agents aren't counted live) — must NOT be flagged as stuck.
+    { id: 'd2', taskId: 't-3-cc', status: 'processing', processedAt: new Date(now - 20 * 60000).toISOString() },
   ]))
-  fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({ 't-2-bb': new Date(now).toISOString() }))
+  fs.writeFileSync(path.join(tmp, 'task-heartbeats.json'), JSON.stringify({
+    't-2-bb': new Date(now - 20 * 60000).toISOString(), // stale
+    't-3-cc': new Date(now).toISOString(),              // fresh → alive
+  }))
   fs.writeFileSync(path.join(tmp, 'streams', `scout-t-1-aa.stream`), 'x') // fresh = zombie agent
   const cancelled = []
   const snap = runHealthPass({ intel: tmp, now, execSync: () => '', writeCancelSignal: id => cancelled.push(id) })
   assert.deepStrictEqual(cancelled, ['t-1-aa'], `zombie should be re-cancelled, got ${cancelled}`)
   assert.strictEqual(snap.checks.find(c => c.name === 'cancel_integrity').autoFixed, true)
-  assert.strictEqual(snap.checks.find(c => c.name === 'queue_integrity').ok, false, 'stuck processing should be flagged')
+  const qi = snap.checks.find(c => c.name === 'queue_integrity')
+  assert.strictEqual(qi.ok, false, 'genuinely-stuck processing (stale heartbeat) should be flagged')
+  assert.ok(/^1 stuck/.test(qi.detail), `only the dead task is stuck, not the fresh-heartbeat long run — got: ${qi.detail}`)
   assert.ok(fs.existsSync(path.join(tmp, 'health.json')), 'health.json written')
   assert.strictEqual(snap.tasks.zombie, 1)
   console.log('ok — supervisor detects zombie/stuck, auto-cancels zombie, writes health.json')
