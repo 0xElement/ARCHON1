@@ -4668,10 +4668,17 @@ async function dispatchPentestParallel(dispatch) {
     try {
       const { execSync } = require('child_process')
       const safeUrl_local = safeUrl(targetUrl)
-      // capture the HTTP code WITHOUT the old `|| echo 000` concat bug ("000000" defeated the check)
+      // capture the HTTP code WITHOUT the old `|| echo 000` concat bug ("000000" defeated the check).
+      // RETRY: a target VM that is still booting (or a brief network blip) returns 000 on the first
+      // probe; aborting the whole run on a single transient failure is wrong. Try 3 times, 2s apart,
+      // and follow redirects (-L) so a 301/302 landing page counts as reachable.
       let httpCode = '000'
-      try { httpCode = execSync(`curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${safeUrl_local}"`, { timeout: 15000 }).toString().trim() || '000' }
-      catch (ce) { httpCode = (ce.stdout || '').toString().trim() || '000' }
+      for (let _try = 1; _try <= 3; _try++) {
+        try { httpCode = execSync(`curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "${safeUrl_local}"`, { timeout: 15000 }).toString().trim() || '000' }
+        catch (ce) { httpCode = (ce.stdout || '').toString().trim() || '000' }
+        if (/^[1-5]\d\d$/.test(httpCode) && httpCode !== '000') break
+        if (_try < 3) { log(`⏳ Pre-flight: ${targetUrl} not answering yet (code ${httpCode}) — retry ${_try}/2 in 2s (target may be booting)`); try { execSync('sleep 2') } catch {} }
+      }
       const httpOk = /^[1-5]\d\d$/.test(httpCode) && httpCode !== '000'
       if (httpOk) { log(`✅ Pre-flight: ${targetUrl} reachable (HTTP ${httpCode})`) }
       else {
