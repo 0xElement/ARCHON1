@@ -138,8 +138,7 @@
                 <button type="button" class="btn sm ghost" id="ptAddCred" style="margin-top:8px">＋ Add user</button>
                 <div class="hint">Each row: username · password · role. Agents authenticate as each role and test cross-role authorization (IDOR / privilege escalation).</div></div>
               <div class="field" id="ptStrategyField"><label>Scan strategy</label>
-                <label class="chk-line"><input type="checkbox" id="ptSkipRecon"> <span>Skip initial recon (nmap / surface discovery) — go straight to authenticated functionality testing</span></label>
-                <div class="hint" style="margin:11px 0 7px">Vulnerability focus — pick classes to run a <b>focused</b> scan (none selected = full A→Z deep dive)</div>
+                <div class="hint" style="margin:2px 0 7px">Vulnerability focus — pick classes to run a <b>focused</b> scan (none selected = full A→Z deep dive)</div>
                 <div class="focus-pick" id="ptFocusClasses">
                   <button type="button" data-cls="access-control">Access control / IDOR</button>
                   <button type="button" data-cls="auth">Auth &amp; session</button>
@@ -221,8 +220,7 @@
           <div id="fnIterForm" class="card" style="display:none;margin-bottom:16px">
             <h3>Run another test on this engagement</h3>
             <div class="hint">Same target, scope &amp; accounts — new focus. Runs as an independent iteration; existing results are untouched and new findings append.</div>
-            <label class="chk-line" style="margin-top:10px"><input type="checkbox" id="itSkipRecon"> <span>Skip initial recon — straight to functionality testing</span></label>
-            <div class="hint" style="margin:11px 0 7px">Vulnerability focus (none = full A→Z)</div>
+            <div class="hint" style="margin:10px 0 7px">Vulnerability focus (none = full A→Z)</div>
             <div class="focus-pick" id="itFocusClasses">
               <button type="button" data-cls="access-control">Access control / IDOR</button>
               <button type="button" data-cls="auth">Auth &amp; session</button>

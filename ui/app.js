@@ -608,12 +608,11 @@ $('#itCancel').onclick = () => { $('#fnIterForm').style.display = 'none' }
 $$('#itFocusClasses button').forEach(b => b.onclick = () => b.classList.toggle('on'))
 $('#itRun').onclick = async () => {
   const focusClasses = $$('#itFocusClasses button.on').map(b => b.dataset.cls)
-  const skipRecon = $('#itSkipRecon').checked
-  const r = await api('POST', '/api/iterate', { engagementId: fnEngagementId, focusClasses, skipRecon })
+  const r = await api('POST', '/api/iterate', { engagementId: fnEngagementId, focusClasses, skipRecon: false })
   if (r && !r.error) {
     toast('Iteration started ✓', `${r.iterationLabel} — runs independently, results will append`, 'ok')
     $('#fnIterForm').style.display = 'none'
-    $$('#itFocusClasses button').forEach(b => b.classList.remove('on')); $('#itSkipRecon').checked = false
+    $$('#itFocusClasses button').forEach(b => b.classList.remove('on'))
     show('tasks'); tick()
   } else toast('Iteration failed', r && r.error, 'err')
 }
@@ -773,7 +772,7 @@ $('#fSubmit').onclick = async () => {
       const featureFocus = $('#ptFocus').value.trim()
       if (testType === 'feature' && !featureFocus) { toast('Focus required', 'Name the features to focus on', 'err'); $('#ptFocus').focus(); return }
       const lines = id => $(id).value.split('\n').map(s => s.trim()).filter(Boolean)
-      const meta = { targetUrl, testType, inScope: lines('#ptInScope'), outOfScope: lines('#ptOutScope'), credentials, skipRecon: $('#ptSkipRecon').checked, focusClasses: $$('#ptFocusClasses button.on').map(b => b.dataset.cls).filter(Boolean) }
+      const meta = { targetUrl, testType, inScope: lines('#ptInScope'), outOfScope: lines('#ptOutScope'), credentials, skipRecon: false, focusClasses: $$('#ptFocusClasses button.on').map(b => b.dataset.cls).filter(Boolean) }
       if (testType === 'feature') meta.featureFocus = featureFocus
       const customFocus = $('#ptCustomChip').classList.contains('on') ? $('#ptCustomFocus').value.trim() : ''
       if (customFocus) meta.customFocus = customFocus
