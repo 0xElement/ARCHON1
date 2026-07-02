@@ -10,7 +10,7 @@ safe and flag-inert.
 | Concern | Chokepoint | Never do instead |
 |---|---|---|
 | Persona / squad paths | `paths.js` (`soulPath`, `skillsDir`, `personaState`, `AGENTS_ROOT`, `INTEL_ROOT`) | hardcode `/root/...` or a local path |
-| Model selection | `modelRouter.resolve(name)` | a literal model string |
+| Model selection | `modelRouter.getModelForAgent(name, opts)` | a literal model string |
 | Running an agent | `runAgent(spec)` in `agents/runner/agent-runner.js` | spawn the `claude` CLI directly |
 | Finding shape | `agents/finding-schema.js` (`normalizeFinding`) | invent a finding object |
 | Feature flags | `paths.flagMode(name)` / `flagEnabled(name)` | read `process.env.ARCHON_ENABLE_*` |

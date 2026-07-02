@@ -29,7 +29,7 @@ ARCHON runs on the **Claude subscription via OAuth** (the `claude` CLI, pointed 
 3. **No hardcoded roots or paths.** Resolve persona/squad paths via `paths.js`
    (`agentPaths.soulPath(name)`, `skillsDir`, `personaState`, …) and roots via
    `AGENTS_ROOT` / `INTEL_ROOT`. No raw `/root/...` or local-machine literals.
-4. **No hardcoded model strings.** Use `modelRouter.resolve(agentName)`.
+4. **No hardcoded model strings.** Use `modelRouter.getModelForAgent(agentName, opts)`.
 5. **Atomic writes on shared state.** `tasks.json`, `dispatch-queue.json`,
    `ACTIVITY-LOG.jsonl` use `writeAtomic` + `withFileLock` — never bare
    `fs.writeFileSync`.

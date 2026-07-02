@@ -50,9 +50,9 @@ Adding a persona dir is not enough — wire it into the four registries:
    is how `paths.js` resolves the persona's home in nested mode.
 2. **Squad roster** — add the agent to its squad config under
    `agents/squads/<squad>/squad.json` so the dispatcher knows it exists.
-3. **`src/routing/model-config.js`** — give the agent a model family if it should
+3. **`agents/model-config.js`** — give the agent a model family if it should
    differ from the squad default. Selection is always via
-   `modelRouter.resolve('<name>')` — never a literal model string.
+   `modelRouter.getModelForAgent('<name>', opts)` — never a literal model string.
 4. **`src/core/coverage-map.js`** — if the specialist owns a WSTG area, add it to
    that area's `owner[]` so coverage scoring credits its runs. Map any new
    vuln-class string in `CLASS_TO_WSTG`.
