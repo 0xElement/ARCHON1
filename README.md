@@ -28,6 +28,7 @@ whose findings merge into one de-duplicated report.
 - [Features](#features)
 - [How it works](#how-it-works)
 - [How the agents and triage work](#how-the-agents-and-triage-work)
+- [Benchmark](#benchmark)
 - [Engagement modes](#engagement-modes)
 - [The squads](#the-squads)
 - [Quickstart](#quickstart)
@@ -206,6 +207,29 @@ deduplication merges the source view and the runtime view of the same issue into
 both the file and line trace and the live reproduction. Every finding states its confirmation status
 honestly: RUNTIME_CONFIRMED when it was proven live, SOURCE_CONFIRMED when it was proven in code only.
 A source read is never presented as a live exploit.
+
+---
+
+## Benchmark
+
+A black box run against a fresh OWASP Juice Shop, scored on the vulnerability classes it is known
+to contain. Full report with charts and the per class breakdown:
+[`benchmark/RESULTS-blackbox.md`](./benchmark/RESULTS-blackbox.md).
+
+| Target | Class coverage | Confirmed findings |
+|---|---|---|
+| OWASP Juice Shop | **12 of 15 (80%)** | 26 (7 Critical, 8 High, 10 Medium, 1 Low) |
+
+```mermaid
+pie showData title Vulnerability class coverage
+  "Covered" : 12
+  "Missed" : 3
+```
+
+Covered: SQL injection, cross site scripting, broken authentication, broken access control, JWT
+weaknesses, XXE, server side JavaScript injection, CORS misconfiguration, mass assignment, path
+traversal, sensitive data exposure, and business logic abuse. Missed: open redirect, SSRF, and
+outdated components. Reproduce it with the harness in [`benchmark/`](./benchmark).
 
 ---
 
