@@ -1,6 +1,6 @@
 # ARCHON × Autonomous Agent OS — Fit & Build Plan
 
-*Synthesis across all 11 spec section digests, mapped to the live codebase at `ARCHON`. Status legend: ✅ have · 🟡 partial · ❌ missing.*
+*Synthesis across all 11 spec section digests, mapped to the live codebase at `the repo root`. Status legend: ✅ have · 🟡 partial · ❌ missing.*
 
 ---
 
