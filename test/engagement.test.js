@@ -81,7 +81,10 @@ function cleanup() {
   const inbox = fs.readdirSync(F('inbox/task-actions')).map(f => { try { return JSON.parse(fs.readFileSync(F('inbox/task-actions/' + f), 'utf8')) } catch { return {} } })
   const ptD = inbox.find(j => j.taskId === CE && j.squad === 'pentest-squad')
   const crD = inbox.find(j => j.taskId === cr.taskId && j.squad === 'code-review-squad')
-  ok('combined: pentest dispatch queued', !!ptD)
+  // White-box contract: the live pentest is DEFERRED (code review runs FIRST, then a
+  // source-guided pentest verifies its findings against the box), so it is NOT queued yet —
+  // it's stashed on the engagement as deferredPentestDispatch and launched on CR completion.
+  ok('combined: pentest dispatch DEFERRED (code review first, then source-guided verify)', !ptD && !!ceng.deferredPentestDispatch)
   ok('combined: code-review dispatch queued with sourceDir', !!crD && crD.meta && crD.meta.sourceDir === srcDir)
   ok('combined: code-review deployUrl bridged to live URL', crD && crD.meta && crD.meta.deployUrl === 'https://combo.test')
   ok('combined: cr scope in_scope includes the source tree (Phase 0.0 source-target match)',

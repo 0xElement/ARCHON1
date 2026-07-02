@@ -1,7 +1,9 @@
 // test/whitebox-deferral.test.js
-// P6 white-box deferral (ULTRAPLAN §3.2): flag-off ⇒ a combined engagement writes
-// BOTH dispatches (byte-stable); flag ACTIVE ⇒ the pentest dispatch is DEFERRED
-// (only code-review queued; pentest stashed as a source-guided white-box dispatch).
+// White-box contract: a combined engagement (pentest squad + sourceDir) ALWAYS defers the
+// live pentest — code review runs FIRST, then a source-guided pentest verifies its findings
+// against the box. So only the code-review dispatch is queued immediately; the pentest is
+// stashed on the engagement (source-guided, iteration pending-source-guidance) and launched by
+// the code-review completion hook. A plain pentest (no sourceDir) still dispatches immediately.
 
 'use strict'
 const { test } = require('node:test')
@@ -35,33 +37,37 @@ function inboxDispatches(TMP) {
   try { return fs.readdirSync(dir).map(f => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { return null } }).filter(Boolean) } catch { return [] }
 }
 
-test('flag-OFF: a combined engagement queues BOTH the pentest and code-review dispatches', () => {
+test('combined white-box ALWAYS defers the pentest (code review first, then source-guided verify)', () => {
+  // Default behavior — no autonomous-OS flags set. The pentest must be deferred so the
+  // code review runs first and its findings aim the live verification against the box.
   const { d, TMP, restore } = loadDashboardWith({})
-  try {
-    const src = path.join(__dirname, '..')
-    const r = d.createDispatch(combinedBody(src))
-    const inbox = inboxDispatches(TMP)
-    assert.ok(inbox.some(x => x.taskId === r.taskId && x.squad === 'pentest-squad'), 'pentest dispatch queued (flag-off)')
-    assert.ok(inbox.some(x => x.squad === 'code-review-squad'), 'code-review dispatch queued')
-    const eng = JSON.parse(fs.readFileSync(path.join(TMP, `engagement-${r.taskId}.json`), 'utf8'))
-    assert.ok(!eng.deferredPentestDispatch, 'no deferral when flag off')
-  } finally { restore() }
-})
-
-test('flag-ACTIVE: the pentest dispatch is DEFERRED (only code-review queued; pentest stashed white-box)', () => {
-  const { d, TMP, restore } = loadDashboardWith({ ARCHON_ENABLE_AUTONOMOUS_OS: '1', ARCHON_ENABLE_SOURCE_GUIDED_PENTEST: '1', ARCHON_DRIVE_SOURCE_GUIDED_PENTEST: '1' })
   try {
     const src = path.join(__dirname, '..')
     const r = d.createDispatch(combinedBody(src))
     assert.equal(r.deferred, true, 'createDispatch reports the pentest was deferred')
     const inbox = inboxDispatches(TMP)
-    assert.ok(!inbox.some(x => x.taskId === r.taskId && x.squad === 'pentest-squad'), 'pentest dispatch NOT queued yet (deferred)')
-    assert.ok(inbox.some(x => x.squad === 'code-review-squad'), 'code-review still queued immediately')
+    assert.ok(!inbox.some(x => x.taskId === r.taskId && x.squad === 'pentest-squad'), 'pentest dispatch NOT queued yet (deferred until code review completes)')
+    assert.ok(inbox.some(x => x.squad === 'code-review-squad'), 'code-review dispatch queued immediately (runs first)')
     const eng = JSON.parse(fs.readFileSync(path.join(TMP, `engagement-${r.taskId}.json`), 'utf8'))
     assert.ok(eng.deferredPentestDispatch, 'pentest dispatch stashed on the engagement')
     assert.equal(eng.deferredPentestDispatch.meta.sourceGuided, true, 'stashed dispatch stamped source-guided')
     assert.equal(eng.deferredPentestDispatch.meta.engagementMode, 'whitebox')
     const bb = (eng.iterations || []).find(i => i.kind === 'blackbox')
     assert.equal(bb.status, 'pending-source-guidance')
+  } finally { restore() }
+})
+
+test('a plain pentest (no sourceDir) is NOT deferred — dispatches immediately', () => {
+  const { d, TMP, restore } = loadDashboardWith({})
+  try {
+    const r = d.createDispatch({ squad: 'pentest', meta: {
+      targetUrl: 'https://bb.test', inScope: ['bb.test'],
+      credentials: [{ username: 'u', password: 'p', role: 'admin' }],
+    } })
+    assert.notEqual(r.deferred, true, 'a black-box pentest is not deferred')
+    const inbox = inboxDispatches(TMP)
+    assert.ok(inbox.some(x => x.taskId === r.taskId && x.squad === 'pentest-squad'), 'pentest dispatch queued immediately')
+    const eng = JSON.parse(fs.readFileSync(path.join(TMP, `engagement-${r.taskId}.json`), 'utf8'))
+    assert.ok(!eng.deferredPentestDispatch, 'no deferral for a source-less pentest')
   } finally { restore() }
 })

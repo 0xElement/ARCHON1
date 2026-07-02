@@ -9224,6 +9224,22 @@ async function dispatchToAgent(dispatch) {
       // 'cancelled', no normalize/enrich/report/'done' (mirrors the parallel-phases path).
       if (_isTaskCancelled(taskId) || (crResult && crResult.cancelled)) {
         log(`🛑 ${taskId} was cancelled — skipping normalize/enrich/report`)
+        // White-box: a cancelled code review must NOT auto-launch the deferred pentest.
+        // Neutralize the deferral so the orphan-sweep skips it (it only fires while the
+        // black-box iteration is 'pending-source-guidance'). Fail-soft.
+        try {
+          const __engId = (dispatch.meta && dispatch.meta.engagementId) || taskId
+          const __ef = `${agentPaths.INTEL_ROOT}/engagement-${__engId}.json`
+          if (fs.existsSync(__ef)) {
+            const __eng = JSON.parse(fs.readFileSync(__ef, 'utf8'))
+            if (__eng && __eng.deferredPentestDispatch) {
+              delete __eng.deferredPentestDispatch
+              const __it = (__eng.iterations || []).find(i => i.kind === 'blackbox'); if (__it) __it.status = 'cancelled'
+              writeAtomic(__ef, JSON.stringify(__eng, null, 2))
+              log(`🛑 ${taskId}: cleared deferred pentest (white-box review cancelled — box not auto-verified)`)
+            }
+          }
+        } catch {}
         try { runningTasks.delete(taskId) } catch {}
         setTimeout(() => processQueue(), 1500)
         return

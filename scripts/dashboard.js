@@ -431,14 +431,16 @@ function createDispatch(body) {
     ...(body.model ? { model: String(body.model) } : {}),
     ...(meta ? { meta } : {}),
   }
-  // White-box source-guided deferral (Autonomous OS, flag-gated). ACTIVE + combined
-  // (pentest dispatch with a sourceDir) ⇒ DEFER the pentest dispatch: stamp it
-  // white-box + source-guided, stash it on the engagement, mark the iteration
-  // pending-source-guidance, and DON'T writeInbox it now — the code-review
-  // completion hook launches it source-guided. Flag-off / non-combined ⇒ the
-  // writeInbox below runs unchanged (byte-identical). See ULTRAPLAN §3.2.
-  const __sgMode = (squad === 'pentest' && typeof agentPaths.flagMode === 'function') ? agentPaths.flagMode('SOURCE_GUIDED_PENTEST') : 'off'
-  if (__sgMode === 'active' && body.meta && body.meta.sourceDir) {
+  // White-box contract: code review FIRST, then a source-guided live pentest that VERIFIES the
+  // code-review candidates against the target box. So for a combined dispatch (pentest squad +
+  // a sourceDir) always DEFER the live pentest: stamp it white-box + source-guided, stash it on
+  // the engagement, mark the black-box iteration pending-source-guidance, and DON'T writeInbox it
+  // now — the code-review completion hook (maybeLaunchSourceGuidedPentest) launches it, aimed by
+  // the source findings. This makes a white-box run genuinely "review, then verify against the
+  // box" instead of two parallel passes. (Previously gated behind ARCHON_ENABLE_SOURCE_GUIDED_
+  // PENTEST; it is now the default white-box flow.) Non-combined pentest ⇒ writeInbox below runs
+  // unchanged. See ULTRAPLAN §3.2.
+  if (squad === 'pentest' && body.meta && body.meta.sourceDir) {
     req.meta = { ...(req.meta || {}), sourceGuided: true, engagementMode: 'whitebox' }
     try {
       const engFile = path.join(INTEL, `engagement-${taskId}.json`)
