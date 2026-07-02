@@ -799,6 +799,24 @@ async function api(method, url, body) {
   try { return await (await fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json() }
   catch (e) { return { error: String(e.message || e) } }
 }
+// Live-validate a source directory as it is typed (the daemon reads the tree straight off local
+// disk, so a wrong or non-absolute path fails the run). Shows a green readable line or a red error.
+function wireSourceCheck(inputId, hintId) {
+  const inp = document.getElementById(inputId), hint = document.getElementById(hintId)
+  if (!inp || !hint) return
+  let t
+  const run = async () => {
+    const dir = inp.value.trim()
+    if (!dir) { hint.textContent = ''; hint.className = 'hint scheck'; inp.classList.remove('src-ok', 'src-bad'); return }
+    const r = await api('GET', '/api/check-source?dir=' + encodeURIComponent(dir))
+    if (r && r.ok) { hint.textContent = `✓ readable · ${r.entries} entries`; hint.className = 'hint scheck ok'; inp.classList.add('src-ok'); inp.classList.remove('src-bad') }
+    else { hint.textContent = `✗ ${r && r.error || 'invalid path'}`; hint.className = 'hint scheck bad'; inp.classList.add('src-bad'); inp.classList.remove('src-ok') }
+  }
+  inp.addEventListener('blur', run)
+  inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 700) })
+}
+wireSourceCheck('crSourceDir', 'crSourceCheck')
+wireSourceCheck('ptSourceDir', 'ptSourceCheck')
 async function tick() { const s = await api('GET', '/api/state'); if (s && !s.error) render(s); if (currentView === 'overview') renderHealth() }
 // System Health card — the Operational Supervisor's latest snapshot
 async function renderHealth() {

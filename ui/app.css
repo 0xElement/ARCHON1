@@ -338,6 +338,12 @@ ol.fsteps li { font-size: 13px; line-height: 1.5; }
 .input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input::placeholder, .textarea::placeholder { color: var(--fg-dim); }
 .hint { color: var(--fg-dim); font-size: 12px; margin-top: 6px; }
+/* live source-path validation feedback */
+.hint.scheck { margin-top: 4px; font-weight: 500; }
+.hint.scheck.ok { color: var(--emerald); }
+.hint.scheck.bad { color: #e5484d; }
+.input.src-ok { border-color: var(--emerald); }
+.input.src-bad { border-color: #e5484d; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .seg { display: inline-flex; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r-sm); padding: 3px; gap: 3px; }
 .seg button { border: 0; background: transparent; color: var(--fg-mut); font: inherit; font-size: 12.5px; padding: 6px 14px; border-radius: 5px; cursor: pointer; font-weight: 500; }

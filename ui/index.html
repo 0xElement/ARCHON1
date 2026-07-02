@@ -82,8 +82,9 @@
             <!-- code-review-specific fields (shown only when squad = code-review) -->
             <div id="crFields" style="display:none">
               <div class="field"><label>Source directory <span class="req">*</span></label>
-                <input class="input" id="crSourceDir" placeholder="<home>  (absolute, local)">
-                <div class="hint">Absolute path to the source tree to review (white-box).</div></div>
+                <input class="input" id="crSourceDir" placeholder="/Users/you/Documents/project  (absolute, local)">
+                <div class="hint">Absolute path to the source tree to review (white-box).</div>
+                <div class="hint scheck" id="crSourceCheck"></div></div>
               <div class="row2">
                 <div class="field"><label>Mode</label>
                   <div class="seg" id="crMode"><button data-v="auto" class="on">Auto</button><button data-v="gitlab">GitLab</button><button data-v="generic">Generic</button></div>
@@ -117,8 +118,9 @@
                 <div class="hint" id="ptUrlHint">The primary live target. Its host is auto-added to in-scope.</div></div>
               <div id="ptSourceGroup" style="display:none">
                 <div class="field"><label>Source code directory <span class="req">*</span></label>
-                  <input class="input" id="ptSourceDir" placeholder="/absolute/path/to/source">
-                  <div class="hint">Absolute path to the source tree to review. ARCHON maps the codebase automatically.</div></div>
+                  <input class="input" id="ptSourceDir" placeholder="/Users/you/Documents/project">
+                  <div class="hint">Absolute path to the source tree to review. ARCHON maps the codebase automatically.</div>
+                  <div class="hint scheck" id="ptSourceCheck"></div></div>
               </div>
               <div id="ptBlackGroup">
                 <div class="field"><label>Coverage</label>

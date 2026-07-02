@@ -156,12 +156,30 @@ function writeInbox(subdir, obj) {
   return name
 }
 
+// Validate a source directory: absolute, exists, is a readable non-empty directory. Returns
+// { ok, error, entries } — never throws — so it drives both the /api/check-source live check
+// and buildCodeReviewMeta. The daemon reads the tree straight off local disk, so the path must
+// be a real absolute path on this machine.
+function checkSourceDir(dir) {
+  const sourceDir = String(dir || '').trim()
+  if (!sourceDir) return { ok: false, error: 'source directory is required' }
+  if (/^~/.test(sourceDir)) return { ok: false, error: 'use a full absolute path, not "~" (e.g. /Users/you/Documents/project)' }
+  if (!path.isAbsolute(sourceDir)) return { ok: false, error: 'must be an absolute path' }
+  let st
+  try { st = fs.statSync(sourceDir) } catch { return { ok: false, error: 'not found or not accessible on this machine' } }
+  if (!st.isDirectory()) return { ok: false, error: 'that path is a file, not a directory' }
+  let entries
+  try { entries = fs.readdirSync(sourceDir) } catch { return { ok: false, error: 'not readable (permission denied)' } }
+  if (!entries.length) return { ok: false, error: 'the directory is empty' }
+  return { ok: true, entries: entries.length }
+}
+
 // Build a code-review meta block from the form, validated.
 function buildCodeReviewMeta(body) {
   const m = (body.meta && typeof body.meta === 'object') ? body.meta : {}
   const sourceDir = String(m.sourceDir || '').trim()
-  if (!sourceDir) throw new Error('code-review needs a source directory (meta.sourceDir)')
-  if (!path.isAbsolute(sourceDir)) throw new Error('sourceDir must be an absolute path')
+  const _chk = checkSourceDir(sourceDir)
+  if (!_chk.ok) throw new Error(`sourceDir: ${_chk.error}${sourceDir ? ` (${sourceDir})` : ''}`)
   const out = { sourceDir }
   if (m.preset === 'gitlab' || m.preset === 'generic') out.preset = m.preset // omit = auto-detect
   const VALID_CLASSES = ['access-control', 'xss', 'sqli', 'ssrf', 'rce', 'account-takeover']
@@ -754,6 +772,7 @@ const server = http.createServer(async (req, res) => {
   }
   try {
     if (req.method === 'GET' && p === '/api/state') return json(res, 200, state())
+    if (req.method === 'GET' && p === '/api/check-source') return json(res, 200, checkSourceDir(url.searchParams.get('dir')))
     if (req.method === 'GET' && p === '/api/squads') return json(res, 200, { squads: squads() })
     if (req.method === 'GET' && p === '/api/report') {
       // Canonicalize then enforce the INTEL_ROOT boundary — path.resolve collapses
