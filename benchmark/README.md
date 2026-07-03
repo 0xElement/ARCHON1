@@ -28,15 +28,15 @@ total, and the scorecard also lists any extra findings that did not map to a gro
 
 ## Setup
 
-1. Start Juice Shop in Docker:
+1. Run OWASP Juice Shop somewhere reachable — from source, or any instance you control:
 
    ```
-   docker run -d --name juice-shop -p 3000:3000 bkimminich/juice-shop
+   git clone https://github.com/juice-shop/juice-shop && cd juice-shop
+   npm install && npm start        # serves on http://localhost:3000
    ```
 
 2. Target the host IP, not localhost. The scan tooling (naabu and nmap) is unreliable against
-   the loopback address and anything running in a container cannot reach the host as localhost,
-   so use the machine LAN IP. Find it and confirm Juice Shop answers there:
+   the loopback address, so use the machine LAN IP. Find it and confirm Juice Shop answers there:
 
    ```
    ipconfig getifaddr en0            # macOS, prints your host LAN IP
@@ -83,11 +83,10 @@ You can also drive the benchmark from the dashboard instead of the command line:
 
 Score a source code review the same way — no live target needed:
 
-1. Get the Juice Shop source (matches the Docker image):
+1. Get the Juice Shop source:
 
    ```
-   docker cp juice-shop:/juice-shop ./juice-shop-src   # exact match to the running instance
-   # or: git clone https://github.com/juice-shop/juice-shop
+   git clone https://github.com/juice-shop/juice-shop ./juice-shop-src
    ```
 
 2. From the portal, dispatch a **static** review (source directory = the Juice Shop source) — or a

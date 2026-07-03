@@ -27,19 +27,10 @@ The main change is that agents should not wait for manual commands after dispatc
 
 ARCHON must be evidence-driven. No finding should enter the final report unless it has sufficient proof, is in scope, and passes independent validation.
 
-## Docker and non-breaking integration
+## Non-breaking integration
 
-This pack is designed to go into the ARCHON Docker build safely.
+This pack lives under `docs/autonomous-agent-os-spec/`. For the rollout process, follow:
 
-Add it under:
-
-```text
-docs/autonomous-agent-os-spec/
-```
-
-Then follow:
-
-- `09_DEVELOPER_IMPLEMENTATION/DOCKER_BUILD_AND_RUNTIME_GUIDE.md`
 - `09_DEVELOPER_IMPLEMENTATION/NON_BREAKING_MIGRATION_GUIDE.md`
 
 The migration principle is simple: preserve the current UI, current workflows, and current agent execution first. Add the autonomous architecture behind feature flags, run it in shadow mode, then enable modules one by one only after the existing product remains stable.

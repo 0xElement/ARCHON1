@@ -36,7 +36,8 @@ const daemonUp = () => { try { return execFileSync('pgrep', ['-f', 'event-bus.js
   const code = await httpCode(URL)
   if (code !== 200 && code !== 302) {
     console.error(`\n  ✗ target not reachable (HTTP ${code}).`)
-    console.error(`    Start it:  docker run -d --name juice-shop -p 3000:3000 bkimminich/juice-shop\n`)
+    console.error(`    Start OWASP Juice Shop (run it from source, or use any deployed instance) and pass its URL:`)
+    console.error(`      node benchmark/run-benchmark.js <target-url>\n`)
     process.exit(2)
   }
   console.log(`  target:  reachable (HTTP ${code})`)

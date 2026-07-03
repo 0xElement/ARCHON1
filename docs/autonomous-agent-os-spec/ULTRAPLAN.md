@@ -177,10 +177,6 @@ One chokepoint in `paths.js` (the env authority that already autoloads `.env.loc
 
 One shared sink **`src/shadow/shadow-sink.js`** (~40 lines): `snapshot(eng, name, obj)` (writeAtomic), `append(eng, name, record)` (JSONL append), `note(eng)` (merge `shadow-manifest.json`). Per-engagement file scope, every fn try/catch → no-op. Backs the three §09 mechanisms: **validate-and-log** (C, R-judge), **passive-listener** (B, F-into-KG), **observer-recommender** (A, E, F, white-box, R-stream). The whole `var/intel/shadow/` subtree is **never read** by the legacy pipeline/dashboard/SCRIBE → reports stay byte-stable even with shadow on. Runtime divergence logger `src/pipeline/shadow-recorder.js` (`recordDivergence`/`readDivergences`) is the production face for offline diffing; NO-OP unless the relevant shadow flag is on.
 
-### 4.4 Docker (Phase 0, optional)
-
-Spec's 4-mount layout collapses onto ARCHON's single data root: mount `./var/intel:/app/var/intel`, `KURU_INTEL_ROOT=/app/var/intel`. `Dockerfile` (`node:lts-slim`, `npm ci --omit=dev`, all `ARCHON_ENABLE_*=false`, `HEALTHCHECK` → `/api/health`), `docker-compose.yml`, spec vendored to `docs/autonomous-agent-os-spec/` via `ARCHON_AGENT_SPEC_DIR` (fail-soft if absent).
-
 ---
 
 ## 5. Component build specs (implementation-ready)
@@ -190,7 +186,7 @@ Spec's 4-mount layout collapses onto ARCHON's single data root: mount `./var/int
 ### 5.0 Foundation
 
 #### F-Flags (Phase 0)
-- **New:** `src/shadow/shadow-sink.js`, `src/core/engagement-mode.js` (§3.1), `test/feature-flags.test.js`; optional `Dockerfile`, `docker-compose.yml`, `docs/autonomous-agent-os-spec/`.
+- **New:** `src/shadow/shadow-sink.js`, `src/core/engagement-mode.js` (§3.1), `test/feature-flags.test.js`; optional `docs/autonomous-agent-os-spec/`.
 - **Modified:** `paths.js` — add `flagMode/flagEnabled/shadowDir` (§4.1), export in the existing exports block (verified anchor `140` `INTEL_ROOT,`). Add grep-gate to enforce no direct `process.env.ARCHON_ENABLE_*` reads **and no `require('ajv')`/`require('js-yaml')` in net-new modules** (Issue 8). Register `3.088`/`3.95` in `src/pipeline/pentest-phases.js PHASE_MANIFEST` as `tier:'optional'` (§1a, Issue 6).
 - **In/out:** in = dispatch body/meta + env; out = `flagMode/flagEnabled` decisions, engagement `kind`, `shadowDir` paths.
 - **Verify:** `test/feature-flags.test.js` — all blocks `false` when unset; master-off forces all off; `flagMode` returns `shadow` on ENABLE-only, `active` only with ENABLE+DRIVE; classifier maps 3 cases **at both boundaries**; **source-guided pentest dispatch (carrying `meta.sourceGuided=true`) classifies whitebox at the event-bus boundary** (Issue 1); `assertModeContract` throws for blackbox+codeReview and **strips `deployUrl` for static** (Issue 5); createDispatch byte-stable vs golden for all non-combined paths (Issue 3); `phaseEnabled('3.088'/'3.95')` resolvable under an explicit `enabledPhases` list (Issue 6).
@@ -301,7 +297,7 @@ Spec's 4-mount layout collapses onto ARCHON's single data root: mount `./var/int
 ### 6.2 Phases (each: changes · gating flag · shadow rollout · MECHANICAL exit)
 
 **P0 — Flags + shadow + mode-routing scaffold + verification harness.**
-- Changes: `paths.flagMode/flagEnabled/shadowDir`; `src/shadow/shadow-sink.js`; `src/core/engagement-mode.js` (classifier reads `meta.sourceDir`/`meta.sourceGuided`/resolved engagement `sourceDir`; `assertModeContract` strips `deployUrl` for static — Issues 1+5); `src/pipeline/shadow-recorder.js`; **register `3.088`/`3.95` in `PHASE_MANIFEST` as optional (Issue 6)**; test harness (`shadow-diff.js`, `golden.js`, `flag-off-byte-stable.test.js`, `mode-contract.test.js`, `dispatch-routing.test.js`); wire `assertModeContract` at both dispatch boundaries; CI workflow incl. the ajv/js-yaml grep-gate (Issue 8); grep-gate for direct env reads. Optional Docker.
+- Changes: `paths.flagMode/flagEnabled/shadowDir`; `src/shadow/shadow-sink.js`; `src/core/engagement-mode.js` (classifier reads `meta.sourceDir`/`meta.sourceGuided`/resolved engagement `sourceDir`; `assertModeContract` strips `deployUrl` for static — Issues 1+5); `src/pipeline/shadow-recorder.js`; **register `3.088`/`3.95` in `PHASE_MANIFEST` as optional (Issue 6)**; test harness (`shadow-diff.js`, `golden.js`, `flag-off-byte-stable.test.js`, `mode-contract.test.js`, `dispatch-routing.test.js`); wire `assertModeContract` at both dispatch boundaries; CI workflow incl. the ajv/js-yaml grep-gate (Issue 8); grep-gate for direct env reads.
 - Flag: master + family defined, all off.
 - Shadow: n/a (substrate).
 - **Exit:** `test/feature-flags.test.js` + `flag-off-byte-stable.test.js` green; createDispatch byte-identical to golden with all flags off (incl. all non-combined paths — Issue 3); `assertModeContract` throws on blackbox+codeReview and strips `deployUrl` for static so PROBER never spawns (Issue 5); **source-guided pentest dispatch classifies whitebox at the event-bus boundary (Issue 1)**; `phaseEnabled('3.088'/'3.95')` resolvable under explicit `enabledPhases` (Issue 6); CI 3-job matrix passing; grep finds **zero** direct `process.env.ARCHON_ENABLE_*` reads outside `paths.js` and **zero** `require('ajv')`/`require('js-yaml')` (Issue 8).

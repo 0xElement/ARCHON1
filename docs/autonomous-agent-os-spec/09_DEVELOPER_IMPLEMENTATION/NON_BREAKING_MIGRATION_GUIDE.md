@@ -16,7 +16,6 @@ The new autonomous agent OS architecture must be introduced gradually and safely
 - Current evidence/output folder behaviour
 - Current CLI commands
 - Current environment variables
-- Current Docker build process
 
 ## Additive-first strategy
 
@@ -116,7 +115,6 @@ ARCHON_ENABLE_STRICT_JUDGE_GATE
 
 ## Developer checklist before merging
 
-- [ ] Docker build passes
 - [ ] UI loads
 - [ ] Legacy black-box scan works
 - [ ] Legacy source review works

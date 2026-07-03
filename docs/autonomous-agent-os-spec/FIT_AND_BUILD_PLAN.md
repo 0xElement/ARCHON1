@@ -41,7 +41,7 @@ What is already done, verified across the digests:
 - **The attack-chain engine is real**: `src/pipeline/attack-graph.js` (multi-hop discovery) + `chain-verifier.js` (deterministic curl/openssl/dig replay) + `browser-verifier.js`.
 - **Two of the three source-review phases are faithfully implemented** with a substantial methodology pack (`src/dispatch/code-review-dispatcher.js` + `squads/code-review/methodology/`).
 
-The genuinely-new work concentrates into **six building blocks** (Section 4) plus the **migration scaffolding** (§09: Docker, `ARCHON_ENABLE_*` flags, shadow mode), none of which exist today but most of which **bolt onto existing modules rather than replacing them.** The risk profile is therefore inverted from a typical greenfield: the danger is *regressing ARCHON's existing strengths by implementing the spec's thinner one-liners literally*, not failing to build the capability.
+The genuinely-new work concentrates into **six building blocks** (Section 4) plus the **migration scaffolding** (`ARCHON_ENABLE_*` flags, shadow mode), none of which exist today but most of which **bolt onto existing modules rather than replacing them.** The risk profile is therefore inverted from a typical greenfield: the danger is *regressing ARCHON's existing strengths by implementing the spec's thinner one-liners literally*, not failing to build the capability.
 
 ---
 
@@ -184,7 +184,6 @@ The genuinely-new work concentrates into **six building blocks** (Section 4) plu
 
 | Spec capability | Status | ARCHON evidence | What's needed |
 |---|---|---|---|
-| Dockerfile + docker-compose + volumes + HEALTHCHECK | ❌ | no Dockerfile; runtime health = `health.json` + `/api/health` (`dashboard.js:730`) | Roadmap P0 (optional) |
 | `ARCHON_AGENT_SPEC_DIR` + vendored `docs/autonomous-agent-os-spec/` | ❌ | spec lives outside repo; `docs/` has only system map | P0 |
 | `ARCHON_ENABLE_*` flag family + 5-stage shadow rollout | 🟡 | pattern exists (`ARCHON_AUTONOMY`/`ARCHON_ACTIVE_POC`/`ARCHON_SCOPE_OVERRIDE` + `enabledPhases`/`phaseEnabled`); named flags absent | P0 — add to `paths.js` |
 | Split monolith into `src/orchestrator/*` | 🟡 | `event-bus.js` is one ~580KB file; much already factored into `src/pipeline/*`, `src/safety/*`, `src/routing/model-router.js` | Incremental extraction; map names onto existing |
@@ -273,10 +272,10 @@ The recent commits (purging removed-squad agents, streamlining the event-bus hea
 
 ### Phase 0 — Migration scaffolding (no behavior change)
 - **Goal.** Make every later phase flaggable and shadow-able without touching the product.
-- **Changes.** Add the `ARCHON_ENABLE_*` flag family to `paths.js` (the central env resolver that already autoloads `.env.local`), reusing the existing `ARCHON_AUTONOMY`/`ARCHON_ACTIVE_POC`/`enabledPhases` pattern. Vendor the spec into `docs/autonomous-agent-os-spec/` + add `ARCHON_AGENT_SPEC_DIR`. Optionally add a root `Dockerfile`/`docker-compose.yml` that maps spec mounts (`outputs/evidence/reports/logs`) onto the existing `var/intel` layout and uses `var/intel/health.json` + `/api/health` as the HEALTHCHECK.
+- **Changes.** Add the `ARCHON_ENABLE_*` flag family to `paths.js` (the central env resolver that already autoloads `.env.local`), reusing the existing `ARCHON_AUTONOMY`/`ARCHON_ACTIVE_POC`/`enabledPhases` pattern. Vendor the spec into `docs/autonomous-agent-os-spec/` + add `ARCHON_AGENT_SPEC_DIR`.
 - **Flag.** `ARCHON_ENABLE_AUTONOMOUS_OS` (master) — default off.
 - **Shadow mode.** N/A (docs + flags only).
-- **Exit.** Flags resolve through `paths.js` to daemon/dashboard/agents; `npm test` green; Docker (if built) starts the existing product unchanged.
+- **Exit.** Flags resolve through `paths.js` to daemon/dashboard/agents; `npm test` green.
 
 ### Phase 1 — Canonical schemas + contracts (Block C)
 - **Goal.** Land the keystone schema layer before anything depends on it.

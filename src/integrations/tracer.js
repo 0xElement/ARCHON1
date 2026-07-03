@@ -1,11 +1,11 @@
 
 const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see paths.js
-// /root/agents/tracer.js
+// src/integrations/tracer.js
 //
 // Langfuse-compatible trace emitter. Wraps LLM calls + agent spawns with structured
 // timings + token/cost data, forwarded to either:
-//   - self-hosted Langfuse (/root/langfuse/docker-compose.yml, LANGFUSE_PUBLIC_KEY env)
-//   - /root/intel/trace-events.jsonl (fallback — always written)
+//   - a self-hosted Langfuse instance (via LANGFUSE_PUBLIC_KEY / LANGFUSE_HOST env)
+//   - <intel-root>/trace-events.jsonl (fallback — always written)
 //
 // The JSONL fallback is the source of truth. Langfuse forwarding is best-effort —
 // never blocks the LLM call. This way tracing never becomes a critical path dep.
