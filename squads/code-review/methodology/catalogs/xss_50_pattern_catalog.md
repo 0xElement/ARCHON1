@@ -38,15 +38,15 @@ NOT-APPLICABLE / NEEDS-LIVE, with file:line + source→sink for anything not N/A
 | XSS-17 | ERB/Haml/Slim unescaped output or unsafe interpolation | F1 |
 | XSS-18 | API/GraphQL field trusted by frontend and rendered as HTML | F2 |
 | XSS-19 | Server returns rendered HTML fragments consumed by frontend without re-sanitization | F2 |
-| XSS-20 | Email/notification/system-note HTML injection | F1 |
+| XSS-20 | Email/notification/activity-log HTML injection | F1 |
 | XSS-21 | File upload, attachment, SVG, HTML, or MIME/content-type inline rendering | F9 |
 | XSS-22 | SVG/MathML/foreignObject sanitizer bypass | F4 |
 | XSS-23 | Linkification/autolink/reference parser creates unsafe HTML or URL | F5 |
-| XSS-24 | Issue/MR/work item/epic description/comment/title rendering | F1 |
+| XSS-24 | Issue/ticket/comment/title rendering | F1 |
 | XSS-25 | Wiki/snippet/project page/blob/diff rendering | F1 |
-| XSS-26 | User/group/project/namespace/label/milestone/environment/runner name rendering | F1 |
+| XSS-26 | User/group/project/label/milestone/environment name rendering | F1 |
 | XSS-27 | Search result, autocomplete, or highlight HTML injection | F1 |
-| XSS-28 | Job log, pipeline trace, artifact browser, package metadata, or deployment output rendering | F1 |
+| XSS-28 | Build/CI log, console output, artifact listing, package metadata, or deployment output rendering | F1 |
 | XSS-29 | Import/export/replay/migration path stores unsafe content later rendered | F1 |
 | XSS-30 | Cached sanitized/rendered HTML reused across unsafe context or stale sanitizer version | F4 |
 | XSS-31 | Admin/maintainer-only stored input later viewed by other users or higher-value victims | F1 |
@@ -58,7 +58,7 @@ NOT-APPLICABLE / NEEDS-LIVE, with file:line + source→sink for anything not N/A
 | XSS-37 | Query/filter/sort/page parameter reflected into UI | F1 |
 | XSS-38 | Form validation errors or model errors include raw params | F1 |
 | XSS-39 | WYSIWYG/editor/preview path differs from final render path | F10 |
-| XSS-40 | Mentions/references/quick actions/autocomplete produce unsafe HTML | F5 |
+| XSS-40 | Mentions/references/slash commands/autocomplete produce unsafe HTML | F5 |
 | XSS-41 | Cross-context escaping mismatch between HTML, attribute, JS, JSON, CSS, URL | F3 |
 | XSS-42 | Frontend state hydration or data attributes contain unsafe serialized data | F2 |
 | XSS-43 | GraphQL error/message/path data rendered unsafely | F2 |
@@ -175,25 +175,25 @@ interpolated user data → attacker markup in body/attribute context.
 **Confirm:** the unescaped sigil wraps a user value. Non-issue if the same value only appears under
 escaped sigils (`<%=`, Haml `=`, Slim `=`) everywhere it renders.
 
-### XSS-20 — Email/notification/system-note HTML injection
+### XSS-20 — Email/notification/activity-log HTML injection
 **Detect**
 ```grep
-grep -rniE "mailer|mail\(|deliver|notification|system_note|activity|webhook payload" .
+grep -rniE "mailer|mail\(|deliver|notification|activity|audit_log|webhook payload" .
 grep -rn "html_part\|content_type.*text/html\|render.*layout.*mailer\|MimeMessage\|Multipart" .
 grep -rn "|safe\|html_safe\|raw(\|{!!" app/views/*mailer* app/mailers/ templates/*mail*
 ```
 **Flow:** user field (name, comment, commit message) is interpolated into an HTML email / in-app
-notification / system note rendered to a different, often higher-privilege recipient with no escape.
+notification / activity-log entry rendered to a different, often higher-privilege recipient with no escape.
 Email clients and notification panes render HTML → stored XSS or spoofed content.
 **Confirm:** user data reaches the HTML mail/notification body unescaped; recipient ≠ author.
 Non-issue if the mailer template auto-escapes or the notification renders as plain text.
 
-### XSS-24 — Issue/MR/work item/epic description/comment/title rendering
+### XSS-24 — Issue/ticket/comment/title rendering
 **Detect**
 ```grep
 grep -rniE "title|description|body|comment|note|summary|content" app/views app/serializers components/ \
   | grep -iE "html_safe|raw|v-html|dangerouslySetInnerHTML|innerHTML|\|\s*safe|{!!"
-grep -rniE "render.*markdown|to_html|render_field|banzai|commonmark|markdown_to" .
+grep -rniE "render.*markdown|to_html|render_field|commonmark|markdown_to" .
 ```
 **Flow:** long-form user text (description/comment/title) rendered through a markdown/HTML pipeline or a
 raw sink → stored XSS visible to every viewer of the record. Highest-volume real-world XSS surface.
@@ -213,10 +213,10 @@ highlighter or markdown engine that emits markup → stored XSS. Diff/blob highl
 **Confirm:** the render path emits attacker-controlled markup without post-sanitization. Non-issue if
 highlighter output is entity-encoded and markdown output is sanitized.
 
-### XSS-26 — User/group/project/namespace/label/milestone/environment/runner name rendering
+### XSS-26 — User/group/project/label/milestone/environment name rendering
 **Detect**
 ```grep
-grep -rniE "\.name|full_name|display_name|label|namespace|slug|title" app/views components/ \
+grep -rniE "\.name|full_name|display_name|label|slug|title" app/views components/ \
   | grep -iE "html_safe|raw|v-html|innerHTML|dangerouslySetInnerHTML|title=|:href|attr\("
 grep -rniE "link_to .*name|content_tag.*name|badge|chip|token" app/helpers
 ```
@@ -238,7 +238,7 @@ or autocomplete dropdown.
 **Confirm:** the highlighter interpolates the raw query into HTML rendered via a raw/DOM sink. Non-issue
 if the term is entity-encoded before wrapping and the wrapper is the only markup added.
 
-### XSS-28 — Job log, pipeline trace, artifact browser, package metadata, or deployment output rendering
+### XSS-28 — Build/CI log, console output, artifact listing, package metadata, or deployment output rendering
 **Detect**
 ```grep
 grep -rniE "job.log|trace|console.output|artifact|package.*metadata|deploy.*output|build.log|ansi" .
@@ -635,7 +635,7 @@ the render context is constant.
 ### XSS-45 — Sanitizer/filter order bug in HTML pipeline
 **Detect**
 ```grep
-grep -rniE "pipeline|filter.*chain|before_filter|after_render|banzai|steps\s*=|\.pipe\(|middleware.*html" .
+grep -rniE "pipeline|filter.*chain|before_filter|after_render|steps\s*=|\.pipe\(|middleware.*html" .
 grep -rniE "autolink|linkify|highlight|emoji|mention|sanitize" . | grep -iE "order|position|before|after|first|last"
 ```
 **Flow:** a multi-stage HTML pipeline runs a transform (autolink, emoji, syntax-highlight, mention
@@ -691,13 +691,13 @@ attribute breakout injected through otherwise-plain text.
 **Confirm:** the linkifier emits `href` from a regex-captured URL without scheme validation/encoding.
 Non-issue if generated links are scheme-allowlisted and the anchor is built with an escaping helper.
 
-### XSS-40 — Mentions/references/quick actions/autocomplete produce unsafe HTML
+### XSS-40 — Mentions/references/slash commands/autocomplete produce unsafe HTML
 **Detect**
 ```grep
-grep -rniE "@mention|mention|reference|\bref\b|quick.?action|slash.?command|/assign|autocomplete|suggestion|tribute" .
-grep -rniE "expand.*reference|render.*mention|to_reference|reference_link|user.*link.*name" .
+grep -rniE "@mention|mention|reference|\bref\b|slash.?command|autocomplete|suggestion|tribute" .
+grep -rniE "expand.*reference|render.*mention|render_reference|reference_link|user.*link.*name" .
 ```
-**Flow:** a mention/reference expander turns `@name`, `#123`, `!ref` into HTML using the referenced
+**Flow:** a mention/reference expander turns `@name`, `#123` references into HTML using the referenced
 object's name/title, rendered raw or into an attribute → stored XSS via a crafted username/label that
 the expander doesn't escape. Autocomplete dropdowns re-render the same unescaped data.
 **Confirm:** the expansion interpolates a user-controlled name/title into markup without escaping.

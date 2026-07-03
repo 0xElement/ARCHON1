@@ -556,7 +556,7 @@ manipulation can bypass application-enforced protections (branch protection, rev
 # low-level ref namespaces + protection primitives
 grep -rn "ref-override\|refs/notes\|refs/meta\|replace.*ref\|ambiguous.*ref\|disambiguate" services/ lib/
 grep -rn "protected-ref\|protected_tag\|branch_protection\|push.?hook\|pre.?receive\|update_hook" services/ lib/ hooks/
-grep -rn "mirror.*pull\|sync.*ref\|import.*ref\|shared.*cache\|cache.*volume\|fallback.*cache" services/ runners/ config/
+grep -rn "mirror.*pull\|sync.*ref\|import.*ref\|shared.*cache\|cache.*volume\|fallback.*cache" services/ workers/ config/
 ```
 
 **Auth-vs-fetch flow:** The app enforces protection at its own layer; a protocol-level op (ref-override
@@ -581,7 +581,7 @@ application's origin.
 ```
 grep -rn "proxy\|forward\|relay\|passthrough\|upstream\|reverse_proxy" controllers/ middleware/ routes/
 grep -rn "response.headers\|set_header\|copy_header\|forward_header\|WriteHeader\|res.set(" services/ lib/
-grep -rn "dependency_proxy\|registry_proxy\|integration.*proxy\|monitoring.*proxy\|artifact.*serve" services/
+grep -rn "package_proxy\|registry_proxy\|integration.*proxy\|monitoring.*proxy\|artifact.*serve" services/
 ```
 
 **Auth-vs-fetch flow:** Client → proxy adds credentials → upstream (attacker-controlled URL) → response

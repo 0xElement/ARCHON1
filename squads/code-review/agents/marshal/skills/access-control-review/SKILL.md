@@ -85,8 +85,8 @@ grep -rn "\.find(\|\.findOne(\|\.findById(\|User.find\|Document.find" . | grep -
 ### P-8 — N: Import/bulk operation skips model validations
 **Pattern:** `bulk_create` / `insert_many` / CSV import bypasses per-record `before_save` hooks that normally enforce authorization.
 
-### P-9 — Q: Fork-based persistent access after revocation
-**Pattern:** User A shares project with User B. User B forks. User A revokes. User B still has the fork (and the data).
+### P-9 — Q: Copy/duplicate-based persistent access after revocation
+**Pattern:** User A shares a resource with User B. User B duplicates/exports it into their own workspace. User A revokes access. User B still holds the copied data.
 
 ### P-10 — T: Git-level operations bypassing application auth
 **Pattern:** App-level auth protects web UI. Git protocol (push/pull) uses a different auth path that doesn't enforce the same checks.

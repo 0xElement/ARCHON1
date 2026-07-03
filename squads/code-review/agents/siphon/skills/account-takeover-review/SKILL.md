@@ -38,7 +38,7 @@ grep -rn "session_token\|access_token\|refresh_token\|api_key" .
 **Variants:**
 - **Array injection:** `POST /reset { "email": ["victim@", "attacker@"] }` — app sends reset link to attacker but validates against victim
 - **Token prediction:** reset token is timestamp+PRNG → predictable
-- **Host header attack:** reset URL uses `Host:` header → attacker sets `Host: evil.com`, victim clicks link to evil.com which forwards token
+- **Host header attack:** reset URL uses `Host:` header → attacker sets `Host: evil.example.com`, victim clicks link to evil.example.com which forwards token
 - **Token leakage:** reset token in Referer header to third-party tracker
 **Search:**
 ```
@@ -50,7 +50,7 @@ grep -rn "params\[:email\]\|body\.email\|req\.body\.email" . | grep -i "reset"
 ### P-1 — OAuth flow exploitation
 **Variants:**
 - **Missing state param:** CSRF on OAuth login — attacker initiates flow, victim finishes in attacker's browser → victim logs in as attacker
-- **redirect_uri bypass:** `redirect_uri=https://trusted.com.evil.com` or `redirect_uri=https://trusted.com/../attacker`
+- **redirect_uri bypass:** `redirect_uri=https://trusted.example.com.evil.example.com` or `redirect_uri=https://trusted.example.com/../attacker`
 - **Auto-link vulnerability:** OAuth provider returns `email_verified: false` and app auto-links to existing account
 **Search:**
 ```
@@ -63,7 +63,7 @@ grep -rn "email_verified\|emailVerified\|email_confirmed" .
 **Variants:**
 - **XPath injection:** attacker manipulates SAML response XPath to extract wrong attribute
 - **Signature wrapping:** attacker wraps signed portion, extracts body, substitutes own
-- **Comment truncation:** `<NameID>admin<!-- @company.com --></NameID>` — different parsers see different values
+- **Comment truncation:** `<NameID>admin<!-- @example.com --></NameID>` — different parsers see different values
 **Search:**
 ```
 grep -rn "saml\|Saml\|SAML" . | grep -i "parse\|extract\|assert"
