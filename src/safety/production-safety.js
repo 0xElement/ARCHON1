@@ -64,6 +64,40 @@ function allowDestructive() {
   return process.env.ARCHON_ALLOW_DESTRUCTIVE === '1'
 }
 
+// ── Local-host command safety ────────────────────────────────────────────────
+// Specialist agents run with a full shell (bypassPermissions), so a hallucination —
+// or a prompt-injection payload returned by a malicious target and read by the agent —
+// could try to run a destructive command on the OPERATOR'S OWN machine. guardLocalCommand()
+// is wired into the agent's PreToolUse hook (agents/runner/adapters/sdk.js) to hard-DENY
+// these before the shell runs them. Focused on host/file destruction + piping a remote
+// script into a shell; a normal `rm <file>` (no -r/-f) and ordinary recon tools are allowed.
+// Opt out with ARCHON_ALLOW_DESTRUCTIVE=1.
+const LOCAL_DESTRUCTIVE_PATTERNS = [
+  { re: /\brm\s+-[a-z]*[rf]/i, why: 'rm -r/-f (recursive/forced deletion)' },
+  { re: /\b(mkfs|mke2fs)\b/i, why: 'filesystem format (mkfs)' },
+  { re: /\bdd\b[^|&;\n]*\bof=\/dev\//i, why: 'dd to a device (disk overwrite)' },
+  { re: /\b(shutdown|reboot|halt|poweroff)\b/i, why: 'host shutdown/reboot' },
+  { re: /\binit\s+[06]\b/, why: 'init 0/6 (halt/reboot)' },
+  { re: /:\s*\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, why: 'fork bomb' },
+  { re: />\s*\/dev\/(sd|nvme|disk|hd)/i, why: 'redirect to a block device' },
+  { re: /\b(curl|wget|fetch)\b[^\n|]*\|\s*(sudo\s+)?(sh|bash|zsh|python[0-9.]*|perl|ruby|node)\b/i, why: 'pipe a remote script into a shell (curl|sh)' },
+  { re: /\bchmod\s+-R\b[^\n]*\s\/(etc|usr|bin|sbin|var|root|boot|lib)\b/i, why: 'chmod -R on a system path' },
+  { re: /\bfind\s+\/[^\n]*-delete\b/i, why: 'find / -delete' },
+]
+
+// PreToolUse gate for a shell command the agent wants to run on the LOCAL machine.
+// Returns { allow: true } or { allow: false, reason, match }.
+function guardLocalCommand(command) {
+  if (allowDestructive()) return { allow: true }
+  if (!command) return { allow: true }
+  const s = String(command)
+  for (const p of LOCAL_DESTRUCTIVE_PATTERNS) {
+    const m = s.match(p.re)
+    if (m) return { allow: false, reason: p.why, match: m[0] }
+  }
+  return { allow: true }
+}
+
 // Execution-chokepoint gate. Returns { allow: true } or { allow: false, reason }.
 // Wire this in wherever ARCHON itself runs an LLM-constructed request.
 function guardRequest(text) {
@@ -113,8 +147,10 @@ Violation = finding rejected and a safety incident.
 module.exports = {
   LIMITS,
   DESTRUCTIVE_PATTERNS,
+  LOCAL_DESTRUCTIVE_PATTERNS,
   scanForDestructive,
   allowDestructive,
   guardRequest,
+  guardLocalCommand,
   PRODUCTION_SAFETY_CONTRACT,
 }

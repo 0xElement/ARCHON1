@@ -455,8 +455,9 @@ The safety perimeter is **non-negotiable** and enforced in code:
 - **Non-destructive by default.** Built for pointing at live production: detection never deletes or
   modifies data, changes credentials/passwords, or runs a DoS; access-control (IDOR) is tested
   read-only; and repeated actions (rate-limit / brute-force) are capped at **10 attempts**. Enforced by
-  a contract in every agent prompt (`GATE-14`) plus a destructive-pattern guard on ARCHON-executed
-  requests — details and residual risk in
+  a contract in every agent prompt (`GATE-14`), a destructive-pattern guard on ARCHON-executed requests,
+  and a PreToolUse hook that hard-blocks destructive **local** commands (`rm -rf`, `curl | sh`) on your
+  own machine — details and residual risk in
   [SECURITY.md](./SECURITY.md#non-destructive-by-default-production-safety).
 - **Evidence contract.** A `CONFIRMED` finding needs replayable evidence (reproduction / proof /
   nonce-confirmed PoC) or it is demoted — no unverifiable claims in the report.

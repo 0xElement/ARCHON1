@@ -92,9 +92,36 @@
 'use strict'
 
 const { buildSpawnEnv } = require('./common')
+const { guardLocalCommand } = require('../../../src/safety/production-safety')
 
 const CLAUDE_BIN = process.env.KURU_CLAUDE_BIN || 'claude'
 const DEFAULT_TIMEOUT_MS = 600000 // 10 minutes — matches cli adapter
+
+// Production-safety PreToolUse hook: agents run with bypassPermissions (full shell),
+// so a hallucination or a prompt-injection payload from a malicious target could try a
+// destructive command on the OPERATOR'S machine (rm -rf, mkfs, curl|sh, …). A PreToolUse
+// hook fires and can DENY even under bypassPermissions (SDK: "PreToolUse hook denies
+// bypass canUseTool"), so it's a HARD interlock — not just the prompt contract. Allow by
+// default; deny only clearly-destructive local shell commands. Opt out with
+// ARCHON_ALLOW_DESTRUCTIVE=1. Fail-open on unexpected error (the prompt contract backstops).
+async function _productionSafetyHook(input) {
+  try {
+    if (input && (input.tool_name === 'Bash' || input.tool_name === 'BashOutput')) {
+      const cmd = input.tool_input && input.tool_input.command
+      const g = guardLocalCommand(cmd)
+      if (!g.allow) {
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: `ARCHON production-safety: blocked destructive local command — ${g.reason} (${g.match}). Set ARCHON_ALLOW_DESTRUCTIVE=1 only for authorized destructive testing.`,
+          },
+        }
+      }
+    }
+  } catch { /* fail-open: never break agent execution on a guard error */ }
+  return {}
+}
 
 // Lazily-imported SDK `query` (ESM-only package → dynamic import from CJS).
 let _queryPromise = null
@@ -244,6 +271,8 @@ async function run(spec) {
     allowDangerouslySkipPermissions: true, // required by the SDK when bypassPermissions is set
     pathToClaudeCodeExecutable: CLAUDE_BIN, // use the daemon's known CLI, not a bundled guess
   }
+  // Hard local-command guard — denies destructive shell commands even under bypassPermissions.
+  options.hooks = { PreToolUse: [{ hooks: [_productionSafetyHook] }] }
   if (model) options.model = model
   if (systemPrompt) {
     // Faithful to cli.js --append-system-prompt: append to the default preset.

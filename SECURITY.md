@@ -36,9 +36,20 @@ in `src/core/squad-framework.js`, defined in `src/safety/production-safety.js`):
   floods or mass record creation; no DoS / stress / ReDoS; back off on WAF / 429 / CAPTCHA.
 - Only a **benign** impact proof (e.g. `echo <nonce>` for RCE) may fire, and only under active-poc.
 
-Two enforcement layers: (1) the prompt contract above, injected into every agent via `MUST_GATES`;
-(2) a deterministic destructive-pattern guard (`guardRequest()`) wired into the request paths ARCHON
-runs itself (the chain-verifier curl replay), which skips any destructive / state-changing step.
+Enforcement layers: (1) the prompt contract above, injected into every agent via `MUST_GATES`;
+(2) a deterministic destructive-pattern guard (`guardRequest()`) on the request paths ARCHON runs itself
+(the chain-verifier curl replay), which skips any destructive / state-changing step.
+
+**Local-machine safety.** The specialist agents run with a full shell (`bypassPermissions`) to drive
+their tools, so a hallucination — or a prompt-injection payload returned by a malicious target and read
+by the agent — could try a destructive command on the OPERATOR'S OWN machine (`rm -rf`, `mkfs`,
+`curl … | sh`, `shutdown`, a fork bomb, …). The default **SDK adapter** wires a **PreToolUse hook**
+(`agents/runner/adapters/sdk.js` → `guardLocalCommand()` in `src/safety/production-safety.js`) that
+**hard-denies** these before the shell runs them — a real interlock that fires even under
+`bypassPermissions`, not just the prompt. A normal `rm <file>` (no `-r`/`-f`) and ordinary recon tools
+are unaffected. The `ADAPTER=cli` rollback path relies on the prompt contract for this; the SDK adapter
+is the default and the recommended one. Authorized destructive testing opts out with
+`ARCHON_ALLOW_DESTRUCTIVE=1`.
 
 **Residual risk (stated honestly):** specialist agents fire their own HTTP through their tools
 (curl / nuclei / sqlmap), which ARCHON does not currently proxy — so for that traffic the guarantee is
