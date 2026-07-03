@@ -10,11 +10,17 @@ black-box assessment, or a **URL + source code** for a combined white-box + blac
 whose findings merge into one de-duplicated report.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![CI](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml/badge.svg)](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Runs on Claude](https://img.shields.io/badge/runs%20on-Claude%20(OAuth)-d97757.svg)](https://claude.ai/code)
 [![Status](https://img.shields.io/badge/status-active-success.svg)](./BACKLOG.md)
+[![Field-tested: CVE-2026-4524](https://img.shields.io/badge/field--tested-CVE--2026--4524-critical.svg)](https://www.cve.org/CVERecord?id=CVE-2026-4524)
 
 </div>
+
+<!-- Dashboard screenshot — drop a PNG/GIF at assets/dashboard.png, then uncomment the block below:
+<div align="center"><img src="./assets/dashboard.png" alt="ARCHON portal — dispatch, live progress, triage, report" width="820"></div>
+-->
 
 > ⚠️ **Authorized testing only.** Only test systems you own or have explicit written permission to
 > assess. ARCHON fails *closed* on missing scope and never fires impact-proving exploits by default,
@@ -29,6 +35,7 @@ whose findings merge into one de-duplicated report.
 - [How it works](#how-it-works)
 - [How the agents and triage work](#how-the-agents-and-triage-work)
 - [Benchmark](#benchmark)
+- [Field-tested — a real CVE](#field-tested--a-real-cve)
 - [Engagement modes](#engagement-modes)
 - [The squads](#the-squads)
 - [Quickstart](#quickstart)
@@ -237,6 +244,23 @@ live scan never hit. Reproduce both with the harness in [`benchmark/`](./benchma
 
 ---
 
+## Field-tested — a real CVE
+
+Beyond the Juice Shop benchmark, ARCHON's **white-box review** found a real broken-access-control flaw in
+a large production codebase — confidential issue data exposed through a missing authorization check. Jay
+([@ghostshift-content](https://github.com/ghostshift-content)) reported it to **GitLab** via **HackerOne**;
+it was fixed in GitLab's May 2026 security release and assigned
+**[CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)** (CVSS 6.5, CWE-288).
+
+- **CVE:** [CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)
+- **GitLab advisory:** [patch release 18.11.3 · 2026-05-13](https://about.gitlab.com/releases/2026/05/13/patch-release-gitlab-18-11-3-released/)
+- **Public report:** [hackerone.com/reports/3597717](https://hackerone.com/reports/3597717)
+
+That's exactly the class ARCHON's code-review squad specializes in — the same access-control depth ships
+as MARSHAL's 40-pattern access-control catalog.
+
+---
+
 ## Engagement modes
 
 | Mode | Input | What runs |
@@ -252,7 +276,8 @@ re-runs you add). Findings aggregate across iterations and one report is generat
 
 ## The squads
 
-Agents use operator call-signs by role. **NEXUS** is the daemon itself (`event-bus.js`), not a persona.
+Agents are **AI personas** the daemon spawns — each runs the `claude` CLI over your subscription and owns
+one role (they use operator call-signs). **NEXUS** is the daemon itself (`event-bus.js`), not a persona.
 
 ### `pentest` — black-box (lead: **ATLAS**)
 
@@ -324,8 +349,9 @@ limits, not metered API billing. Point `KURU_CLAUDE_BIN` at your local `claude` 
 
 ## Usage
 
-1. **Authorize.** Confirm you have written permission for the target. Define in-scope /
-   out-of-scope hosts (see `common/config/scope_template.yaml`).
+1. **Authorize.** Confirm you have written permission for the target. Copy
+   `common/config/scope_template.yaml` as your engagement scope and load it in the dispatch form's
+   **Scope** field — scope is fail-closed, so a dispatch with no scope config is blocked.
 2. **Dispatch.** Portal → *New dispatch*: target URL, optional source directory, credentials, test
    type, severity profile, triage gate.
 3. **Watch.** *Tasks* shows live phase progress; the daemon recon→fingerprint→plan→attacks→verifies.
@@ -340,6 +366,9 @@ troubleshooting — is in **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)**.
 ---
 
 ## Configuration
+
+**Most users can skip this section** — a fresh clone runs with no env vars set; override only for a
+non-default layout or a server deploy.
 
 `paths.js` is the single root resolver. It auto-loads `.env.local` (gitignored) at require time so the
 daemon, dashboard, and every spawned subprocess pick the roots up — but all three are **optional**:
@@ -452,8 +481,8 @@ modules ship with a matching `test/*.test.js`.
 
 ## Development & contributing
 
-- Work from the repo root. `npm install` once; create `.env.local` from the example and
-  `npm run setup` to seed `var/intel`.
+- Work from the repo root. Run `bash setup.sh` once (installs deps, seeds `var/intel`, runs the
+  `npm run doctor` preflight). `.env.local` is optional — only for a non-default layout.
 - **Read [`CLAUDE.md`](./CLAUDE.md) first** — it documents the architecture, the pipeline phases,
   and the critical invariants (atomic writes, the evidence contract, never hardcode model strings,
   always resolve persona paths through `paths.js`).
