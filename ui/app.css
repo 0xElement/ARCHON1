@@ -175,6 +175,15 @@ a { color: var(--accent-2); text-decoration: none; } a:hover { text-decoration: 
 .report-inline > :first-child { margin-top: 0; }
 
 /* findings & triage */
+/* The findings panel fills the scroll viewport so the triage action bar
+   (#fnActions, position:sticky;bottom:0) pins to the BOTTOM even when the
+   findings list is short — previously the sticky bar had nothing to stick
+   against and floated mid-screen. 100vh (not %) sidesteps the parent
+   height chain; the offset ≈ topbar + .main padding + view-head + subtabs.
+   With a long list, #fnList grows past the min-height and the bar stays
+   pinned while .main scrolls. */
+#td-findings { display: flex; flex-direction: column; min-height: calc(100vh - 240px); }
+#td-findings > #fnList { flex: 1 0 auto; }
 .finding { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 14px 16px; margin-bottom: 10px; transition: .12s; box-shadow: var(--shadow-sm); }
 .finding.rejected { opacity: .5; }
 .finding .fmain { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
