@@ -184,9 +184,9 @@ Large parts of `_processQueueInner` exist solely to re-sync them (sticky-cancel 
 Dispatched as `squad:'code-review'` (or via the pentest form's Static/White-box buttons). `runCodeReview(dispatch, deps)` is self-contained, all prompts inline:
 
 1. **Phase 0** `validateSourceDir` — absolute path, ≥1 code file (depth≤3, cap 100).
-2. **0a** `buildInventories` — scripted `grep -rEn` enumeration (head-capped at 8000 lines), per-preset (gitlab marker sniff vs generic).
+2. **0a** `buildInventories` — scripted `grep -rEn` enumeration (head-capped at 8000 lines), one stack-agnostic multi-language spec set (routes/auth/db/render/uploads/tokens/jobs/business-logic) for any project.
 3. **0b** CURATOR writes `app-blueprint.md` (1-page architecture, authN/authZ files, trust boundaries).
-4. **0c** feature queue: explicit `meta.features` > gitlab preset (`gitlab-features.json`, 43 features) > generic CURATOR discovery.
+4. **0c** feature queue: explicit `meta.features` > CURATOR auto-discovery from the surface (stack-agnostic; breadth scales with codebase size).
 5. **1** per-feature mapping — one specialist per feature in **waves of 3**, round-robin over the 6-agent MAPPER_POOL; each writes a 13-section feature map with an Endpoint/Action Ledger.
 6. **1c** CURATOR consolidation → matrices + **ranked** `phase2_review_queue.md` + completion gate.
 7. **2** per-class assessment — `vulnClasses × features.slice(0, maxPhase2=6)` routed to the class specialist (access-control→MARSHAL, xss→CIPHER, etc.).

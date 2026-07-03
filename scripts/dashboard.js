@@ -187,7 +187,6 @@ function buildCodeReviewMeta(body) {
   const _chk = checkSourceDir(sourceDir)
   if (!_chk.ok) throw new Error(`sourceDir: ${_chk.error}${sourceDir ? ` (${sourceDir})` : ''}`)
   const out = { sourceDir }
-  if (m.preset === 'gitlab' || m.preset === 'generic') out.preset = m.preset // omit = auto-detect
   const VALID_CLASSES = ['access-control', 'xss', 'sqli', 'ssrf', 'rce', 'account-takeover']
   if (Array.isArray(m.vulnClasses)) {
     const vc = m.vulnClasses.filter(c => VALID_CLASSES.includes(c))

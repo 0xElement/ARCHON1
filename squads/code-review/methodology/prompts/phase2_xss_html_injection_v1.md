@@ -31,7 +31,7 @@ The agent must not invent a different workflow, skip required gates, redefine co
 
 Allowed work:
 
-- Reviewing local GitLab source code for XSS / HTML injection vulnerabilities
+- Reviewing local the application source code for XSS / HTML injection vulnerabilities
 - Consuming existing Phase 1 feature maps if available
 - Reconstructing missing inventories from source code
 - Reviewing Web, REST, GraphQL, frontend, workers, services, serializers, views, helpers, renderers, markdown pipelines, and generated-content paths
@@ -446,7 +446,7 @@ Each pattern must be marked:
 | XSS-41 | Cross-context escaping mismatch between HTML, attribute, JS, JSON, CSS, URL |
 | XSS-42 | Frontend state hydration or data attributes contain unsafe serialized data |
 | XSS-43 | GraphQL error/message/path data rendered unsafely |
-| XSS-44 | Webhook/integration/external service data rendered in GitLab UI |
+| XSS-44 | Webhook/integration/external service data rendered in the application UI |
 | XSS-45 | Sanitizer/filter order bug in HTML pipeline |
 | XSS-46 | User-controlled protocol scheme bypass such as javascript:, data:, vbscript:, or encoded variants |
 | XSS-47 | Unicode, null-byte, control-character, or browser parser differential bypass |
@@ -503,7 +503,7 @@ Every feature review must include:
 | XSS-41 | Cross-context escaping mismatch between HTML, attribute, JS, JSON, CSS, URL | TBD | TBD | TBD | TBD | TBD |
 | XSS-42 | Frontend state hydration or data attributes contain unsafe serialized data | TBD | TBD | TBD | TBD | TBD |
 | XSS-43 | GraphQL error/message/path data rendered unsafely | TBD | TBD | TBD | TBD | TBD |
-| XSS-44 | Webhook/integration/external service data rendered in GitLab UI | TBD | TBD | TBD | TBD | TBD |
+| XSS-44 | Webhook/integration/external service data rendered in the application UI | TBD | TBD | TBD | TBD | TBD |
 | XSS-45 | Sanitizer/filter order bug in HTML pipeline | TBD | TBD | TBD | TBD | TBD |
 | XSS-46 | User-controlled protocol scheme bypass such as javascript:, data:, vbscript:, or encoded variants | TBD | TBD | TBD | TBD | TBD |
 | XSS-47 | Unicode, null-byte, control-character, or browser parser differential bypass | TBD | TBD | TBD | TBD | TBD |
@@ -682,7 +682,7 @@ Every confirmed, potential, or suspicious finding must include CVSS.
 - DOM XSS is usually `UI:R` unless no victim interaction is needed.
 - XSS usually has `S:C` because the vulnerable component is the web application and the impacted component is the victim browser/session.
 - XSS without meaningful CSP bypass may be `C:L/I:L/A:N`.
-- XSS with session/token theft, account action, trusted app modification, OAuth abuse, or GitLab.com CSP bypass may justify `C:H/I:H`.
+- XSS with session/token theft, account action, trusted app modification, OAuth abuse, or the application CSP bypass may justify `C:H/I:H`.
 - HTML injection without script execution may still be reportable if it enables credential phishing, UI spoofing, dangerous link injection, or security decision manipulation.
 - HTML injection with no security impact should not be reported as a vulnerability finding.
 

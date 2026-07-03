@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Regression: replays 5 CONFIRMED findings from the 2026-04-23 GitLab live
+// Regression: replays 5 CONFIRMED findings from a live access-control
 // verification. Asserts v2 threat-model discipline assigns realistic severity
-// caps matching what GitLab's security team would actually accept.
+// caps matching what a security team would actually accept.
 //
 // Context: today's live verification found 0/13 findings acceptable at
 // Critical/High by realistic vendor triage. v2 discipline collapses these
@@ -12,7 +12,7 @@ const ec = require('../src/pipeline/evidence-completeness')
 let passed = 0, failed = 0
 function ok(l, c, extra = '') { if (c) { console.log('  ✓ ' + l); passed++ } else { console.log('  ✗ ' + l + (extra ? ' — ' + extra : '')); failed++ } }
 
-console.log('GitLab v2 FP-regression — 5 CONFIRMED findings from 2026-04-23:')
+console.log("FP-regression v2 — 5 CONFIRMED findings:")
 
 // VI-AC-001 silent email change (claimed High)
 // Reality: admin feature, boundary=none, documented as admin rescue

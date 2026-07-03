@@ -86,11 +86,9 @@
                 <div class="hint">Absolute path to the source tree to review (white-box).</div>
                 <div class="hint scheck" id="crSourceCheck"></div></div>
               <div class="row2">
-                <div class="field"><label>Mode</label>
-                  <div class="seg" id="crMode"><button data-v="auto" class="on">Auto</button><button data-v="gitlab">GitLab</button><button data-v="generic">Generic</button></div>
-                  <div class="hint" id="crModeHint">Auto-detect GitLab vs generic.</div></div>
                 <div class="field"><label>Deploy URL <span style="color:var(--fg-dim)">(optional)</span></label>
-                  <input class="input" id="crDeployUrl" placeholder="https://staging… → PROBER runtime validation"></div>
+                  <input class="input" id="crDeployUrl" placeholder="https://staging… → PROBER runtime validation">
+                  <div class="hint">Stack-agnostic: features are auto-discovered for any project. A deploy URL adds PROBER runtime validation.</div></div>
               </div>
               <div class="field"><label>Vulnerability classes</label>
                 <div id="crClasses" style="display:flex;flex-wrap:wrap;gap:8px">

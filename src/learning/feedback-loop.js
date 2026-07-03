@@ -770,7 +770,7 @@ If validation-gap claim with fewer than 3 layers inspected → cap Medium. Valid
 7. validation_layers_checked if applicable →
 8. Final severity = MIN of all ceilings reached.
 
-### Anti-inflation patterns (learned from GitLab verification 2026-04-23)
+### Anti-inflation patterns (access-control severity calibration)
 - Admin changing user email silently: admin + none + documented=true → Informational. Not a vuln — it's the admin rescue feature.
 - Admin injecting OAuth identity into victim account: admin + privilege-escalation → +1 from Medium = High (genuine privilege transfer).
 - Controller doesn't inherit from AdminController: local_only evidence + admin_privilege=unauth on /admin/ path = INCOHERENT → AUDITOR rejects.

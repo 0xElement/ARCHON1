@@ -1,11 +1,12 @@
-# GitLab White-Box Security Assessment Master Prompt
+# White-Box Access-Control Review Master Prompt
 ## Aligned Phase 1 + Phase 2 Workflow for Deep Access-Control Review
 
-Use this file as the **single master prompt** for a new AI run.
+Use this file as the **single master prompt** for a new AI run. It is stack-agnostic — it applies to
+any application (Rails, Django, Express/Nest, Spring, Laravel, Go, .NET, …).
 
 This prompt is designed so that:
 
-- **Phase 1** maps the GitLab codebase feature-by-feature with complete file, entry-point, and code-path coverage.
+- **Phase 1** maps the target codebase feature-by-feature with complete file, entry-point, and code-path coverage.
 - **Phase 2** uses the Phase 1 outputs directly to perform deep access-control vulnerability discovery.
 - The AI cannot perform shallow high-level review.
 - The AI cannot skip features.
@@ -17,17 +18,16 @@ This prompt is designed so that:
 
 # Source Code Path
 
-Use the following local GitLab source-code path as the primary review target:
-
-```text
-<source-dir>
-```
+Review the source tree provided in your task — the absolute path given to you for this run. Do NOT
+assume any specific application or hardcode a path; every file reference and finding must be relative
+to that provided source root.
 
 ---
 
 # Overall Assessment Goal
 
-You are assisting with a white-box security assessment of the GitLab open-source application.
+You are assisting with a white-box security assessment of the target application (the source tree
+provided in your task).
 
 The assessment has two aligned phases:
 
@@ -331,7 +331,7 @@ Only perform work that directly supports the task defined in this prompt.
 
 Allowed work:
 
-- Inventorying the GitLab source code from the specified local path
+- Inventorying the target source code from the provided source path
 - Mapping features listed in the mandatory feature queue
 - Tracing entry points, routes, APIs, GraphQL operations, workers, services, models, policies, serializers, and related code paths
 - Reconciling source inventories into feature maps and ledgers
@@ -541,57 +541,18 @@ For every feature, endpoint, mutation, worker, service, or security-sensitive op
 
 ---
 
-# Mandatory Feature Work Queue
+# Feature Work Queue
 
-Use this feature list for both Phase 1 and Phase 2.
+Use the feature work queue produced for **this run** — the features discovered in Phase 1
+(`phase1-maps/feature-queue.json`), or the explicit feature list provided in your task. Do NOT use a
+hardcoded or application-specific feature list.
 
-Every feature must be mapped in Phase 1 and reviewed in Phase 2, or explicitly marked incomplete with exact reason.
-
-| # | Feature | Suggested Slug |
-|---|---|---|
-| 1 | Issues & Work Items | issues-work-items |
-| 2 | Epics & Portfolio | epics-portfolio |
-| 3 | Merge Requests | merge-requests |
-| 4 | Notes, Discussions & Reactions | notes-discussions |
-| 5 | CRM / Customer Relations | crm-contacts |
-| 6 | CI/CD Pipelines & Jobs | ci-cd-pipelines |
-| 7 | CI Runners | runners |
-| 8 | Package Registry | packages |
-| 9 | Container Registry & Dependency Proxy | container-registry |
-| 10 | Repositories & Git | repositories-git |
-| 11 | Branch Rules & Protected Refs | protected-branch-rules |
-| 12 | Snippets | snippets |
-| 13 | Wikis | wikis |
-| 14 | Members & Access Tokens | members-access |
-| 15 | Authentication, SSO & System Access | authentication-sso |
-| 16 | Projects | projects |
-| 17 | Groups, Namespaces & Organizations | groups-namespaces |
-| 18 | Users & Profile | users-profile |
-| 19 | Boards, Milestones & Labels | boards-milestones-labels |
-| 20 | Integrations & Webhooks | integrations-webhooks |
-| 21 | Import / Export & Bulk Import | import-export |
-| 22 | Releases, Environments & Deployments | releases-environments |
-| 23 | Monitor: Incidents, Alerts & On-call | monitor-incidents |
-| 24 | Feature Flags | feature-flags |
-| 25 | Clusters, Terraform & Cloud | clusters-infra |
-| 26 | Workspaces & Remote Development | workspaces-remote-dev |
-| 27 | Security: Vulnerabilities | vulnerabilities |
-| 28 | Security: Orchestration & Policies | security-policies |
-| 29 | Security: Dependencies & SBOM | dependency-sbom |
-| 30 | Compliance & Audit Events | compliance-audit |
-| 31 | Geo | geo |
-| 32 | AI / Duo | ai-duo |
-| 33 | Analytics & Observability | analytics-observability |
-| 34 | Service Desk & Email | service-desk |
-| 35 | Design Management | design-management |
-| 36 | ML / Model Registry | ml |
-| 37 | Admin & Application Settings | admin-settings |
-| 38 | Anti-Abuse & Spam | anti-abuse |
-| 39 | Subscriptions & Licensing | subscriptions-billing |
-| 40 | Search | search |
-| 41 | Uploads, LFS & Object Storage | uploads-files |
-| 42 | Cells | cells |
-| 43 | GitLab Pages | pages |
+Every feature in that queue must be mapped in Phase 1 and reviewed in Phase 2, or explicitly marked
+incomplete with an exact reason. Feature categories that exist in most applications and are worth
+confirming during discovery: authentication & sessions; users & profiles; groups / organizations /
+multi-tenancy; the core resource objects and their CRUD; file upload / download / import / export;
+background jobs & scheduled tasks; integrations & webhooks; API / GraphQL endpoints; admin &
+application settings; search; and access-token / API-key management.
 
 ---
 
@@ -2108,7 +2069,7 @@ Each finding must include:
 
 | Metric | Definition | Examples |
 |---|---|---|
-| AV:N | Attack is triggered by making a network request to GitLab.com or a self-managed GitLab instance. | API request, Web request, GraphQL request, Git HTTP/SSH request |
+| AV:N | Attack is triggered by making a network request to the application or a a self-managed instance. | API request, Web request, GraphQL request, Git HTTP/SSH request |
 | AV:A | Attack must be launched from a limited physical or logical network distance. | Adjacent network or limited-scope network condition |
 | AV:P | Attacker requires physical access to the vulnerable component. | Physical access to infrastructure/component |
 | AV:L | Attack is committed through a local application vulnerability, by the victim running something locally, or by an attacker able to log in locally. | Malicious or compromised server administrator attacks after logging in to a self-managed instance server |
@@ -2135,30 +2096,30 @@ Side note for triage: high-privilege users using a bug only to sabotage their ow
 | Metric | Definition | Examples |
 |---|---|---|
 | UI:R | Successful attack requires user interaction. | Any victim action is needed, including logging in; includes XSS and CSRF |
-| UI:N | Attack can be accomplished without user interaction. | Attack works even if the victim never logs back in to GitLab |
+| UI:N | Attack can be accomplished without user interaction. | Attack works even if the victim never logs back in to the application |
 
 ### Scope — S
 
 | Metric | Definition | Examples |
 |---|---|---|
 | S:C | Impact is caused to systems beyond the exploitable component. | Protected CI/CD variables affecting production/third-party systems; XSS affecting browser; SSRF fetching cloud metadata |
-| S:U | Impact is localized to the exploitable component. | Developer can perform Maintainer-only GitLab action within GitLab |
+| S:U | Impact is localized to the exploitable component. | Developer can perform a higher-privilege action within the application |
 
 ### Confidentiality — C
 
 | Metric | Definition | Examples |
 |---|---|---|
 | C:N | No confidential information is disclosed. | No confidentiality impact |
-| C:L | Some information can be obtained, or attacker lacks control over kind/degree. | Private issue/MR titles but not content; small number of private issues/MRs; previously accessible private data; minor private data; XSS without GitLab.com CSP bypass |
-| C:H | All information is disclosed, or critical information is disclosed. | Full read access to instance; tokens/session IDs; private repositories; XSS with GitLab.com CSP bypass |
+| C:L | Some information can be obtained, or attacker lacks control over kind/degree. | Private issue/MR titles but not content; small number of private issues/MRs; previously accessible private data; minor private data; XSS without the application CSP bypass |
+| C:H | All information is disclosed, or critical information is disclosed. | Full read access to instance; tokens/session IDs; private repositories; XSS with the application CSP bypass |
 
 ### Integrity — I
 
 | Metric | Definition | Examples |
 |---|---|---|
 | I:N | No integrity loss. | No modification possible |
-| I:L | Some information can be altered, or attacker lacks control over kind/degree. | Modify private issue/MR titles but not content; modify small number of private issues/MRs; minor private data; XSS without GitLab.com CSP bypass |
-| I:H | Attacker can modify any information at any time, or critical information can be modified. | Add malicious runner without permission; add malicious OAuth app; modify GitLab instance data; XSS with GitLab.com CSP bypass |
+| I:L | Some information can be altered, or attacker lacks control over kind/degree. | Modify private issue/MR titles but not content; modify small number of private issues/MRs; minor private data; XSS without the application CSP bypass |
+| I:H | Attacker can modify any information at any time, or critical information can be modified. | Add malicious runner without permission; add malicious OAuth app; modify application instance data; XSS with the application CSP bypass |
 
 ### Availability — A
 
@@ -2170,14 +2131,14 @@ Side note for triage: high-privilege users using a bug only to sabotage their ow
 
 ## CVSS Selection Rules for Access-Control Findings
 
-1. Most GitLab Web/API/GraphQL access-control bugs are `AV:N`.
+1. Most Web/API/GraphQL access-control bugs are `AV:N`.
 2. If exploitation requires only an authenticated account, use `PR:L`.
 3. If exploitation requires Maintainer/Owner/admin rights in the victim resource, use `PR:H`.
 4. If the attacker can create their own project/group and invite the victim, do not automatically use `PR:H`; evaluate whether victim-resource privilege is truly required.
 5. If no victim action is needed, use `UI:N`.
 6. If victim action is required, including login, click, CSRF, or XSS interaction, use `UI:R`.
-7. Use `S:C` only when impact crosses from GitLab into another security authority/component, such as browser, production server, cloud metadata, third-party system, or protected CI/CD secrets affecting external systems.
-8. Use `S:U` when both vulnerable and impacted component are GitLab.
+7. Use `S:C` only when impact crosses from the application into another security authority/component, such as browser, production server, cloud metadata, third-party system, or protected CI/CD secrets affecting external systems.
+8. Use `S:U` when both vulnerable and impacted component are the application.
 9. For read-only access-control leaks, impact is usually `C:L` or `C:H`, with `I:N/A:N` unless state can be changed.
 10. For unauthorized state change, impact is usually `I:L` or `I:H`, with confidentiality/availability set only if also affected.
 11. For count/metadata leaks, usually start with `C:L` unless the metadata is critical or broad enough for `C:H`.
@@ -2317,7 +2278,7 @@ Use this exact structure.
 
 ## Feature Scope
 
-Explain what part of GitLab this feature covers.
+Explain what part of the application this feature covers.
 
 ## Expected Permission Model
 
@@ -2475,49 +2436,9 @@ Use this matrix in the final report.
 
 | # | Feature | Phase 1 Map Used | Entry Points Reviewed | Core Files Reviewed | Supporting Files Reviewed | Same-Functionality Cross-Feature Checks | Patterns Applied | Findings | Coverage Status | Gaps / Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | Issues & Work Items | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 2 | Epics & Portfolio | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 3 | Merge Requests | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 4 | Notes, Discussions & Reactions | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 5 | CRM / Customer Relations | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 6 | CI/CD Pipelines & Jobs | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 7 | CI Runners | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 8 | Package Registry | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 9 | Container Registry & Dependency Proxy | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 10 | Repositories & Git | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 11 | Branch Rules & Protected Refs | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 12 | Snippets | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 13 | Wikis | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 14 | Members & Access Tokens | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 15 | Authentication, SSO & System Access | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 16 | Projects | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 17 | Groups, Namespaces & Organizations | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 18 | Users & Profile | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 19 | Boards, Milestones & Labels | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 20 | Integrations & Webhooks | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 21 | Import / Export & Bulk Import | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 22 | Releases, Environments & Deployments | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 23 | Monitor: Incidents, Alerts & On-call | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 24 | Feature Flags | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 25 | Clusters, Terraform & Cloud | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 26 | Workspaces & Remote Development | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 27 | Security: Vulnerabilities | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 28 | Security: Orchestration & Policies | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 29 | Security: Dependencies & SBOM | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 30 | Compliance & Audit Events | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 31 | Geo | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 32 | AI / Duo | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 33 | Analytics & Observability | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 34 | Service Desk & Email | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 35 | Design Management | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 36 | ML / Model Registry | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 37 | Admin & Application Settings | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 38 | Anti-Abuse & Spam | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 39 | Subscriptions & Licensing | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 40 | Search | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 41 | Uploads, LFS & Object Storage | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 42 | Cells | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
-| 43 | GitLab Pages | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
+| 1 | <feature 1 from this run> | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
+| 2 | <feature 2 from this run> | Yes/No | TBD | TBD | TBD | TBD | TBD | TBD | Complete / Partial / Incomplete | TBD |
+| … | one row per feature in THIS run's queue (phase1-maps/feature-queue.json) | | | | | | | | | | |
 
 ---
 
@@ -2734,7 +2655,7 @@ If multiple agents are available, divide work by feature and pattern coverage.
 
 # Final Strict Instructions
 
-- Use `<source-dir>` as the source-code path.
+- Use the source tree provided in your task as the source-code path (never a hardcoded path).
 - Phase 1 must map all features before Phase 2 begins.
 - Phase 2 must consume Phase 1 maps.
 - Review feature-by-feature.

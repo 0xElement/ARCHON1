@@ -3,17 +3,19 @@ const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see p
 // ════════════════════════════════════════════════════════════════════════════
 // Code-review squad dispatcher — phase1-maps white-box methodology
 // ════════════════════════════════════════════════════════════════════════════
-// Replaces the old 6-framework→chain flow with a two-phase, feature-by-feature
-// process (ported from the operator's own GitLab review methodology):
+// Replaces the old 6-framework→chain flow with a two-phase, feature-by-feature,
+// STACK-AGNOSTIC process that reviews any project the same way (Rails, Django,
+// Express/Nest, Spring, Laravel, Go, .NET, …) — no per-app or per-framework preset:
 //
 //   Phase 0   sourceDir validation
 //   Phase 0b  App Blueprint — CURATOR reads inventories + tree + bootstrap/auth/
 //             config files → a 1-page architecture/auth/data-flow/shared-infra doc
 //             that grounds discovery + every feature mapper (catches cross-feature
 //             vulns the feature-by-feature pass would miss in isolation)
-//   Phase 0a  Inventories — scripted enumeration (routes/api/graphql/workers/
-//             services/finders/policies/serializers/downloads/search/tokens)
-//   Phase 0b  Feature discovery — gitlab preset (43) | generic (CURATOR) | meta.features
+//   Phase 0a  Inventories — scripted enumeration (routes/endpoints, auth checks, DB
+//             queries, render/output, uploads/downloads, tokens/actors, background
+//             jobs, business-logic/service objects) via multi-language grep specs
+//   Phase 0b  Feature discovery — CURATOR auto-discovers from the surface (or meta.features)
 //   Phase 1   Feature mapping — ONE agent per feature, in RAM-safe waves; each
 //             builds features/<slug>.md (Endpoint/Action Ledger + auth/actor/data/
 //             worker/same-functionality maps + ranked Phase-2 leads + depth status)
@@ -29,13 +31,12 @@ const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see p
 //
 // dispatch.meta:
 //   sourceDir   (required, absolute) — the source tree to review
-//   preset      'gitlab' | 'generic'  (default: auto-detect gitlab markers, else generic)
 //   features    string[] (optional)   — explicit feature-slug queue (overrides discovery)
-//   vulnClasses string[] (optional)   — default ['access-control','xss']
+//   vulnClasses string[] (optional)   — default ['access-control','xss']; ['all'] = every catalog
 //   deployUrl   (optional)            — enables PROBER runtime validation
 //   testAccounts(optional)            — { attacker, victim } creds for runtime probing
 //   outputDir   (optional)            — default <INTEL>/code-review/<taskId>
-//   maxFeatures (optional)            — cap mapped features (default: gitlab=43, generic=10)
+//   maxFeatures (optional)            — cap mapped features (default: scales with codebase size, 10–30)
 //   maxPhase2   (optional)            — cap features taken to Phase 2 (default 6, by queue rank)
 //   phasesOnly  (optional)            — subset of PHASES to run (reuse prior artifacts)
 
@@ -44,7 +45,6 @@ const path = require('path')
 const { execSync } = require('child_process')
 
 const METH = path.join(__roots.AGENTS_ROOT, 'squads/code-review/methodology')
-const PRESET_GITLAB = path.join(METH, 'presets/gitlab-features.json')
 
 // vuln class → { specialist, phase-2 module, pattern catalog }. The slugs match
 // common/patterns/<slug>.json — a null catalog auto-resolves to that pattern
@@ -135,40 +135,37 @@ async function runWaves(items, size, fn) {
   return out
 }
 
-function detectPreset(sourceDir) {
-  // GitLab markers: a Rails app with GitLab's signature layout.
-  try {
-    if (fs.existsSync(path.join(sourceDir, 'config/routes.rb')) &&
-        (fs.existsSync(path.join(sourceDir, 'GITLAB_WORKHORSE_VERSION')) ||
-         fs.existsSync(path.join(sourceDir, 'ee')) ||
-         fs.existsSync(path.join(sourceDir, 'app/graphql')))) return 'gitlab'
-  } catch {}
+// Detect the primary language/stack of the source tree — INFORMATIONAL ONLY (labels the inventory
+// manifest). It never changes behaviour: inventory + feature discovery are identical for every
+// project, so any repo (Rails, Django, Express/Nest, Spring, Laravel, Go, .NET, …) reviews the same way.
+function detectStack(sourceDir) {
+  const has = (p) => { try { return fs.existsSync(path.join(sourceDir, p)) } catch { return false } }
+  if (has('Gemfile') || has('config/routes.rb')) return 'ruby'
+  if (has('manage.py') || has('pyproject.toml') || has('requirements.txt')) return 'python'
+  if (has('go.mod')) return 'go'
+  if (has('pom.xml') || has('build.gradle') || has('build.gradle.kts')) return 'java/kotlin'
+  if (has('composer.json')) return 'php'
+  if (has('Program.cs') || has('Startup.cs')) return 'dotnet'
+  if (has('package.json')) return 'node'
+  if (has('Cargo.toml')) return 'rust'
   return 'generic'
 }
 
-// Scripted inventory enumeration (grep — universally available). Each spec writes
-// one inventory file; counts feed the coverage denominator. Fail-soft per spec.
-function buildInventories(sourceDir, invDir, preset, log) {
+// Scripted inventory enumeration (grep — universally available). ONE comprehensive, multi-language
+// spec set surfaces the review surface of ANY project (no per-app or per-framework preset). Each
+// spec writes one inventory file; counts feed the coverage denominator. Fail-soft per spec.
+function buildInventories(sourceDir, invDir, stack, log) {
   fs.mkdirSync(invDir, { recursive: true })
-  const RUBY = ['--include=*.rb']
-  const GENERIC_CODE = ['--include=*.rb', '--include=*.py', '--include=*.js', '--include=*.ts', '--include=*.go', '--include=*.java', '--include=*.php', '--include=*.cs', '--include=*.rs']
-  const specs = preset === 'gitlab' ? [
-    ['01_routes', '(resources?|resource|get|post|put|patch|delete|namespace|scope|draw)\\b', RUBY],
-    ['02_rest_api', '(resource|get|post|put|delete|namespace|route_setting|requires|optional)\\b', RUBY],
-    ['03_graphql', '(field|mutation|resolver|argument|authorize|type)\\b', RUBY],
-    ['04_workers', '(class .*Worker|perform_async|perform_in|perform_at|perform_bulk|sidekiq_options)', RUBY],
-    ['05_services_finders_policies', '(class .*(Service|Finder|Policy)|def execute|can\\?|allowed\\?|rule \\{)', RUBY],
-    ['06_response_shaping', '(class .*(Serializer|Entity|Presenter)|expose |represent )', RUBY],
-    ['07_downloads_exports', '(send_file|send_data|signed_url|object_storage|ExportService|archive|presigned)', RUBY],
-    ['08_search_count', '(search|count|aggregate|\\.where\\(|Finder)', RUBY],
-    ['09_tokens_actors', '(current_user|access_token|personal_access_token|api_key|impersonat|actor|principal)', RUBY],
-  ] : [
-    ['01_routes_endpoints', '(@(app|router)\\.(get|post|put|delete|patch)|app\\.(get|post|route)|router\\.|@(Get|Post|Put|Delete|RequestMapping|RestController)|http\\.HandleFunc|def [a-z_]+\\(.*request)', GENERIC_CODE],
-    ['02_auth_checks', '(authorize|authenticate|permission|access_control|can\\?|isAuthenticated|@PreAuthorize|require_role|ensure_|before_action)', GENERIC_CODE],
-    ['03_db_queries', '(SELECT |find_by|findOne|\\.query\\(|\\.where\\(|prepareStatement|execute\\(|raw\\()', GENERIC_CODE],
-    ['04_render_output', '(render|innerHTML|dangerouslySetInnerHTML|\\.html\\(|template|res\\.send|raw\\()', GENERIC_CODE],
-    ['05_uploads_downloads', '(upload|download|send_file|sendFile|multipart|res\\.download|presigned|object_storage)', GENERIC_CODE],
-    ['06_tokens_actors', '(token|session|cookie|jwt|api_key|current_user|currentUser|principal|actor)', GENERIC_CODE],
+  const CODE = ['--include=*.rb', '--include=*.py', '--include=*.js', '--include=*.ts', '--include=*.jsx', '--include=*.tsx', '--include=*.go', '--include=*.java', '--include=*.kt', '--include=*.php', '--include=*.cs', '--include=*.rs']
+  const specs = [
+    ['01_routes_endpoints', '(@(app|router)\\.(get|post|put|delete|patch)|app\\.(get|post|put|delete|route)|router\\.(get|post|put|delete|use)|@(Get|Post|Put|Delete|Patch|RequestMapping|RestController|Path)\\b|http\\.HandleFunc|Route::(get|post|put|delete)|\\bresources?\\b|\\bnamespace\\b|\\bdraw\\b|def [a-z_]+\\(.*request|\\b(field|mutation|resolver)\\b)', CODE],
+    ['02_auth_checks', '(authorize|authenticate|permission|access_control|can\\?|allowed\\?|isAuthenticated|@PreAuthorize|@RolesAllowed|require_role|ensure_|before_action|@login_required|IsAuthenticated|hasRole|checkAccess|current_user)', CODE],
+    ['03_db_queries', '(SELECT |INSERT INTO|UPDATE |DELETE FROM|find_by|findOne|findAll|\\.query\\(|\\.where\\(|\\.raw\\(|prepareStatement|createQuery|execute\\(|sequelize\\.query|knex\\()', CODE],
+    ['04_render_output', '(render|innerHTML|dangerouslySetInnerHTML|\\.html\\(|template|res\\.send|\\braw\\(|\\bexpose |\\brepresent |Serializer|Presenter|\\bEntity\\b|toJSON)', CODE],
+    ['05_uploads_downloads', '(upload|download|send_file|send_data|sendFile|multipart|res\\.download|presigned|object_storage|ExportService|\\barchive\\b|FileUpload|MultipartFile)', CODE],
+    ['06_tokens_actors', '(token|session|cookie|jwt|api_key|access_token|personal_access_token|current_user|currentUser|principal|\\bactor\\b|impersonat|Authorization)', CODE],
+    ['07_background_jobs', '(class .*Worker\\b|perform_async|perform_in|perform_later|sidekiq|ActiveJob|@Scheduled|@Async|@shared_task|celery|\\.enqueue|\\bcron\\b|implements Job\\b|extends Job\\b)', CODE],
+    ['08_business_logic', '(class .*(Service|Policy|Finder|UseCase|Handler|Manager|Processor)\\b|def execute\\b|def call\\b|rule \\{|def perform\\b|state_machine|\\btransition\\b|\\bworkflow\\b)', CODE],
   ]
   const counts = {}
   for (const [name, pattern, globs] of specs) {
@@ -187,7 +184,7 @@ function buildInventories(sourceDir, invDir, preset, log) {
   const manifest = `# Phase 1 — Source-of-Truth Inventory Manifest
 
 Target: \`${sourceDir}\`
-Preset: **${preset}**
+Stack: **${stack}**
 Method: scripted grep enumeration (source-parsed; the agents re-grep + read live code during mapping).
 
 ## Inventory files
@@ -415,29 +412,31 @@ async function runCodeReview(dispatch, deps) {
     logActivity('NEXUS', `🚫 Phase 0 failed: ${p0.reason}`, { taskId, squad, projectId: projectId || '' })
     return { error: p0.reason, phase: 0 }
   }
-  const preset = (meta.preset === 'gitlab' || meta.preset === 'generic') ? meta.preset : detectPreset(sourceDir)
+  const stack = detectStack(sourceDir) // informational label only — behaviour is stack-agnostic
   // Classes: explicit meta.vulnClasses wins; ['all'] = every catalog; otherwise a
   // broad default floor here, refined from the discovered surface after inventories.
   const explicitClasses = Array.isArray(meta.vulnClasses) && meta.vulnClasses.length > 0
   let vulnClasses = (explicitClasses
     ? (meta.vulnClasses.length === 1 && meta.vulnClasses[0] === 'all' ? Object.keys(CLASS) : meta.vulnClasses)
     : DEFAULT_CLASSES).filter(c => CLASS[c])
-  const maxFeatures = meta.maxFeatures || (preset === 'gitlab' ? 43 : 10)
+  // Scale discovery breadth to the codebase size (no per-app preset) — small apps get ~10 features,
+  // large monorepos more, capped so cost stays bounded. Operator can pin it via meta.maxFeatures.
+  const maxFeatures = meta.maxFeatures || Math.max(10, Math.min(30, Math.round((p0.fileCount || 0) / 500)))
   const maxPhase2 = meta.maxPhase2 || 6
   fs.mkdirSync(`${outDir}/phase1-maps/features`, { recursive: true })
   fs.mkdirSync(`${outDir}/phase1-maps/consolidated`, { recursive: true })
   for (const c of vulnClasses) fs.mkdirSync(`${outDir}/phase2/${c}`, { recursive: true })
   const invDir = `${outDir}/phase1-maps/inventories`
-  log(`✅ Phase 0: sourceDir=${sourceDir} (${p0.fileCount} code files) · preset=${preset} · classes=${vulnClasses.join(',')}`)
-  logActivity('NEXUS', `✅ Phase 0: source valid (${preset})`, {
+  log(`✅ Phase 0: sourceDir=${sourceDir} (${p0.fileCount} code files) · stack=${stack} · classes=${vulnClasses.join(',')}`)
+  logActivity('NEXUS', `✅ Phase 0: source valid (${stack})`, {
     taskId, squad, projectId: projectId || '',
-    details: `Path: ${sourceDir}\nFiles: ${p0.fileCount}\nPreset: ${preset}\nVuln classes: ${vulnClasses.join(', ')}\nOutput: ${outDir}\nDeploy URL: ${deployUrl || '(none — runtime validation skipped)'}`,
+    details: `Path: ${sourceDir}\nFiles: ${p0.fileCount}\nStack: ${stack}\nVuln classes: ${vulnClasses.join(', ')}\nOutput: ${outDir}\nDeploy URL: ${deployUrl || '(none — runtime validation skipped)'}`,
   })
 
   // Phase 0a — inventories
   if (runPhase('inventories')) {
     updateProgress(10, 'Phase 0a: scripted inventory enumeration')
-    const invCounts = buildInventories(sourceDir, invDir, preset, log)
+    const invCounts = buildInventories(sourceDir, invDir, stack, log)
     // Auto-select the vuln classes that the discovered surface actually warrants
     // (unless the operator pinned an explicit list).
     if (!explicitClasses) {
@@ -464,9 +463,6 @@ async function runCodeReview(dispatch, deps) {
   if (Array.isArray(meta.features) && meta.features.length) {
     features = meta.features.map(f => typeof f === 'string' ? { slug: slugify(f), name: f } : f).slice(0, maxFeatures)
     log(`📋 Feature queue from meta.features: ${features.length}`)
-  } else if (preset === 'gitlab') {
-    try { features = JSON.parse(fs.readFileSync(PRESET_GITLAB, 'utf8')).features.slice(0, maxFeatures) } catch { features = [] }
-    log(`📋 GitLab preset feature queue: ${features.length}`)
   } else if (runPhase('discovery')) {
     updateProgress(16, 'Phase 0c: CURATOR feature discovery')
     const dRes = await spawnAgent('curator', taskId, discoveryPrompt(taskId, sourceDir, outDir, invDir, maxFeatures), `task-${taskId}-discovery`, null)
@@ -574,7 +570,7 @@ async function runCodeReview(dispatch, deps) {
 
   updateProgress(100, 'Complete')
   return {
-    preset, sourceDir, fileCount: p0.fileCount,
+    stack, sourceDir, fileCount: p0.fileCount,
     features: features.map(f => f.slug),
     featuresMapped: features.length,
     phase2Features: p2Features.map(f => f.slug),
@@ -626,7 +622,7 @@ module.exports = {
   runCodeReview,
   validateSourceDir,
   // exported for tests/introspection
-  detectPreset,
+  detectStack,
   buildInventories,
   selectVulnClasses,
   DEFAULT_CLASSES,

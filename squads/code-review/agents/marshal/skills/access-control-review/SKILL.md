@@ -188,7 +188,7 @@ Before emitting BFLA / missing-admin-gate / horizontal-privesc candidate at Crit
 - `partial` → claim Medium or below, set `needs_live_validation: true`
 - `local_only` (single-file evidence) → claim Low, set `suspected_not_proven: true`
 
-### Anti-patterns (learned from GitLab DH-AC-001, 2026-04-23)
+### Anti-patterns (learned from access-control review calibration)
 - "Controller inherits from ApplicationController instead of AdminController" → **always local_only** unless you traced the full pipeline. Framework may enforce elsewhere.
 - Identical TP/FP signatures → AUDITOR rejects as malformed.
 - Claiming CRITICAL without `runtime_verification_command` → auto-downgrade.

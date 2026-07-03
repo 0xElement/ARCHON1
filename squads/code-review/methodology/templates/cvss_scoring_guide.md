@@ -42,7 +42,7 @@ Use this for every confirmed, potential, or suspicious finding.
 - Use `PR:H` only when the attacker needs high privilege in the victim resource.
 - Use `UI:R` when victim interaction is required.
 - Use `S:C` when impact crosses to browser, cloud, production, third-party systems, or protected external secrets.
-- Use `S:U` when the impact stays within GitLab.
+- Use `S:U` when the impact stays within the application.
 - Use `C:H` for token/session/private repository/full instance read disclosure.
 - Use `C:L` for limited metadata or small-scope private data disclosure.
 - Use `I:H` for critical or broad unauthorized modification.

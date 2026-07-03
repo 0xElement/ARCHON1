@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-// Regression: simulates the GitLab DH-AC-001 false positive from 2026-04-23.
+// Regression: simulates a BFLA (broken function-level authorization) false positive.
 // With evidence-completeness discipline active, the unreformed Critical BFLA
 // claim MUST downgrade to Low at the severity-cap layer.
 //
 // This test does NOT invoke real LLM specialists — it constructs the exact
 // candidate that the pre-discipline MARSHAL emitted in the 2026-04-23
-// GitLab run and asserts the cap logic catches it.
+// access-control review and asserts the cap logic catches it.
 
 const ec = require('../src/pipeline/evidence-completeness')
 
 let passed = 0, failed = 0
 function ok(l, c, extra = '') { if (c) { console.log('  ✓ ' + l); passed++ } else { console.log('  ✗ ' + l + (extra ? ' — ' + extra : '')); failed++ } }
 
-console.log('GitLab DH-AC-001 BFLA regression test:')
+console.log("BFLA severity-cap regression test:")
 
 // The candidate that 2026-04-23 MARSHAL actually emitted
 // (paraphrased from FINAL-REPORT-crv2-1776935900.md).
@@ -61,7 +61,7 @@ const candidateProperlyDone = {
                    'model_scope', 'sink'],
   runtime_verification_command: 'curl -b "session=NON_ADMIN" http://target/admin/broadcast_messages',
   expected_true_positive_signature: 'HTTP 200 + body contains "Broadcast Messages"',
-  expected_false_positive_signature: 'HTTP 404 with X-Gitlab-Custom-Error, or HTTP 302 to /users/sign_in',
+  expected_false_positive_signature: 'HTTP 404 with X-App-Custom-Error, or HTTP 302 to /users/sign_in',
 }
 const vProper = ec.validateCandidateSchema(candidateProperlyDone)
 ok('properly-documented candidate is valid schema', vProper.valid, JSON.stringify(vProper.errors))

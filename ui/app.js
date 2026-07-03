@@ -715,10 +715,10 @@ function updateDispatchInfo() {
     : `Leader ${sq.leader} coordinates ${sq.agents.length} personas through ${sq.phases.length} phases.`
   $('#dispatchInfo').innerHTML = md(cr
     ? `**Code review (white-box, phase1-maps method)** on a local source tree.\n\n`
-      + `1. **Inventories** — scripted enumeration\n2. **Feature queue** — GitLab preset (43) or auto-discovered (generic)\n`
+      + `1. **Inventories** — scripted multi-language enumeration\n2. **Feature queue** — CURATOR auto-discovers features from the surface\n`
       + `3. **Feature mapping** — one agent per feature → \`features/<slug>.md\`\n4. **Consolidation** — CURATOR → coverage matrices + review queue\n`
       + `5. **Vuln assessment** — per feature × class (access-control → MARSHAL, XSS → CIPHER)\n6. **Verify** — AUDITOR (+ PROBER if Deploy URL)\n7. **Report** — SCRIBE\n\n`
-      + `Artifacts land under \`phase1-maps/\` + \`phase2/\`, viewable in **Reports**.\n\n> **GitLab** uses your 43-feature preset; **Generic** auto-discovers features for any repo.`
+      + `Artifacts land under \`phase1-maps/\` + \`phase2/\`, viewable in **Reports**.\n\n> Stack-agnostic: works for any project (Rails, Django, Express, Spring, Laravel, Go, .NET, …); breadth scales with codebase size.`
     : pt
     ? `**Web pentest** of the target URL.\n\n`
       + `On dispatch the console writes a **scope config** (\`scope-<taskId>.json\`) and an **engagement brief** (target, scope, focus, the test-account table).\n\n`
@@ -730,7 +730,6 @@ function updateDispatchInfo() {
 }
 $('#fSquad').addEventListener('change', updateDispatchInfo)
 $$('#fPriority button').forEach(b => b.onclick = () => { $$('#fPriority button').forEach(x => x.classList.remove('on')); b.classList.add('on') })
-$$('#crMode button').forEach(b => b.onclick = () => { $$('#crMode button').forEach(x => x.classList.remove('on')); b.classList.add('on') })
 $$('#ptType button').forEach(b => b.onclick = () => { $$('#ptType button').forEach(x => x.classList.remove('on')); b.classList.add('on'); $('#ptFocusField').style.display = b.dataset.v === 'feature' ? 'block' : 'none' })
 // focus-class chips: multi-select toggle (none on = full A→Z). The "Custom /
 // abuse-driven" chip (data-custom) reveals the free-text box instead of being a class.
@@ -763,10 +762,8 @@ $('#fSubmit').onclick = async () => {
   if (isCR()) {
     const sourceDir = $('#crSourceDir').value.trim()
     if (!sourceDir) { toast('Source directory required', 'Absolute path to the source tree', 'err'); $('#crSourceDir').focus(); return }
-    const mode = ($('#crMode button.on') || {}).dataset?.v || 'auto'
     const vulnClasses = $$('#crClasses input:checked').map(c => c.value)
     const meta = { sourceDir }
-    if (mode !== 'auto') meta.preset = mode
     if (vulnClasses.length) meta.vulnClasses = vulnClasses
     const dep = $('#crDeployUrl').value.trim(); if (dep) meta.deployUrl = dep
     const mf = +$('#crMaxFeatures').value; if (mf > 0) meta.maxFeatures = mf
@@ -785,7 +782,7 @@ $('#fSubmit').onclick = async () => {
     if (mode === 'static') {
       // Static Analysis → source-only code-review squad; URL (if given) becomes the runtime-validation target
       if (!sourceDir) { toast('Source directory required', 'Absolute path to the source tree', 'err'); $('#ptSourceDir').focus(); return }
-      const meta = { sourceDir }   // preset auto-detected by the code-review engine
+      const meta = { sourceDir }   // stack auto-detected by the code-review engine (stack-agnostic)
       if (targetUrl) meta.deployUrl = targetUrl
       if (credentials.length) meta.testAccounts = { attacker: credentials[0], ...(credentials[1] ? { victim: credentials[1] } : {}) }
       body = { squad: 'code-review', taskTitle: title, priority: prio, meta }
@@ -802,7 +799,7 @@ $('#fSubmit').onclick = async () => {
       if (customFocus) meta.customFocus = customFocus
       if (mode === 'whitebox') {
         if (!sourceDir) { toast('Source directory required', 'White-box needs a live URL and a source directory', 'err'); $('#ptSourceDir').focus(); return }
-        meta.sourceDir = sourceDir   // preset auto-detected
+        meta.sourceDir = sourceDir   // stack auto-detected (stack-agnostic)
       }
       body = { squad: 'pentest', taskTitle: title, priority: prio, meta }
     }

@@ -49,7 +49,7 @@ Every Phase 2 XSS feature report must include all 50 rows.
 | XSS-41 | Cross-context escaping mismatch between HTML, attribute, JS, JSON, CSS, URL |
 | XSS-42 | Frontend state hydration or data attributes contain unsafe serialized data |
 | XSS-43 | GraphQL error/message/path data rendered unsafely |
-| XSS-44 | Webhook/integration/external service data rendered in GitLab UI |
+| XSS-44 | Webhook/integration/external service data rendered in the application UI |
 | XSS-45 | Sanitizer/filter order bug in HTML pipeline |
 | XSS-46 | User-controlled protocol scheme bypass such as javascript:, data:, vbscript:, encoded variants |
 | XSS-47 | Unicode, null-byte, control-character, or browser parser differential bypass |

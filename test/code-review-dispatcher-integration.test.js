@@ -48,12 +48,12 @@ function stubDeps(spawnCalls) {
     const calls = []
     const res = await cr.runCodeReview(
       { taskId: 'cr-test-1', squad: 'code-review-squad', projectId: '',
-        meta: { sourceDir: srcDir, preset: 'generic', features: ['auth', 'uploads', 'admin'],
+        meta: { sourceDir: srcDir, features: ['auth', 'uploads', 'admin'],
                 vulnClasses: ['access-control', 'xss'], maxPhase2: 2, outputDir: outDir } },
       stubDeps(calls))
 
     ok('returns no error', !res.error, JSON.stringify(res).slice(0, 120))
-    ok('preset=generic', res.preset === 'generic')
+    ok('stack label present (auto-detected)', typeof res.stack === 'string' && res.stack.length > 0, 'got ' + res.stack)
     ok('3 features mapped', res.featuresMapped === 3, 'got ' + res.featuresMapped)
     ok('inventories written to disk', fs.existsSync(path.join(outDir, 'phase1-maps/inventories/00_MANIFEST.md')))
     ok('phase2 class dirs created', fs.existsSync(path.join(outDir, 'phase2/access-control')) && fs.existsSync(path.join(outDir, 'phase2/xss')))
@@ -85,16 +85,17 @@ function stubDeps(spawnCalls) {
     ok('discovered 2 features → 2 mapping agents', calls.filter(c => c.sessionSuffix.includes('-map-')).length === 2, 'got ' + calls.filter(c => c.sessionSuffix.includes('-map-')).length)
   }
 
-  // ── Test 3: gitlab preset loads 43; phasesOnly gates ──
+  // ── Test 3: an explicit meta.features queue is used verbatim (capped by maxFeatures); phasesOnly gates ──
   {
     const srcDir = makeSourceDir()
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crout-'))
     const calls = []
+    const featureList = Array.from({ length: 43 }, (_, i) => ({ slug: `feature-${i}`, name: `Feature ${i}` }))
     const res = await cr.runCodeReview(
       { taskId: 'cr-test-3', squad: 'code-review-squad', projectId: '',
-        meta: { sourceDir: srcDir, preset: 'gitlab', phasesOnly: ['inventories'], outputDir: outDir } },
+        meta: { sourceDir: srcDir, features: featureList, maxFeatures: 43, phasesOnly: ['inventories'], outputDir: outDir } },
       stubDeps(calls))
-    ok('gitlab preset → 43 features', res.featuresMapped === 43, 'got ' + res.featuresMapped)
+    ok('explicit meta.features queue → 43 features', res.featuresMapped === 43, 'got ' + res.featuresMapped)
     ok('phasesOnly=[inventories] → no agents spawned', calls.length === 0, 'got ' + calls.length)
   }
 
