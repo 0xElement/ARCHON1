@@ -213,24 +213,27 @@ proven in code only. A source read is never presented as a live exploit.
 
 ## Benchmark
 
-A black box run against a fresh OWASP Juice Shop, scored on the vulnerability classes it is known
-to contain. Full report with charts and the per class breakdown:
-[`benchmark/RESULTS-blackbox.md`](./benchmark/RESULTS-blackbox.md).
+OWASP Juice Shop, scored on the vulnerability classes it is known to contain — the same ground
+truth and scorer grade **both** run types against the same app. Full reports with charts and the
+per-class breakdown: [`benchmark/RESULTS-blackbox.md`](./benchmark/RESULTS-blackbox.md) ·
+[`benchmark/RESULTS-codereview.md`](./benchmark/RESULTS-codereview.md).
 
-| Target | Class coverage | Confirmed findings |
+| Run type | Class coverage | Confirmed findings |
 |---|---|---|
-| OWASP Juice Shop | **12 of 15 (80%)** | 26 (7 Critical, 8 High, 10 Medium, 1 Low) |
+| **Black box** (live pentest) | **12 of 15 (80%)** | 26 |
+| **Static / white-box** (code review) | **12 of 15 (80%)** | 48 (36 beyond the 15 classes) |
 
 ```mermaid
-pie showData title Vulnerability class coverage
+pie showData title Vulnerability class coverage (both run types)
   "Covered" : 12
   "Missed" : 3
 ```
 
-Covered: SQL injection, cross site scripting, broken authentication, broken access control, JWT
-weaknesses, XXE, server side JavaScript injection, CORS misconfiguration, mass assignment, path
-traversal, sensitive data exposure, and business logic abuse. Missed: open redirect, SSRF, and
-outdated components. Reproduce it with the harness in [`benchmark/`](./benchmark).
+Same class coverage from both angles — but the source review goes **deeper**: reading all the code
+surfaces roughly twice the confirmed findings (YAML-deserialization RCE, JWT algorithm confusion,
+unsalted-MD5 password storage, and more), each pinned to a file and line. Between them the black box
+covers SSRF that the per-feature source pass mapped elsewhere, and the source review reaches code the
+live scan never hit. Reproduce both with the harness in [`benchmark/`](./benchmark).
 
 ---
 

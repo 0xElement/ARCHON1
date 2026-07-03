@@ -16,7 +16,7 @@ const GT = require('./juice-shop-ground-truth.json')
 
 const taskId = process.argv[2]
 if (!taskId) { console.error('\n  usage: node benchmark/report-md.js <taskId> [outfile]\n'); process.exit(2) }
-const outFile = process.argv[3] || path.join(__dirname, 'RESULTS-blackbox.md')
+let outFile = process.argv[3] // default set below, once the run's mode (black-box vs code-review) is known
 
 const INTEL = require('../paths').INTEL_ROOT
 const tasks = (() => { try { const t = JSON.parse(fs.readFileSync(path.join(INTEL, 'tasks.json'), 'utf8')); return Array.isArray(t) ? t : (t.tasks || []) } catch { return [] } })()
@@ -31,6 +31,25 @@ const r = scoreFindings(findings, GT)
 const complete = ['done', 'completed', 'awaiting-triage'].includes(String(task.status || ''))
 const date = new Date().toISOString().slice(0, 10)
 const short = s => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 64)
+
+// Mode-aware labelling: the same scorer + ground truth grade a black-box (live) run and a
+// static / white-box code review; only the framing (title, target line, intro, verbs, missed
+// analysis) differs. Detected from the run's squad.
+const isCodeReview = String(task.squad || '').includes('code-review')
+if (!outFile) outFile = path.join(__dirname, isCodeReview ? 'RESULTS-codereview.md' : 'RESULTS-blackbox.md')
+const MODE = isCodeReview ? {
+  title: 'ARCHON Static / White-Box Code-Review Benchmark',
+  targetLine: `**Target:** OWASP Juice Shop  ·  source code review  ·  ${date}`,
+  intro: `ARCHON was pointed at the OWASP Juice Shop **source tree** and asked to perform a full white-box security code review. It reads the actual code — inventory, application blueprint, feature mapping, per-class assessment, then an AUDITOR reverse-check — and traces user-controlled input from entry point to sink, so a pattern alone never raises a finding. Each finding is reported at file and line with the vulnerable code block as proof. The benchmark measures how many of the vulnerability classes Juice Shop is known to contain the review surfaces from the code alone, and how deeply.`,
+  foundVerb: 'identified in the source',
+  missed: (n, ids) => `The review did not map a confirmed finding to ${n} class${n === 1 ? '' : 'es'}: ${ids}. In a source review these are largely a class-mapping artifact (an XXE finding, for example, maps to path traversal by CWE, so the XXE *class* reads as missed even though the vulnerability was found) or need a dependency/runtime view: outdated-component detection favours a dependency-manifest scan, and open redirect is a small sink a per-feature pass can skip. A combined white-box run — this source review THEN a source-guided live pentest — closes the remaining gaps.`,
+} : {
+  title: 'ARCHON Black Box Benchmark',
+  targetLine: `**Target:** OWASP Juice Shop  ·  \`${displayUrl}\`  ·  ${date}`,
+  intro: `ARCHON was pointed at a fresh OWASP Juice Shop instance with no prior knowledge and asked to perform a full black box web application penetration test. Juice Shop is a deliberately vulnerable application, which makes it a stable yardstick: the benchmark measures how many of the vulnerability classes it is known to contain ARCHON surfaces on its own, and how deeply.`,
+  foundVerb: 'independently reproduced',
+  missed: (n, ids) => `ARCHON did not surface a confirmed finding for ${n} classes: ${ids}. These are the harder to reach or lower signal classes in a pure black box run: open redirect and server side request forgery need a specific reachable sink, XML external entity depends on hitting the file import surface, NoSQL and command injection sit behind less obvious endpoints, and outdated component detection favours a source or dependency view. They are candidates for a focused follow up pass or a white box run.`,
+}
 
 // visual helpers
 const bar = (pct, w = 24) => { const f = Math.round((pct / 100) * w); return '█'.repeat(f) + '░'.repeat(Math.max(0, w - f)) }
@@ -47,14 +66,11 @@ const rows = GT.classes.map(c => {
   return `| ${name} | ${m ? '🟢 found' : '🔴 missed'} | ${m ? short(m.finding) : ''} |`
 }).join('\n')
 
-const md = `# ARCHON Black Box Benchmark
+const md = `# ${MODE.title}
 
-**Target:** OWASP Juice Shop  ·  \`${displayUrl}\`  ·  ${date}
+${MODE.targetLine}
 ${complete ? '' : '\n> Snapshot taken while the run was still executing. It is regenerated for the final numbers once the run reaches operator triage.\n'}
-ARCHON was pointed at a fresh OWASP Juice Shop instance with no prior knowledge and asked to
-perform a full black box web application penetration test. Juice Shop is a deliberately
-vulnerable application, which makes it a stable yardstick: the benchmark measures how many of the
-vulnerability classes it is known to contain ARCHON surfaces on its own, and how deeply.
+${MODE.intro}
 
 ## Coverage at a glance
 
@@ -97,7 +113,7 @@ ${rows}
 
 ARCHON covered **${r.found} of ${r.totalClasses}** classes and reported **${findings.length}**
 confirmed findings, ${r.extra.length} of them beyond a single example per class. The depth matters:
-it did not simply tick a box per class, it independently reproduced multiple distinct instances,
+it did not simply tick a box per class, it ${MODE.foundVerb} multiple distinct instances,
 including SQL injection authentication bypass, union based injection in product search, JWT
 algorithm confusion and the alg none bypass, stored cross site scripting, mass assignment leading
 to administrator self registration, and exposed cryptographic key material. Every high impact class
@@ -107,7 +123,7 @@ Classes covered: ${foundClasses.map(c => c.id).join(', ') || 'none yet'}.
 
 ## What ARCHON missed
 
-${missedClasses.length === 0 ? 'Nothing. Every class was covered.' : `ARCHON did not surface a confirmed finding for ${missedClasses.length} classes: ${missedClasses.map(c => c.id).join(', ')}. These are the harder to reach or lower signal classes in a pure black box run: open redirect and server side request forgery need a specific reachable sink, XML external entity depends on hitting the file import surface, NoSQL and command injection sit behind less obvious endpoints, and outdated component detection favours a source or dependency view. They are candidates for a focused follow up pass or a white box run.`}
+${missedClasses.length === 0 ? 'Nothing. Every class was covered.' : MODE.missed(missedClasses.length, missedClasses.map(c => c.id).join(', '))}
 
 ## Reading the score
 

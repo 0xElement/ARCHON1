@@ -1,8 +1,22 @@
 # ARCHON benchmark: OWASP Juice Shop
 
-This benchmark measures how much of OWASP Juice Shop ARCHON discovers in a full black box
-pentest. It dispatches a real run against a running Juice Shop instance, then scores the
-findings against a catalog of the vulnerability classes Juice Shop is known to contain.
+This benchmark measures how much of OWASP Juice Shop ARCHON discovers, scored against a catalog
+of the vulnerability classes Juice Shop is known to contain. The same ground truth and scorer
+grade two run types against the same app:
+
+- **Black box** — a live pentest against a running Juice Shop instance.
+- **Static / white-box** — a code review of the Juice Shop source tree.
+
+## Results
+
+| Run type | Class coverage | Findings on board | Report |
+|---|---|---|---|
+| Black box (live) | **12 / 15 (80%)** | 26 | [`RESULTS-blackbox.md`](./RESULTS-blackbox.md) |
+| Static / white-box (source) | **12 / 15 (80%)** | 48 (36 beyond the 15 classes) | [`RESULTS-codereview.md`](./RESULTS-codereview.md) |
+
+Same class coverage from both angles, but the source review goes deeper — reading all the code
+surfaces roughly twice the confirmed findings (YAML-deserialization RCE, JWT algorithm confusion,
+unsalted-MD5 password storage, and more), each pinned to a file and line.
 
 ## What it measures
 
@@ -65,6 +79,29 @@ You can also drive the benchmark from the dashboard instead of the command line:
    This reads that run's findings and prints the same coverage scorecard, then writes
    `benchmark/results-<taskId>.json`. No second dispatch and no waiting.
 
+## Static / white-box benchmark
+
+Score a source code review the same way — no live target needed:
+
+1. Get the Juice Shop source (matches the Docker image):
+
+   ```
+   docker cp juice-shop:/juice-shop ./juice-shop-src   # exact match to the running instance
+   # or: git clone https://github.com/juice-shop/juice-shop
+   ```
+
+2. From the portal, dispatch a **static** review (source directory = the Juice Shop source) — or a
+   **white-box** run (source + the live URL, which then verifies the source findings against the box).
+3. Score it by task id once it completes, and write the visual report:
+
+   ```
+   node benchmark/score-task.js <taskId>
+   node benchmark/report-md.js <taskId> benchmark/RESULTS-codereview.md
+   ```
+
+   `report-md.js` detects the run type from its squad and titles the report accordingly (black-box
+   vs code review), so the same command produces the right report for either.
+
 ## Files
 
 | File | Purpose |
@@ -73,8 +110,9 @@ You can also drive the benchmark from the dashboard instead of the command line:
 | `score.js` | The pure scoring engine. Unit tested in `test/benchmark-score.test.js`. |
 | `run-benchmark.js` | The command line runner: dispatch, wait, score, write results. |
 | `score-task.js` | Score a run you already dispatched (from the portal) by its task id. |
-| `report-md.js` | Generate a markdown benchmark report for a run (`node benchmark/report-md.js <taskId>`), written to `RESULTS-blackbox.md`. |
+| `report-md.js` | Generate a markdown benchmark report for a run (`node benchmark/report-md.js <taskId> [outfile]`). Mode-aware: black-box → `RESULTS-blackbox.md`, code review → `RESULTS-codereview.md`. |
 | `RESULTS-blackbox.md` | The latest black box benchmark result against Juice Shop. |
+| `RESULTS-codereview.md` | The latest static / white-box code-review benchmark result. |
 
 ## Notes
 
