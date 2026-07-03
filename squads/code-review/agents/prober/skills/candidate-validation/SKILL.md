@@ -4,7 +4,7 @@
 Prove or disprove each the code-review specialist candidate against a deployed instance of the target application. CONFIRMED, FALSE_POSITIVE, or INFORMATIONAL per candidate.
 
 ## Inputs
-- Candidate list from `/root/intel/code-review/findings/<taskId>/*-*.jsonl`
+- Candidate list from `<intel-root>/code-review/findings/<taskId>/*-*.jsonl`
 - Deployment details from dispatcher: base URL, test accounts (attacker + victim per role), cookies, CSP headers observed
 - Framework-specific context from prompt (which framework's candidates to focus on)
 
@@ -76,7 +76,7 @@ If the behavior is INTENTIONAL per docs → mark INFORMATIONAL not CONFIRMED.
 - Needs live data to reproduce (access to prod customer's real records)
 
 ## Output Format
-Write to: `/root/intel/code-review/findings/<taskId>/prober-verdicts.jsonl`
+Write to: `<intel-root>/code-review/findings/<taskId>/prober-verdicts.jsonl`
 ```json
 {
   "candidateId": "CT-AC-042",

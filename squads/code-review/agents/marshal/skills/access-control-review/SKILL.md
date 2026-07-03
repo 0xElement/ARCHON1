@@ -2,7 +2,7 @@
 
 **Scope:** Authorization bypass, IDOR, BOLA, BFLA, privilege escalation, missing permission checks, broken role boundaries. NO XSS, NO injection — those are separate frameworks.
 
-**Sourced from:** ARCHON_V0 `frameworks/ACCESS_CONTROL.md` — 26 patterns A through Z, condensed for our code-review squad 2026-04-23. Full pattern text available at `/tmp/archon_v0/frameworks/ACCESS_CONTROL.md` if you need deeper reference.
+**Sourced from:** ARCHON_V0 `frameworks/ACCESS_CONTROL.md` — 26 patterns A through Z, condensed for our code-review squad 2026-04-23.if you need deeper reference.
 
 ---
 
@@ -155,7 +155,7 @@ For each candidate found:
 - Every multi-interface surface (REST/GraphQL/WS/worker) cross-compared
 - No more candidates emerge after 2 full passes
 
-Then: write candidates to `/root/intel/code-review/findings/<taskId>/marshal-access-control.jsonl` and signal done.
+Then: write candidates to `<intel-root>/code-review/findings/<taskId>/marshal-access-control.jsonl` and signal done.
 
 ---
 

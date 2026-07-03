@@ -152,7 +152,7 @@ grep -rn "XSLT\|TransformerFactory\|xsltProcessor" .
 
 ## Output Format
 
-Write to: `/root/intel/code-review/findings/<taskId>/breaker-rce.jsonl`
+Write to: `<intel-root>/code-review/findings/<taskId>/breaker-rce.jsonl`
 
 ```json
 {

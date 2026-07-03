@@ -128,7 +128,7 @@ User uploads SVG → parsed server-side → fetches external URL inside.
 
 ## Output Format
 
-Write to: `/root/intel/code-review/findings/<taskId>/beacon-ssrf.jsonl`
+Write to: `<intel-root>/code-review/findings/<taskId>/beacon-ssrf.jsonl`
 
 ```json
 {

@@ -144,7 +144,7 @@ Headers like `User-Agent` / `Referer` stored to DB unescaped → later rendered 
 
 ## Output Format
 
-Write to: `/root/intel/code-review/findings/<taskId>/quill-sqli.jsonl`
+Write to: `<intel-root>/code-review/findings/<taskId>/quill-sqli.jsonl`
 
 ```json
 {

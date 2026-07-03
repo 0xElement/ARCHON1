@@ -2,7 +2,7 @@
 
 **Scope:** Stored/Reflected/DOM XSS, HTML injection, CSS injection, script gadget chains, CSP bypass, postMessage abuse, DOM clobbering, prototype pollution leading to XSS, mXSS, file-upload XSS.
 
-**Sourced from:** ARCHON_V0 `frameworks/XSS_CLIENT_SIDE.md` — 12 patterns, condensed 2026-04-23. Full reference at `/tmp/archon_v0/frameworks/XSS_CLIENT_SIDE.md`.
+**Sourced from:** ARCHON_V0 `frameworks/XSS_CLIENT_SIDE.md` — 12 patterns, condensed 2026-04-23.
 
 ---
 
@@ -140,7 +140,7 @@ User-controlled CSS (e.g. custom theme, user bio with unescaped `style`) → use
 ## Output Format
 Same JSON schema as other frameworks. `framework:"xss"`, `pattern:"P-<N>"`.
 
-Write to: `/root/intel/code-review/findings/<taskId>/cipher-xss.jsonl`
+Write to: `<intel-root>/code-review/findings/<taskId>/cipher-xss.jsonl`
 
 ## Verification Notes
 - An XSS is only CONFIRMED when `<script>alert(document.domain)</script>` or equivalent executes in the browser AND reaches OTHER users (not self).

@@ -168,12 +168,14 @@ Inventory:
 - flash/error/redirect message rendering
 - preview endpoints
 
-Search examples:
+Search examples (run against the whole provided source root `.`; the sink names below are examples —
+apply the equivalents for the target's stack, e.g. Rails `raw`/`html_safe`, Python/Jinja `mark_safe`/
+`|safe`/autoescape-off, PHP `echo`/`print`, .NET `Html.Raw`, JS `innerHTML`/`dangerouslySetInnerHTML`):
 
 ```bash
-grep -RIn "render\|redirect_to\|flash\|respond_to\|format.html\|format.json" app/controllers ee/app/controllers
-find app/views ee/app/views -type f
-grep -RIn "raw\|html_safe\|safe_join\|sanitize\|simple_format\|link_to\|content_tag\|tag\." app/helpers ee/app/helpers app/views ee/app/views
+grep -RIn "render\|redirect_to\|flash\|respond_to\|res\.send\|res\.render\|template\|format.html\|format.json" .
+find . -type f \( -name "*.erb" -o -name "*.html*" -o -name "*.vue" -o -name "*.jsx" -o -name "*.tsx" -o -name "*.twig" -o -name "*.blade.php" \)
+grep -RIn "raw\|html_safe\|safe_join\|sanitize\|simple_format\|link_to\|content_tag\|mark_safe\|Html.Raw" .
 ```
 
 ### 2. REST API / Grape Responses
@@ -191,7 +193,7 @@ Inventory:
 Search examples:
 
 ```bash
-grep -RIn "present \|expose \|entity \|error!\|render_api_error\|params\[" lib/api ee/lib/api app/entities ee/app/entities
+grep -RIn "present \|expose \|entity \|serialize\|error!\|render_api_error\|res.json\|params\[\|req\.\(query\|body\|params\)" .
 ```
 
 ### 3. GraphQL Responses
@@ -210,8 +212,8 @@ Inventory:
 Search examples:
 
 ```bash
-find app/graphql ee/app/graphql -type f
-grep -RIn "field \|mutation\|resolver\|resolve\|authorize\|markdown\|html\|description\|title\|name" app/graphql ee/app/graphql
+find . -type f -path "*graphql*"
+grep -RIn "field \|mutation\|resolver\|resolve\|authorize\|markdown\|html\|description\|title\|name" .
 ```
 
 ### 4. Frontend / Client-Side Rendering
@@ -235,7 +237,7 @@ Inventory:
 Search examples:
 
 ```bash
-grep -RIn "v-html\|innerHTML\|outerHTML\|insertAdjacentHTML\|dangerouslySetInnerHTML\|\.html(\|DOMPurify\|sanitize\|escape" app/assets app/javascript ee/app/assets ee/app/javascript
+grep -RIn "v-html\|innerHTML\|outerHTML\|insertAdjacentHTML\|dangerouslySetInnerHTML\|\.html(\|DOMPurify\|sanitize\|escape" .
 ```
 
 ### 5. Markdown / Rich Text / HTML Pipeline
@@ -295,8 +297,8 @@ Inventory:
 Search examples:
 
 ```bash
-find app/views ee/app/views -path "*mailer*" -o -path "*emails*"
-grep -RIn "mail\|notification\|webhook\|system_note\|event\|audit" app ee lib
+find . -type f \( -path "*mailer*" -o -path "*email*" -o -path "*template*" \)
+grep -RIn "mail\|notification\|webhook\|event\|audit\|render" .
 ```
 
 ### 8. Search / Highlight / Autocomplete Rendering

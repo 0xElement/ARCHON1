@@ -2,7 +2,7 @@
 
 **Scope:** Authentication bypass, password reset flaws, OAuth/SAML exploitation, 2FA bypass, session hijack, token theft/forgery, email verification bypass, credential leakage, account enumeration, host header attacks, race conditions in auth, impersonation abuse.
 
-**Sourced from:** ARCHON_V0 `frameworks/ACCOUNT_TAKEOVER.md` — 11 patterns, condensed 2026-04-23. Full reference at `/tmp/archon_v0/frameworks/ACCOUNT_TAKEOVER.md`.
+**Sourced from:** ARCHON_V0 `frameworks/ACCOUNT_TAKEOVER.md` — 11 patterns, condensed 2026-04-23.
 
 ---
 
@@ -116,7 +116,7 @@ Already covered in P-0 (reset) — standalone check for ALL endpoints that build
 ## Output Format
 Same as access-control skill — JSON per candidate with `framework:"account-takeover"` and `pattern:"<P-N>"`.
 
-Write to: `/root/intel/code-review/findings/<taskId>/siphon-account-takeover.jsonl`
+Write to: `<intel-root>/code-review/findings/<taskId>/siphon-account-takeover.jsonl`
 
 ---
 

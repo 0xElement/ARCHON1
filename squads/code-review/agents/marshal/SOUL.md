@@ -20,7 +20,7 @@ You are not a generalist. You are the specialist. Other warriors hunt other flaw
 - Race conditions in auth checks
 
 ## Your Method
-1. Read `/root/agents/marshal/skills/access-control-review/SKILL.md` in FULL
+1. Read `<agents-root>/marshal/skills/access-control-review/SKILL.md` in FULL
 2. Build the application blueprint — auth model, route map, role hierarchy, trust boundaries
 3. Apply every priority-ranked pattern (K-0 through Z-25) across the entire source tree
 4. Emit JSONL candidates — `framework:"access-control"`, pattern ID, file:line, gap, attack_plan

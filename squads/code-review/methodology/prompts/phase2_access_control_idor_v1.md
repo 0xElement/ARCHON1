@@ -1841,7 +1841,7 @@ Review move, transfer, reassign, link, unlink, clone, import, retarget, retry, a
 
 Look for raw object lookup without scoping to current user or without post-fetch authorization.
 
-Review user-controlled IDs such as project_id, group_id, namespace_id, user_id, issue_id, merge_request_id, epic_id, note_id, runner_id, job_id, pipeline_id, artifact_id, token_id, environment_id, deployment_id, package_id, file_path, branch, tag, ref, sha, gid, and global_id.
+Review any user-controlled identifier that selects a record — e.g. user_id, account_id, org_id, team_id, project_id, group_id, order_id, invoice_id, document_id, file_id, record_id, token_id, session_id, resource_id, uuid/global id, file_path, slug, ref, and any `*_id` parameter — i.e. whatever object identifiers the target's own domain model exposes.
 
 ## Pattern C: Parent Auth Without Child Auth
 
@@ -1959,31 +1959,31 @@ Review permission caches, Redis caches, session-stored roles, JWT claims, memoiz
 
 ## Pattern 30: Search / Index Authorization Mismatch
 
-Review global search, project search, group search, advanced search, Elasticsearch indexing, snippets, issues, MRs, code search, package search, and AI semantic search.
+Review global/tenant/scoped search, autocomplete, and any indexed search backend (e.g. Elasticsearch/OpenSearch) — any "search across all records" endpoint that may return objects the caller cannot directly access.
 
 ## Pattern 31: Export / Report / Archive Authorization Bypass
 
-Review project export, group export, user export, compliance reports, audit reports, CSV exports, pipeline artifacts, archive downloads, package archives, and generated bundles.
+Review data exports (CSV/JSON/PDF), reports (compliance/audit/usage/analytics), archive and bundle downloads, generated artifacts, and any "download all / export everything" endpoint.
 
 ## Pattern 32: Notification / Email / Webhook Data Leak
 
-Review emails, notifications, webhooks, system hooks, Slack integrations, Jira integrations, issue-by-email, service desk, and alerting.
+Review emails, notifications, webhooks/system hooks, third-party integrations (chat / ticketing / alerting), inbound-email handlers, and any outbound message that may embed data the recipient should not see.
 
 ## Pattern 33: Admin Mode / Elevated Session Bypass
 
-Review admin-only operations and admin mode enforcement across Web, REST API, GraphQL, workers, and tokens.
+Review admin-only operations and admin mode enforcement across Web, REST API, GraphQL, background jobs, and tokens.
 
 ## Pattern 34: Visibility Change Does Not Cascade
 
-Review project/group/resource visibility changes and whether caches, forks, exports, artifacts, packages, pages, wikis, snippets, search indexes, and archives update correctly.
+Review visibility/permission changes on a resource and whether all derived copies update correctly — caches, forks/copies, exports, generated artifacts, child and linked objects, published pages, and search indexes.
 
 ## Pattern 35: Relationship Mutation Without Dual-Side Authorization
 
-Review actions that connect two objects, such as issue-to-epic, runner-to-project, vulnerability-to-issue, project-to-group, project sharing, deploy key linking, environment/deployment linking, and package/artifact linking.
+Review actions that link or associate two objects (child-to-parent, resource sharing, key/credential linking, cross-object references, membership grants) where authorization is checked on only one side.
 
 ## Pattern 36: Indirect Privileged Action Trigger
 
-Review actions where a low-privileged user can indirectly trigger privileged behavior through pipelines, bots, workers, mirrors, imports, exports, webhooks, scans, policies, deployments, or notifications.
+Review actions where a low-privileged user can indirectly trigger privileged behavior through background jobs, bots, imports/exports, webhooks, scheduled tasks, scans, policies, deployments, or notifications.
 
 ## Pattern 37: Serializer / Entity / Presenter Field Leak
 
@@ -1991,11 +1991,11 @@ Review REST entities, serializers, presenters, GraphQL types, view models, front
 
 ## Pattern 38: Count / Aggregate / Metadata Leak
 
-Review counts, badges, dashboard widgets, statistics, analytics, health status, pipeline status, issue counts, MR counts, vulnerability counts, package counts, and search counts.
+Review counts, badges, dashboard widgets, statistics/analytics, and status/health endpoints that may reveal the existence or volume of records the caller cannot directly access.
 
 ## Pattern 39: License / Plan / Feature Entitlement Bypass
 
-Review licensed/paid features, namespace entitlements, subscription checks, trial/expired plan behavior, frontend-only restrictions, API/GraphQL bypass, and background job bypass.
+Review licensed/paid features, tenant/account entitlements, subscription checks, trial/expired plan behavior, frontend-only restrictions, API/GraphQL bypass, and background-job bypass.
 
 ## Pattern 40: Unmapped Shared Infrastructure Used by Feature
 

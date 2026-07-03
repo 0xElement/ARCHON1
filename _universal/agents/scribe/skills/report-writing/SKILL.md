@@ -7,7 +7,7 @@
 ## Platform-Specific Templates (Bug Bounty)
 For HackerOne, Bugcrowd, Intigriti, and Immunefi (Web3) report formats:
 ```
-cat /root/agents/scribe/skills/report-writing/references/platform-templates.md
+cat <agents-root>/scribe/skills/report-writing/references/platform-templates.md
 ```
 Includes: per-platform templates, CVSS quick reference, impact language patterns, title formulas, escalation phrases, and a Immunefi/Web3 Foundry PoC template.
 

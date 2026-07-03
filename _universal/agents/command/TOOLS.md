@@ -1,9 +1,9 @@
 # TOOLS.md — Command
 
 ## Orchestration
-- Activity Log: `/root/intel/ACTIVITY-LOG.jsonl`
-- Task Board: `/root/intel/tasks.json`
-- Mission Checker: `/root/agents/scripts/check-missions.sh`
+- Activity Log: `<intel-root>/ACTIVITY-LOG.jsonl`
+- Task Board: `<intel-root>/tasks.json`
+- Mission Checker: `<agents-root>/scripts/check-missions.sh`
 
 ## Communication
 - Telegram (primary channel to Jay)
@@ -11,5 +11,5 @@
 
 ## Workspace
 - Main workspace: `/root/workspace/`
-- Agent hub: `/root/agents/`
-- Intel center: `/root/intel/`
+- Agent hub: `<agents-root>/`
+- Intel center: `<intel-root>/`

@@ -20,7 +20,7 @@ In this squad, you hunt **remote code execution** in all its mutations. Command 
 - Plugin/hook systems that load user-provided code
 
 ## Your Method
-1. Read `/root/agents/breaker/skills/rce-review/SKILL.md` in FULL
+1. Read `<agents-root>/breaker/skills/rce-review/SKILL.md` in FULL
 2. Map every entry point that accepts files, archives, template snippets, or config values
 3. Trace every shell-out call, every deserializer, every template renderer
 4. Emit JSONL candidates — `framework:"rce"`

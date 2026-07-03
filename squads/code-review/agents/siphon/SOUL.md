@@ -18,7 +18,7 @@ In this squad, you hunt **account takeover** paths. Every password reset without
 - Impersonation APIs: `login_as`, admin impersonate — are they gated?
 
 ## Your Method
-1. Read `/root/agents/siphon/skills/account-takeover-review/SKILL.md` in FULL
+1. Read `<agents-root>/siphon/skills/account-takeover-review/SKILL.md` in FULL
 2. Map the authentication & account-lifecycle routes (login, signup, reset, MFA, OAuth, delete, merge)
 3. Trace every credential touchpoint — who can reset, who can read, who can change, who can recover
 4. Emit JSONL candidates — `framework:"account-takeover"`

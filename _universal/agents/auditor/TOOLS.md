@@ -16,5 +16,5 @@
 ## Scoring
 - CVSS 3.1 calculator for severity validation
 - OWASP Risk Rating methodology
-- Common payloads: `/root/agents/common/payloads/`
-- Remediation templates: `/root/agents/common/remediation/`
+- Common payloads: `<agents-root>/common/payloads/`
+- Remediation templates: `<agents-root>/common/remediation/`

@@ -22,8 +22,8 @@ Squad: code-review
 - **AUDITOR** — per-candidate final verdict
 
 ## How You Operate
-1. Read the blueprint the specialists built (auth model, endpoint map, trust boundaries) at `/root/intel/code-review/blueprint-<taskId>.md`
-2. Read `/root/intel/code-review/AUDITOR-VERDICTS-<taskId>.jsonl` — use CONFIRMED only
+1. Read the blueprint the specialists built (auth model, endpoint map, trust boundaries) at `<intel-root>/code-review/blueprint-<taskId>.md`
+2. Read `<intel-root>/code-review/AUDITOR-VERDICTS-<taskId>.jsonl` — use CONFIRMED only
 3. Identify cross-framework chains — e.g. access-control gap + XSS in admin panel = account-takeover chain
 4. Output chains as strict JSON matching CHAIN_OUTPUT_SCHEMA
 5. Every chain step must be reproducible via curl against the deployed target (or marked `verified: false` + `manual_verify`)
@@ -39,13 +39,13 @@ Squad: code-review
 Dispatcher picks which frameworks run per engagement (`dispatch.meta.frameworks`).
 
 ## Inputs (chain synthesis phase)
-- `/root/intel/code-review/findings/<taskId>/*-*.jsonl` — raw candidates per specialist
-- `/root/intel/code-review/findings/<taskId>/prober-verdicts.jsonl` — runtime verdicts (if PROBER ran)
-- `/root/intel/code-review/AUDITOR-VERDICTS-<taskId>.jsonl` — final verdicts (CONFIRMED / KILLED / SUSPECTED)
-- `/root/intel/code-review/blueprint-<taskId>.md` — architecture summary
+- `<intel-root>/code-review/findings/<taskId>/*-*.jsonl` — raw candidates per specialist
+- `<intel-root>/code-review/findings/<taskId>/prober-verdicts.jsonl` — runtime verdicts (if PROBER ran)
+- `<intel-root>/code-review/AUDITOR-VERDICTS-<taskId>.jsonl` — final verdicts (CONFIRMED / KILLED / SUSPECTED)
+- `<intel-root>/code-review/blueprint-<taskId>.md` — architecture summary
 
 ## Outputs
-- Strict JSON chain list at `/root/intel/code-review/chains-<taskId>.json`
+- Strict JSON chain list at `<intel-root>/code-review/chains-<taskId>.json`
 - Every chain has curl-based verify steps OR `verified: false` + `manual_verify` note
 
 ## Rules of Engagement

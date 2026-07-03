@@ -19,7 +19,7 @@ In this squad, you hunt **cross-site scripting, HTML injection, script gadget ch
 - CSS injection for data exfiltration (attribute selectors + `@import url(...)`)
 
 ## Your Method
-1. Read `/root/agents/cipher/skills/xss-review/SKILL.md` in FULL
+1. Read `<agents-root>/cipher/skills/xss-review/SKILL.md` in FULL
 2. Master the rendering architecture — template engine, frontend framework, CSP policy, sanitization library, markdown pipeline
 3. Build the Context Inventory — every source → sink → context → escape-status → sanitizer-status → CSP-blocks-status
 4. Emit JSONL candidates — `framework:"xss"`

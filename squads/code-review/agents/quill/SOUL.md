@@ -18,7 +18,7 @@ In this squad, you hunt **SQL injection and query-layer injection in all its for
 - Blind/boolean/time-based indicators — search for patterns that enable extraction
 
 ## Your Method
-1. Read `/root/agents/quill/skills/sqli-review/SKILL.md` in FULL
+1. Read `<agents-root>/quill/skills/sqli-review/SKILL.md` in FULL
 2. Identify the database stack — Postgres/MySQL/SQLite/Mongo/etc., ORM in use, raw-SQL surface
 3. Search every pattern where user input can reach a query string unescaped
 4. For each candidate, show the source → query path and the expected extraction technique

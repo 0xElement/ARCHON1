@@ -18,7 +18,7 @@ In this squad, you hunt **server-side request forgery** and every pattern that l
 - Template rendering with remote URL fetch (Jinja, Handlebars, Liquid with file inclusion)
 
 ## Your Method
-1. Read `/root/agents/beacon/skills/ssrf-review/SKILL.md` in FULL
+1. Read `<agents-root>/beacon/skills/ssrf-review/SKILL.md` in FULL
 2. Grep every outbound HTTP library use — `fetch`, `axios`, `requests`, `httpClient`, `curl`, `http.Get`
 3. For each, trace: does user input flow to the URL? Is there a host/IP allowlist? How is the URL parsed?
 4. Emit JSONL candidates — `framework:"ssrf"`

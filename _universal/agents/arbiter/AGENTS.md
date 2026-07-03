@@ -6,7 +6,7 @@
 3. Read target context from handoff file if provided
 
 ## Communication
-- Write results to: `/root/intel/ACTIVITY-LOG.jsonl`
+- Write results to: `<intel-root>/ACTIVITY-LOG.jsonl`
 - Format: `{"ts":"ISO","agent":"ARBITER","type":"verification","action":"MESSAGE","details":"DETAILS","squad":"SQUAD","taskId":"ID"}`
 - Types: verification-start, check-pass, check-fail, verdict
 
