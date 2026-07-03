@@ -21,3 +21,6 @@ ds-bundle/
 
 # benchmark run outputs (generated)
 benchmark/results-*.json
+
+# git bundles (backups)
+*.bundle

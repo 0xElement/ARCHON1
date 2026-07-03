@@ -168,5 +168,16 @@ for (const name of TOUCH) {
   info('touched ' + name)
 }
 
+// Enable the secret/PII pre-commit hook (defense in depth for OSS). Fail-soft: outside a git
+// checkout (e.g. a release tarball) this is simply skipped.
+try {
+  const cp = require('child_process')
+  const inGit = cp.execSync('git rev-parse --is-inside-work-tree', { cwd: __dirname + '/..', stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() === 'true'
+  if (inGit) {
+    cp.execSync('git config core.hooksPath .githooks', { cwd: __dirname + '/..' })
+    console.log('🔒 secret-scan pre-commit hook enabled (core.hooksPath=.githooks)')
+  }
+} catch { /* not a git checkout — skip */ }
+
 console.log('\n✅ Local data layer ready at ' + INTEL)
-console.log('   Next: npm run verify   (gate suite)   ·   npm start   (daemon)')
+console.log('   Next: npm test   ·   npm start (daemon)   ·   npm run dashboard (portal → :4000)')

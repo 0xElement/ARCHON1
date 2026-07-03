@@ -21,6 +21,7 @@
     "dashboard": "node scripts/dashboard.js",
     "pretest": "node scripts/setup-local.js || true",
     "test": "node test/run-all.js",
+    "scan": "node scripts/scan-secrets.js",
     "benchmark": "node benchmark/run-benchmark.js",
     "test:ui": "bash scripts/e2e.sh",
     "test:bun": "bun test",
