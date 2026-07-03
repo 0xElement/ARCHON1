@@ -254,7 +254,6 @@ it was fixed in GitLab's May 2026 security release and assigned
 
 - **CVE:** [CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)
 - **GitLab advisory:** [patch release 18.11.3 · 2026-05-13](https://about.gitlab.com/releases/2026/05/13/patch-release-gitlab-18-11-3-released/)
-- **Public report:** [hackerone.com/reports/3597717](https://hackerone.com/reports/3597717)
 
 That's exactly the class ARCHON's code-review squad specializes in — the same access-control depth ships
 as MARSHAL's 40-pattern access-control catalog.

@@ -21,8 +21,7 @@ unsalted-MD5 password storage, and more), each pinned to a file and line.
 > **Beyond the benchmark — a real CVE.** ARCHON's white-box review also found a real broken-access-control
 > flaw in a production codebase, reported to GitLab via HackerOne and fixed as
 > [CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524) (CVSS 6.5) —
-> [GitLab advisory](https://about.gitlab.com/releases/2026/05/13/patch-release-gitlab-18-11-3-released/) ·
-> [report](https://hackerone.com/reports/3597717).
+> [GitLab advisory](https://about.gitlab.com/releases/2026/05/13/patch-release-gitlab-18-11-3-released/).
 
 ## What it measures
 
