@@ -16,8 +16,8 @@ const { extractFirstUrl } = require('../agents/url-extractor')
 
 test('extractFirstUrl: returns URL when present in text', () => {
   assert.strictEqual(
-    extractFirstUrl('curl -sI https://host.example.com/eticket/login'),
-    'https://host.example.com/eticket/login'
+    extractFirstUrl('curl -sI https://uat-portal.example.com/eticket/login'),
+    'https://uat-portal.example.com/eticket/login'
   )
 })
 
@@ -64,6 +64,6 @@ test('extractFirstUrl: trims trailing punctuation (. , ; : ) ])', () => {
 })
 
 test('extractFirstUrl: AUDITOR-realistic detail text', () => {
-  const detail = `Confirmed via curl: curl -sI 'https://host.example.com/eticket/login' returned 200 with X-Powered-By header.`
-  assert.strictEqual(extractFirstUrl(detail), 'https://host.example.com/eticket/login')
+  const detail = `Confirmed via curl: curl -sI 'https://uat-portal.example.com/eticket/login' returned 200 with X-Powered-By header.`
+  assert.strictEqual(extractFirstUrl(detail), 'https://uat-portal.example.com/eticket/login')
 })

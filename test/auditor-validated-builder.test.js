@@ -23,7 +23,7 @@ const {
 } = require('../agents/auditor-validated-builder')
 
 // Real AUDITOR action lines pulled from /root/intel/ACTIVITY-LOG.jsonl after
-// round-10 host.example.com (taskId 1778467022281). The em-dash is the
+// round-10 webvpn.us.example.com (taskId 1778467022281). The em-dash is the
 // actual character used by AUDITOR's prompt template.
 const auditor_ACTIONS = [
   'CONFIRMED — F-001: No Account Lockout on VPN Authentication',
@@ -34,7 +34,7 @@ const auditor_ACTIONS = [
   'CONFIRMED — F-008: Tarpit Bypass via Global VPN Node Cluster — 30+ Nodes Share ISE Backend With No Rate Limiting',
   'KILLED — F-010: CSRF Token Validation Absent on Login Endpoint (DECOY 3-way test)',
   'SELF_EVAL: 8/10 — Comprehensive validation with 15 independent probes',
-  'Validation Summary — Task 1778467022281 (host.example.com round-10)',
+  'Validation Summary — Task 1778467022281 (webvpn.us.example.com round-10)',
   '💰 Cost: $0.8177',
 ]
 

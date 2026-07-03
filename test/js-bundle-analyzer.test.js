@@ -20,15 +20,15 @@ const {
   readJsUrlsForTask,
 } = require('../agents/js-bundle-analyzer')
 
-// Realistic JS bundle fragment modeled on the actual vendorapp SPA bundle we
-// reverse-engineered in the 2026-05-11 session.
+// Realistic JS bundle fragment modeled on a typical SPA bundle (endpoints in the
+// router/fetch/axios calls, plus internal-host and build-metadata leaks in the header).
 const SAMPLE_BUNDLE = `
 /*
- * @@Copyright (c): vendorapp All rights reserved.
+ * @@Copyright (c): VendorApp All rights reserved.
  * @Description: Environment variables
  * @Author: dev@example.com
  * @LastEditors: dev@example.com
- * @FilePath: /client-h5-v2/public/index.html
+ * @FilePath: /app/public/index.html
  */
 const router = {
   push: function(p) { return fetch('/api/v1/auth/query'); }
@@ -37,12 +37,12 @@ axios.post('/api/v1/chatLog/sync', payload);
 axios.post('/api/v1/printLog', logEntry);
 axios.get('/api/v1/config/query');
 fetch("/api/v1/deviceHelp/pullMessage", { method: "POST" });
-const apiBase = "https://host.example.com/callcenterv2";
-const testHost = "https://host.example.com";
+const apiBase = "https://api.internal.example.com/service";
+const testHost = "https://test.internal.example.com";
 const internalAdmin = "http://10.0.0.5:8080/admin";
-const cnHost = "https://host.example.com";
+const cnHost = "https://vpn-01.internal.example.com";
 window.botV2GlobalProperties = {
-  MF_API_HOST: 'https://host.example.com',
+  MF_API_HOST: 'https://api.partner.example.com',
 };
 // Note: dev.api.example.internal used for staging
 `
@@ -93,26 +93,26 @@ test('extractApiEndpoints handles null/empty/non-string gracefully', () => {
 
 test('extractUrls finds absolute URLs (incl. internal-hint hosts)', () => {
   const urls = extractUrls(SAMPLE_BUNDLE)
-  assert.ok(urls.some(u => u.includes('host.example.com')))
-  assert.ok(urls.some(u => u.includes('host.example.com')))
-  assert.ok(urls.some(u => u.includes('host.example.com')))
-  assert.ok(urls.some(u => u.includes('host.example.com')))
+  assert.ok(urls.some(u => u.includes('api.internal.example.com')))
+  assert.ok(urls.some(u => u.includes('test.internal.example.com')))
+  assert.ok(urls.some(u => u.includes('vpn-01.internal.example.com')))
+  assert.ok(urls.some(u => u.includes('api.partner.example.com')))
 })
 
 test('extractInternalHints flags RFC1918 IPs and .internal / dev. hosts', () => {
   const hints = extractInternalHints(SAMPLE_BUNDLE)
   assert.ok(hints.some(h => /10\.0\.0\.5/.test(h)))
-  // The "host.example.com" should match the dev/test prefix pattern
-  const hasTestHost = hints.some(h => /test\.cube\.example\.com/.test(h))
+  // The "test.internal.example.com" should match the dev/test prefix pattern
+  const hasTestHost = hints.some(h => /test\.internal\.example\.com/.test(h))
   // Either it matches or the bundle simply doesn't trigger our pattern shape — both OK,
   // the goal is that RFC1918 ALWAYS works.
   assert.ok(hasTestHost || hints.length >= 1)
 })
 
-test('extractBuildMetadata captures developer-identity leaks (the dev case)', () => {
+test('extractBuildMetadata captures developer-identity leaks (author/path in bundle header)', () => {
   const meta = extractBuildMetadata(SAMPLE_BUNDLE)
   assert.ok(meta.some(m => m.includes('Author: dev@example.com')))
-  assert.ok(meta.some(m => m.includes('FilePath: /client-h5-v2/public/index.html')))
+  assert.ok(meta.some(m => m.includes('FilePath: /app/public/index.html')))
 })
 
 test('analyzeJsBundle returns the full analysis object', () => {

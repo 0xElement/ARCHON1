@@ -38,13 +38,13 @@ test('rejects expired permission', () => {
 test('targetInScope: glob and exact', () => {
   const perm = {
     permission_id: 'p', issued_by: 'jay', valid_until: '2099-01-01T00:00:00Z',
-    scope_domains: ['*host.example.com', 'aws.amazon.com'],
-    scope_excludes: ['host.example.com'],
+    scope_domains: ['*.example.com', 'aws.amazon.com'],
+    scope_excludes: ['billing.example.com'],
     capabilities: ['x'], max_total_probes: 10, max_per_finding: 2,
   }
-  assert.strictEqual(policy.targetInScope('host.example.com', perm), true)
+  assert.strictEqual(policy.targetInScope('webvpn.us.example.com', perm), true)
   assert.strictEqual(policy.targetInScope('aws.amazon.com', perm), true)
-  assert.strictEqual(policy.targetInScope('host.example.com', perm), false)
+  assert.strictEqual(policy.targetInScope('billing.example.com', perm), false)
   assert.strictEqual(policy.targetInScope('evil.com', perm), false)
 })
 

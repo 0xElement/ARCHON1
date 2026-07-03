@@ -24,11 +24,11 @@ Here is my analysis. I found PII flowing to a foreign host.
 target_squad: cloud-security
 target_capability: data-residency
 source_finding_id: ASH-CONFIG-001
-question: Is PII flowing to host.example.com a GDPR violation?
+question: Is PII flowing to api.partner.example.com a GDPR violation?
 evidence:
-  api_host: host.example.com
-  config_url: https://host.example.com/callcenterv2/config.js
-  dns_chain: host.example.com → it-hw-waf → Huawei Cloud China
+  api_host: api.partner.example.com
+  config_url: https://api.internal.example.com/callcenterv2/config.js
+  dns_chain: api.partner.example.com → edge-waf → a third-party cloud provider
 expected_artifacts: compliance-verdict, geographic-routing-confirmation
 >>
 
@@ -52,7 +52,7 @@ target_capability: dns-attribution
 source_finding_id: ASH-DNS-002
 question: Is this DNS chain attacker-controlled?
 evidence:
-  dns_chain: foo.bar → it-hw-waf
+  dns_chain: foo.bar → edge-waf
 expected_artifacts: dns-verdict
 >>\n`
   const markers = extractHandoffMarkers(txt)

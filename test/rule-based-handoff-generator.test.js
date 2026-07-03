@@ -108,7 +108,7 @@ test('supply-chain rule fires on third-party / dependency / takeover signals (in
   const cases = [
     { severity: 'high', details: 'supply chain risk via npm package outdated' },
     { severity: 'high', url: 'https://cdn.jsdelivr.net/foo.js' },
-    { severity: 'critical', details: 'subdomain takeover on host.example.com exfiltrates JS context' },
+    { severity: 'critical', details: 'subdomain takeover on api.partner.example.com exfiltrates JS context' },
     { severity: 'high', reproduction_method: 'GET /third-party/integration' },
   ]
   for (const f of cases) {

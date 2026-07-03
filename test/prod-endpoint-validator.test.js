@@ -2,8 +2,8 @@
 //
 // Validates that findings claiming PROD impact actually validated against
 // production endpoints (not sandbox/test/uat). Q#8 (2026-05-15) shipped
-// "F-002 PROD PayPal CRITICAL" where AUDITOR validated against
-// api.sandbox.paypal.com — confirmed false-positive once Jay tested PROD
+// "F-002 PROD Example CRITICAL" where AUDITOR validated against
+// api.sandbox.example.com — confirmed false-positive once the operator tested PROD
 // (invalid_client). This validator catches that mismatch programmatically.
 
 const assert = require('node:assert')
@@ -11,24 +11,24 @@ const { test } = require('node:test')
 const pev = require('../agents/prod-endpoint-validator')
 
 test('production hostname → production', () => {
-  const r = pev.classifyEndpoint('https://api.paypal.com/v1/oauth2/token')
+  const r = pev.classifyEndpoint('https://api.example.com/v1/oauth2/token')
   assert.strictEqual(r.kind, 'production')
 })
 
-test('sandbox PayPal → sandbox', () => {
-  const r = pev.classifyEndpoint('https://api.sandbox.paypal.com/v1/oauth2/token')
+test('sandbox Example → sandbox', () => {
+  const r = pev.classifyEndpoint('https://api.sandbox.example.com/v1/oauth2/token')
   assert.strictEqual(r.kind, 'sandbox')
   assert.match(r.signal, /sandbox/i)
 })
 
 test('UAT subdomain → uat', () => {
-  const r = pev.classifyEndpoint('https://host.example.com/management/configprops')
+  const r = pev.classifyEndpoint('https://payment-uat.dev.internal.example.com/management/configprops')
   assert.strictEqual(r.kind, 'uat')
   assert.match(r.signal, /uat/i)
 })
 
 test('dev subdomain → dev', () => {
-  const r = pev.classifyEndpoint('https://host.example.com/auth')
+  const r = pev.classifyEndpoint('https://api-dev.example.com/auth')
   assert.strictEqual(r.kind, 'dev')
 })
 
@@ -66,9 +66,9 @@ test('auditFindings flags PROD-claim against sandbox validation', () => {
   const findings = [
     {
       id: 'F-001', severity: 'Critical',
-      title: 'PROD PayPal credentials valid',
-      url: 'https://api.sandbox.paypal.com/v1/oauth2/token',
-      details: 'Successfully obtained access token from PROD PayPal',
+      title: 'PROD Example credentials valid',
+      url: 'https://api.sandbox.example.com/v1/oauth2/token',
+      details: 'Successfully obtained access token from PROD Example',
     },
   ]
   const audited = pev.auditFindings(findings)
@@ -102,7 +102,7 @@ test('auditFindings flags Critical even if title is generic (severity alone is e
   const findings = [{
     id: 'F-004', severity: 'Critical',
     title: 'Credential exposure',
-    url: 'https://api.sandbox.paypal.com/v1/oauth2/token',
+    url: 'https://api.sandbox.example.com/v1/oauth2/token',
   }]
   const audited = pev.auditFindings(findings)
   // Critical severity + sandbox endpoint = warning, regardless of title

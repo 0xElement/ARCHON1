@@ -32,7 +32,7 @@ test('Inbox/done/failed paths point at /root/intel/handoffs/<sub>/', () => {
   assert.strictEqual(HANDOFFS_FAILED_DIR, (__roots.INTEL_ROOT + '/handoffs/failed'))
 })
 
-test('Locked-decision constants match Jay 2026-05-10 design', () => {
+test('Locked-decision constants match the operator 2026-05-10 design', () => {
   assert.strictEqual(MAX_HANDOFFS_PER_FINDING, 3)
   assert.strictEqual(MAX_CHAIN_DEPTH, 2)
   assert.strictEqual(DEFAULT_HANDOFF_BUDGET_USD, 0.50)
@@ -56,7 +56,7 @@ test('createHandoff: writes a JSON file to inbox dir', () => {
       targetCapability: 'data-residency',
       request: {
         question: 'Is this PII flow legal?',
-        evidence: { api_host: 'host.example.com' },
+        evidence: { api_host: 'api.partner.example.com' },
       },
     }, { baseDir: tmpBase })
     assert.ok(result.handoff_id, 'handoff_id must be set')

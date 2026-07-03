@@ -15,16 +15,16 @@ const sv = require('../agents/scope-validator')
 
 const SCOPE = Object.freeze({
   in_scope: [
-    'host.example.com',
-    'host.example.com',
-    'host.example.com',
-    '*host.example.com',
+    'www.example.com',
+    'account.example.com',
+    'www.example.com',
+    '*.support.example.com',
   ],
   // Infrastructure-dependency: hosts NOT in scope but the listed dependents
   // ARE in scope and demonstrably depend on the host.
   infra_dependencies: {
-    'host.example.com': ['host.example.com'],
-    'host.example.com': ['host.example.com'],
+    'payment-prod.internal.example.com': ['www.example.com'],
+    'payment-uat.dev.internal.example.com': ['www.example.com'],
   },
 })
 
@@ -33,20 +33,20 @@ function findingFor(url) {
 }
 
 test('exact host match → in-scope', () => {
-  const r = sv.validateFindingScope(findingFor('https://host.example.com/order/history'), SCOPE)
+  const r = sv.validateFindingScope(findingFor('https://www.example.com/order/history'), SCOPE)
   assert.strictEqual(r.status, 'in-scope')
   assert.match(r.reason, /exact match/i)
 })
 
 test('wildcard subdomain match → in-scope', () => {
-  const r = sv.validateFindingScope(findingFor('https://host.example.com/api'), SCOPE)
+  const r = sv.validateFindingScope(findingFor('https://help.support.example.com/api'), SCOPE)
   assert.strictEqual(r.status, 'in-scope')
   assert.match(r.reason, /wildcard/i)
 })
 
 test('host with explicit infra dependency → infrastructure-dependency', () => {
   const r = sv.validateFindingScope(
-    findingFor('https://host.example.com/management/configprops'),
+    findingFor('https://payment-uat.dev.internal.example.com/management/configprops'),
     SCOPE,
   )
   assert.strictEqual(r.status, 'infrastructure-dependency')
@@ -65,14 +65,14 @@ test('missing URL → out-of-scope (fail-safe)', () => {
 })
 
 test('empty scope → all findings out-of-scope', () => {
-  const r = sv.validateFindingScope(findingFor('https://host.example.com/x'), { in_scope: [], infra_dependencies: {} })
+  const r = sv.validateFindingScope(findingFor('https://www.example.com/x'), { in_scope: [], infra_dependencies: {} })
   assert.strictEqual(r.status, 'out-of-scope')
 })
 
 test('annotateFindings adds scope_status to every finding', () => {
   const findings = [
-    { id: 'F-1', url: 'https://host.example.com/x' },
-    { id: 'F-2', url: 'https://host.example.com/payment' },
+    { id: 'F-1', url: 'https://www.example.com/x' },
+    { id: 'F-2', url: 'https://payment-prod.internal.example.com/payment' },
     { id: 'F-3', url: 'https://random-evil.com/x' },
   ]
   const annotated = sv.annotateFindings(findings, SCOPE)
@@ -82,7 +82,7 @@ test('annotateFindings adds scope_status to every finding', () => {
 })
 
 test('annotateFindings preserves all original fields', () => {
-  const findings = [{ id: 'F-1', url: 'https://host.example.com/x', severity: 'high', custom: 'value' }]
+  const findings = [{ id: 'F-1', url: 'https://www.example.com/x', severity: 'high', custom: 'value' }]
   const r = sv.annotateFindings(findings, SCOPE)
   assert.strictEqual(r[0].severity, 'high')
   assert.strictEqual(r[0].custom, 'value')

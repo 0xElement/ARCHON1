@@ -182,7 +182,7 @@ test('buildJudgePrompt: still reads `evidence` field (legacy schema)', () => {
 // then template-literal interpolated the result — coercing objects to the
 // literal string "[object Object]". Stage A then reasoned "evidence malformed
 // → downgrade", masking real Highs as a serialization accident, not validation.
-// Caught during round-6 retro 2026-05-09 (3/48 findings affected on example).
+// Caught during round-6 retro 2026-05-09 (3/48 findings affected on Example).
 // Schema reality (jq audit on /root/intel/pentest/VALIDATED-FINDINGS.jsonl):
 //   proof:                null on 48/48
 //   evidence (object):    3/48
@@ -212,16 +212,16 @@ test('buildJudgePrompt: reads reproduction_method when evidence/proof are null (
   const f = {
     title: 'Supply chain: chat config points to external domain',
     severity: 'High',
-    description: 'Moli chat config.js loads MF_API_HOST from host.example.com',
+    description: "the app's config.js loads MF_API_HOST from api.partner.example.com",
     proof: null,
     evidence: null,
-    reproduction_method: 'Direct HTTP GET to https://host.example.com/callcenterv2/config.js',
-    reproduction_result: 'HTTP 200, MF_API_HOST=https://host.example.com confirmed',
+    reproduction_method: 'Direct HTTP GET to https://api.internal.example.com/service/config.js',
+    reproduction_result: 'HTTP 200, MF_API_HOST=https://api.partner.example.com confirmed',
   }
   const p = buildJudgePrompt(f, '')
-  assert.match(p, /us-llm\.moli\.example\.com/,
+  assert.match(p, /api\.internal\.example\.com/,
     'reproduction_method must appear when proof/evidence are null (45/48 findings hit this path)')
-  assert.match(p, /cube\.partner\.com/, 'reproduction_result must also appear (carries response data)')
+  assert.match(p, /api\.partner\.example\.com/, 'reproduction_result must also appear (carries response data)')
   assert.doesNotMatch(p, /\(no evidence\)/, 'must not show "(no evidence)" when reproduction_* fields are populated')
 })
 

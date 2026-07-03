@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Unit tests for the dispatch-config priority in extractTargetUrl().
 //
-// Bug context (2026-05-09 round-8 host.example.com):
-//   Title: "Pentest round-8 — full Sprint A+B+C+polish+gates validation on host.example.com"
-//   Config: { target: "https://host.example.com", target_url: "https://host.example.com" }
-//   Pre-fix: bare 'host.example.com' won from title, TRACER crawled wrong URL.
+// Bug context (2026-05-09 round-8 example.com):
+//   Title: "Pentest round-8 — full Sprint A+B+C+polish+gates validation on example.com"
+//   Config: { target: "https://support.example.com", target_url: "https://support.example.com" }
+//   Pre-fix: bare 'example.com' won from title, TRACER crawled wrong URL.
 //   Post-fix: config.target_url MUST win over title-extracted bare domain.
 //
 // Priority order locked in here:
@@ -35,12 +35,12 @@ function test(name, fn) {
 
 console.log('extract-target-priority tests:')
 
-test('config.target_url wins over title bare domain (round-8 host.example.com regression)', () => {
+test('config.target_url wins over title bare domain (round-8 example.com regression)', () => {
   const out = extractTargetUrl({
-    taskTitle: 'Pentest round-8 — full Sprint A+B+C+polish+gates validation on host.example.com',
-    config: { target: 'https://host.example.com', target_url: 'https://host.example.com' },
+    taskTitle: 'Pentest round-8 — full Sprint A+B+C+polish+gates validation on example.com',
+    config: { target: 'https://support.example.com', target_url: 'https://support.example.com' },
   })
-  assert.strictEqual(out, 'https://host.example.com')
+  assert.strictEqual(out, 'https://support.example.com')
 })
 
 test('config.target_url present + title has bare domain → uses config.target_url', () => {
@@ -106,10 +106,10 @@ test('null/empty everywhere → returns null (existing behavior preserved)', () 
 
 test('config.target_url with whitespace is trimmed/used as-is', () => {
   const out = extractTargetUrl({
-    taskTitle: 'host.example.com',
-    config: { target_url: 'https://host.example.com' },
+    taskTitle: 'example.com',
+    config: { target_url: 'https://support.example.com' },
   })
-  assert.strictEqual(out, 'https://host.example.com')
+  assert.strictEqual(out, 'https://support.example.com')
 })
 
 test('config.target_url ignores goal text — config wins', () => {
