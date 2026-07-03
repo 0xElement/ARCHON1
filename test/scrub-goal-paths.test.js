@@ -68,7 +68,7 @@ test('scrubFilePathsFromGoal: empty/null/undefined → safe empty default', () =
 })
 
 test('scrubFilePathsFromGoal: preserves URLs (no false-positive on http://)', () => {
-  const goal = 'Test https://host.example.com and https://host.example.com — find vulns.'
+  const goal = 'Test https://example.com and https://hrconnect.example.com — find vulns.'
   const out = scrubFilePathsFromGoal(goal)
   // URLs must be intact
   assert.match(out, /https:\/\/example\.com/)
