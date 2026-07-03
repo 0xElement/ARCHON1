@@ -283,29 +283,33 @@ Findings board) · **WRITER** (per-finding writeup).
 
 ## Quickstart
 
-**Requires** Node ≥ 18 and the [Claude CLI](https://claude.ai/code) (ARCHON uses your Claude
-subscription via OAuth — *not* a metered API key).
+**Prerequisites** — the first one is what actually gates a run:
+
+1. **A Claude subscription + the `claude` CLI, logged in.** ARCHON runs on your Claude subscription
+   via OAuth — *not* a metered API key. Install [Claude Code](https://claude.ai/code) and run
+   `claude` once to log in. **Nothing dispatches until this is done.**
+2. **Node ≥ 18** and **git** (macOS / Linux, or Windows via WSL).
+3. *Optional:* recon tools (`nmap`, `naabu`, …) for black-box recon — every one is fail-soft, so you
+   can skip them. A **static code-review** run needs only Node + the `claude` CLI.
 
 ```bash
 git clone https://github.com/ghostshift-content/ARCHON.git archon && cd archon
-bash setup.sh                         # Node check → npm install → seed var/intel → Claude login check
+bash setup.sh             # Node check → npm install → seed var/intel → preflight (npm run doctor)
 
-npm run dashboard                     # portal → http://localhost:4000
-npm start                             # (separate shell) the agent daemon
+npm start                 # 1) the agent daemon (event-bus)
+npm run dashboard         # 2) separate shell → portal at http://localhost:4000
 ```
 
-`bash setup.sh` (also `npm run bootstrap`) is the one-shot local installer. Roots resolve to the **repo
+`bash setup.sh` (also `npm run bootstrap`) is the one-shot installer, and it ends by running
+**`npm run doctor`** — a preflight that prints exactly what's present vs missing (Node, the `claude`
+login, optional tools). Run **`npm run doctor`** anytime a dispatch fails. Roots resolve to the **repo
 directory** automatically, so a fresh clone needs **no `.env.local`** — override only if your layout
-differs (`cp .env.local.example .env.local`, edit the `KURU_*` paths). ARCHON runs on your **Claude
-subscription via OAuth** — log in once with the [Claude CLI / Claude Code](https://claude.ai/code) (no
-`ANTHROPIC_API_KEY`); point `KURU_CLAUDE_BIN` at your `claude` binary if it isn't on `PATH`.
+differs (`cp .env.local.example .env.local`, edit the `KURU_*` paths); point `KURU_CLAUDE_BIN` at your
+`claude` binary if it isn't on `PATH`.
 
-Open **http://localhost:4000 → New dispatch**, enter a target URL (and optionally a source
-directory), and dispatch. Watch progress under **Tasks**, triage under the run's **Findings** tab,
-and read the **Report** tab once generated.
-
-> First run failing every dispatch? Check the daemon's boot preflight — a missing `claude` CLI is
-> the #1 cause. The dashboard/API still serve so you can configure first.
+Open **http://localhost:4000 → New dispatch**, enter a source directory (lightest first run) and/or a
+target URL, and dispatch. Watch progress under **Tasks**, triage under the run's **Findings** tab, and
+read the **Report** tab once generated.
 
 ---
 

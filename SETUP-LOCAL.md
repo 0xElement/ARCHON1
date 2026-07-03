@@ -8,9 +8,18 @@ still works: set the roots via env.)
 
 ## One-time setup
 
+The one-shot installer does everything — Node check → install → seed → preflight:
+
+```bash
+bash setup.sh                     # also: npm run bootstrap
+```
+
+Or run the steps yourself:
+
 ```bash
 npm install                       # deps: claude-agent-sdk, acorn (+ optional playwright)
 npm run setup                     # scaffold + seed the local data layer (var/intel)
+npm run doctor                    # preflight: what's present vs missing (Node, claude login, tools)
 ```
 
 That's it — a fresh clone runs with **no env set**: the roots default to the repo dir and

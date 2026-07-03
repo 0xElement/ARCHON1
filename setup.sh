@@ -30,21 +30,17 @@ bold "Seeding the data layer…"
 node scripts/setup-local.js || die "data-layer setup failed (scripts/setup-local.js)."
 ok "data layer ready (var/intel)"
 
-# 4. Claude login check — ARCHON runs on your Claude SUBSCRIPTION via OAuth (no API key).
-bold "Checking Claude access…"
-if command -v claude >/dev/null 2>&1; then
-  ok "claude CLI found ($(command -v claude)) — make sure you've logged in (run: claude)"
-elif [ -d "$HOME/.claude" ]; then
-  ok "~/.claude present — Claude Code is set up on this machine"
-else
-  warn "No Claude login detected. ARCHON authenticates with your Claude SUBSCRIPTION (no API key)."
-  warn "Install Claude Code (https://claude.ai/code) and log in once, then you're set."
-fi
+# 4. Preflight — the doctor reports exactly what's present vs missing (Node, the
+#    claude login — the one hard gate — and the optional recon tools). ARCHON runs
+#    on your Claude SUBSCRIPTION via OAuth (no API key). Informational: never aborts.
+bold "Running preflight (npm run doctor)…"
+node scripts/doctor.js || true
 
 # 5. Next steps.
-bold "Done. To run ARCHON:"
-echo "  npm run dashboard     # operator portal → http://127.0.0.1:4000"
-echo "  npm start             # (separate shell) the agent daemon"
+bold "To run ARCHON (two shells):"
+echo "  npm start             # 1) the agent daemon (event-bus)"
+echo "  npm run dashboard     # 2) operator portal → http://127.0.0.1:4000"
 echo
-echo "  Open the portal, create a dispatch (a URL and/or a source dir), and go."
-echo "  Authorized testing only — scope is fail-closed by default."
+echo "  Open the portal, create a dispatch (a source dir for the lightest run,"
+echo "  and/or a target URL), and go. Authorized testing only — scope is fail-closed."
+echo "  Re-check prerequisites anytime with:  npm run doctor"

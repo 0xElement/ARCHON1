@@ -17,6 +17,7 @@
   "scripts": {
     "bootstrap": "bash setup.sh",
     "setup": "node scripts/setup-local.js",
+    "doctor": "node scripts/doctor.js",
     "start": "node event-bus.js",
     "dashboard": "node scripts/dashboard.js",
     "pretest": "node scripts/setup-local.js || true",

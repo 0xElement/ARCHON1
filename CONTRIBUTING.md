@@ -9,10 +9,12 @@ first — it explains *why* the rules below exist.
 ```bash
 git clone <your-fork>
 cd ARCHON
-npm install            # acorn + the Claude Agent SDK; playwright is optional
-npm run setup          # seeds var/intel + local state (idempotent)
+bash setup.sh          # one-shot: install + seed var/intel + preflight (or run the steps below)
 npm test               # node test/run-all.js — must be green, no network, no API key
 ```
+
+`bash setup.sh` wraps `npm install` + `npm run setup` + `npm run doctor`. Run `npm run doctor` anytime
+to check prerequisites (Node ≥ 18, the `claude` CLI login, optional recon tools).
 
 ARCHON runs on the **Claude subscription via OAuth** (the `claude` CLI, pointed at by
 `KURU_CLAUDE_BIN`). There is **no API key**. See `SETUP-LOCAL.md` for env + portable roots.

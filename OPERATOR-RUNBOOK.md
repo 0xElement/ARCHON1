@@ -36,26 +36,16 @@ not legal cover. The operator owns authorization.
 Done once per machine (or after a fresh clone). Full detail in `SETUP-LOCAL.md`.
 
 ```bash
-# 1. Node 18+ (package.json engines: node >=18)
-node --version
-
-# 2. Install deps
-npm install
-
-# 3. Create your local env file from the example
-cp .env.local.example .env.local
-#    then edit .env.local and set the three KURU_* values:
-#    - KURU_AGENTS_ROOT  — code root; the repo dir (paths.js resolves from here)
-#    - KURU_INTEL_ROOT   — data/state root; keep it at <repo>/var/intel (gitignored)
-#    - KURU_CLAUDE_BIN   — path to your `claude` CLI  (find it with: which claude)
-#    paths.js autoloads .env.local for the daemon AND every spawned agent.
-
-# 4. Run the setup script
-npm run setup            # → node scripts/setup-local.js  (seeds var/intel)
-
-# 5. Sanity-check the framework before trusting it
-npm test                 # → node test/run-all.js  (unit + gate suite)
+bash setup.sh            # one-shot: Node check → npm install → seed var/intel → preflight
+npm test                 # sanity-check before trusting it (offline unit + gate suite)
 ```
+
+`bash setup.sh` (also `npm run bootstrap`) resolves the roots to the **repo directory**
+automatically, so a fresh clone needs **no `.env.local`** — don't create one unless your layout
+differs. Only then: `cp .env.local.example .env.local` and edit the `KURU_*` paths (`KURU_AGENTS_ROOT`
+= code root, `KURU_INTEL_ROOT` = `<repo>/var/intel`, `KURU_CLAUDE_BIN` = your `claude` CLI). `setup.sh`
+ends by running **`npm run doctor`**, which prints exactly what's present vs missing — re-run it
+anytime a dispatch fails.
 
 **Authentication: no API key.** ARCHON runs on your **Claude subscription via
 OAuth** (`~/.claude`) — there is **no `ANTHROPIC_API_KEY`** to set. Just make sure
@@ -250,9 +240,9 @@ signal; the re-plan intel itself is always produced.
 ## Quick-reference card (pin this)
 
 ```
-SETUP (once):   npm install → cp .env.local.example .env.local (set 3 KURU_* paths)
-                → npm run setup → npm test  (gates must be green)
+SETUP (once):   bash setup.sh → npm test  (gates must be green)
                 NO API KEY — log in once with `claude` (subscription OAuth)
+                npm run doctor  →  what's present vs missing (run if a dispatch fails)
 
 EVERY SESSION:  Terminal 1: npm start         (daemon — does the work)
                 Terminal 2: npm run dashboard (UI — http://localhost:4000)
