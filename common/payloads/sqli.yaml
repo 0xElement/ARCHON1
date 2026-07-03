@@ -119,12 +119,10 @@ payloads:
     dbms: [mysql]
     context: [dos-detection, time-based]
 
-  # Destructive (use with caution)
-  - payload: "1; DROP TABLE users--"
-    type: stacked-query
-    dbms: [mssql, postgres]
-    context: [destructive, stacked-queries]
-    warning: "DESTRUCTIVE - only use in test environments"
+  # Stacked / destructive queries (DROP / DELETE / UPDATE) are INTENTIONALLY EXCLUDED.
+  # ARCHON detects SQL injection non-destructively (boolean / time / error / UNION SELECT, all
+  # read-only) — never prove SQLi by destroying data on a live target.
+  # See src/safety/production-safety.js (GATE-14 PRODUCTION-SAFE).
 
   # NoSQL (MongoDB)
   - payload: '{"$ne": ""}'

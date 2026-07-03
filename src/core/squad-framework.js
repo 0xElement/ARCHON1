@@ -4,6 +4,7 @@ const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see p
 // Universal Squad Framework — every squad inherits these capabilities automatically
 
 const fs = require('fs')
+const { PRODUCTION_SAFETY_CONTRACT } = require('../safety/production-safety')
 
 const MUST_GATES = `
 ## MANDATORY VERIFICATION GATES (ALL AGENTS)
@@ -58,7 +59,7 @@ If you cannot answer YES to all three → mark as SUSPECTED or DISPROVEN, not CO
 - \`"confidence": "high|medium|low"\` — high = I ran the exploit and saw the impact; medium = I reproduced the condition but impact is inferred; low = I saw signals but didn't fully confirm
 - \`"reproduction": "EXACT curl command or steps"\` — the specific command you ran that produced evidence
 Without these fields, AUDITOR and ARBITER cannot evaluate your finding properly. A finding with confidence="high" and a concrete reproduction command gets priority validation. Low confidence findings get deprioritized. This is not optional.
-`;
+` + PRODUCTION_SAFETY_CONTRACT;
 
 const MUST_GATES_STOCKS = `
 ## MANDATORY QUALITY GATES (STOCK ANALYSIS)

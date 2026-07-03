@@ -23,6 +23,30 @@ The tool ships with a safety perimeter, and it must stay intact:
   default fires nothing beyond detection payloads.
 - Do not remove, weaken, or bypass these gates in a contribution.
 
+## Non-destructive by default (production safety)
+
+ARCHON is meant to be pointed at **live production** by bug-bounty users, so detection is
+**non-destructive by design**. Every agent prompt carries a hard contract (`GATE-14 [PRODUCTION-SAFE]`
+in `src/core/squad-framework.js`, defined in `src/safety/production-safety.js`):
+
+- **Never** delete or modify data (`DELETE`/`DROP`/`TRUNCATE`/`UPDATE`, `rm`, file overwrite), change
+  credentials / passwords / MFA / roles, or delete/lock accounts.
+- **IDOR / access-control is tested read-only** — prove it by *reading* an object you shouldn't see.
+- **Bounded** — at most **10 attempts** when testing rate-limiting / lockout / brute-force; no signup
+  floods or mass record creation; no DoS / stress / ReDoS; back off on WAF / 429 / CAPTCHA.
+- Only a **benign** impact proof (e.g. `echo <nonce>` for RCE) may fire, and only under active-poc.
+
+Two enforcement layers: (1) the prompt contract above, injected into every agent via `MUST_GATES`;
+(2) a deterministic destructive-pattern guard (`guardRequest()`) wired into the request paths ARCHON
+runs itself (the chain-verifier curl replay), which skips any destructive / state-changing step.
+
+**Residual risk (stated honestly):** specialist agents fire their own HTTP through their tools
+(curl / nuclei / sqlmap), which ARCHON does not currently proxy — so for that traffic the guarantee is
+the prompt contract, not a network interlock. For maximum safety on sensitive production targets, prefer
+a **static / white-box** run (reads source, fires **zero** requests) or use **test accounts**. A network
+egress proxy that enforces the guard for all agent traffic is on the roadmap. Authorized destructive
+testing (e.g. your own staging) can opt out with `ARCHON_ALLOW_DESTRUCTIVE=1` (default off).
+
 ## No secrets or client data in the repo
 
 This is a public repository. It must never contain:

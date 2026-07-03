@@ -20,6 +20,7 @@
 
 const { spawnSync } = require('child_process')
 const { isCorsAssertion, extractFinalResponse } = require('../../agents/redirect-aware-curl')
+const { guardRequest } = require('../safety/production-safety')
 
 // Maximum time per step (seconds). Prevents runaway curls.
 const STEP_TIMEOUT_SEC = 15
@@ -85,6 +86,19 @@ function verifyChain(chain, opts = {}) {
         break
       }
       const argv = parseResult.argv
+
+      // Production-safety: never replay a destructive / state-changing step against a live target
+      // (unless ARCHON_ALLOW_DESTRUCTIVE=1). Runs AFTER the shell-injection parser (so metacharacter
+      // injection stays 'rejected'); this catches destructive content in an otherwise-valid curl.
+      // See src/safety/production-safety.js.
+      const safeGuard = guardRequest(resolvedCurl)
+      if (!safeGuard.allow) {
+        stepRecord.status = 'safe-mode-skipped'
+        stepRecord.reason = safeGuard.reason
+        stepResults.push(stepRecord)
+        logger(`[chain-verifier] step ${stepRecord.step_id} SKIPPED — ${safeGuard.reason}`)
+        continue
+      }
 
       if (dryRun) {
         stepRecord.status = 'dry-run'
