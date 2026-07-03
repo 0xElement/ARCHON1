@@ -4,6 +4,13 @@
 
 **Sourced from:** ARCHON_V0 `frameworks/XSS_CLIENT_SIDE.md` — 12 patterns, condensed 2026-04-23.
 
+> **Deep catalog:** the P-0…P-11 families below map to the canonical 50-pattern library
+> (`XSS-01…XSS-50`) — each with multi-language detection signatures and source→sink flows — plus the
+> 20-shape payload-variation catalog, the 9-technique CSP-bypass gadget catalog, the script-gadget
+> inventory, the template-engine / sanitizer reference tables, and 8 impact chains. It is injected into
+> your Phase-2 wave as `methodology/catalogs/xss_50_pattern_catalog.md`. This skill is the condensed
+> family ranking; apply the catalog for the full 50 and the reference tables.
+
 ---
 
 ## Methodology

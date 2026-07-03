@@ -49,14 +49,15 @@ const METH = path.join(__roots.AGENTS_ROOT, 'squads/code-review/methodology')
 // vuln class → { specialist, phase-2 module, pattern catalog }. The slugs match
 // common/patterns/<slug>.json — a null catalog auto-resolves to that pattern
 // catalog in phase2Prompt (when the pattern flag is on), else the specialist's
-// own skill. access-control + xss keep their dedicated methodology-pack modules.
+// own skill. access-control, xss + account-takeover keep dedicated methodology-pack
+// modules; account-takeover's catalog also backs the authentication-session class.
 const CLASS = {
   'access-control':        { agent: 'marshal', module: 'phase2_access_control_idor_v1.md', catalog: 'access_control_40_pattern_catalog.md' },
   'multi-tenant':          { agent: 'marshal', module: null, catalog: null },
   'admin-privileged':      { agent: 'marshal', module: null, catalog: null },
   'business-logic':        { agent: 'marshal', module: null, catalog: null },
-  'account-takeover':      { agent: 'siphon',  module: null, catalog: null },
-  'authentication-session':{ agent: 'siphon',  module: null, catalog: null },
+  'account-takeover':      { agent: 'siphon',  module: 'phase2_account_takeover_v1.md', catalog: 'account_takeover_pattern_catalog.md' },
+  'authentication-session':{ agent: 'siphon',  module: null, catalog: 'account_takeover_pattern_catalog.md' },
   'cryptography-secrets':  { agent: 'siphon',  module: null, catalog: null },
   'xss':                   { agent: 'cipher',  module: 'phase2_xss_html_injection_v1.md', catalog: 'xss_50_pattern_catalog.md' },
   'data-exposure':         { agent: 'cipher',  module: null, catalog: null },

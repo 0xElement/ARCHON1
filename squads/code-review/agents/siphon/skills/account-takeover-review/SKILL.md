@@ -4,6 +4,12 @@
 
 **Sourced from:** ARCHON_V0 `frameworks/ACCOUNT_TAKEOVER.md` — 11 patterns, condensed 2026-04-23.
 
+> **Deep catalog:** the full `ATO-P0…ATO-P10` library — every variant with multi-language detection
+> signatures + source→sink flows, the **"What Survives Security Actions" matrix**, the 10 ATO chains,
+> and the token-entropy reference — is injected into your Phase-2 wave as
+> `methodology/catalogs/account_takeover_pattern_catalog.md`. This skill is the condensed priority
+> ranking; apply the catalog for depth.
+
 ---
 
 ## Methodology
@@ -83,7 +89,14 @@ grep -rn "remember_device\|trusted_device"
 - Session cookie lacks HttpOnly/Secure/SameSite
 
 ### P-5 — Email verification bypass
-**Pattern:** signup creates unverified account that can still log in / access sensitive features.
+**Pattern:** signup/verification flow lets an unverified (or attacker-claimed) email reach a trusted state.
+**Variants:**
+- **Predictable token:** verification token is sequential / timestamp / weak-PRNG → guessable.
+- **Reusable token:** token not consumed on use → replayable, or the same token works across accounts.
+- **Change-without-reverify:** changing the account email doesn't re-trigger verification → new email trusted.
+- **Race:** concurrent verify + login / state-change lands a session before verification completes.
+- **Unverified-match:** identity lookups (invitations, SSO/SAML linking, member-add) match on an *unverified*
+  email → attacker pre-claims `victim@example.com` and inherits access meant for the real owner.
 
 ### P-6 — Credential leakage
 **Variants:** password in URL query, password in logs, password in 4xx error response, API key in JS bundle, token in localStorage accessible to XSS.
@@ -110,6 +123,16 @@ Already covered in P-0 (reset) — standalone check for ALL endpoints that build
 
 ### P-10 — Impersonation and delegation abuse
 **Pattern:** admin "impersonate user" feature lacks audit log OR can be invoked without admin perms via API.
+
+---
+
+## The "What Survives Security Actions" check (core technique)
+For every security action a user or admin can take — **password change, explicit logout, admin block/disable,
+email change, 2FA enable, role downgrade** — trace what it actually invalidates versus what it *should*: web
+session, remember-me cookie, active reset/verification tokens, API/personal tokens, OAuth authorizations, and
+any derived/child tokens. Anything that outlives an action meant to revoke it is an ATO path (e.g. a reset
+token still valid after the password already changed; a derived token whose TTL outlives the parent session).
+The full matrix — 6 actions × 6 invalidation targets, with how-to-check greps — is in the catalog.
 
 ---
 

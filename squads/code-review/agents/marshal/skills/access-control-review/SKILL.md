@@ -2,7 +2,19 @@
 
 **Scope:** Authorization bypass, IDOR, BOLA, BFLA, privilege escalation, missing permission checks, broken role boundaries. NO XSS, NO injection — those are separate frameworks.
 
-**Sourced from:** ARCHON_V0 `frameworks/ACCESS_CONTROL.md` — 26 patterns A through Z, condensed for our code-review squad 2026-04-23.if you need deeper reference.
+**Sourced from:** ARCHON_V0 `frameworks/ACCESS_CONTROL.md` — patterns A through Z, condensed for our code-review squad 2026-04-23.
+
+> **Deep catalog:** the full **40-pattern** library (A–Z + 27–40) — each with per-pattern detection
+> signatures, auth-check-vs-fetch flows, and confirmation techniques, plus the language/framework
+> adaptation grep table and the false-positive checklist — is injected into your Phase-2 wave as
+> `methodology/catalogs/access_control_40_pattern_catalog.md`. The A–Z below is the condensed priority
+> ranking; apply the catalog for the full 40 and their depth.
+>
+> **Core technique — Normal GET vs Action Endpoint:** action endpoints (POST/PUT that
+> move/transfer/clone/link/reassign) routinely serialize the *full object* in their response even when
+> only the **write** was authorized and the caller has no **read** permission — and their target-id
+> parameters are frequently looked up unscoped. For every action endpoint, diff what its response
+> returns against what the caller is actually allowed to read.
 
 ---
 

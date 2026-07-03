@@ -118,6 +118,17 @@ function stubDeps(spawnCalls) {
     ok("CLASS covers every pattern catalog (23 classes)", Object.keys(cr.CLASS).length === 23)
   }
 
+  // ── Test 6: every CLASS module/catalog file reference resolves on disk (no dangling refs) ──
+  {
+    const METH = path.join(__dirname, '..', 'squads', 'code-review', 'methodology')
+    let dangling = 0
+    for (const [cls, c] of Object.entries(cr.CLASS)) {
+      if (c.module && !fs.existsSync(path.join(METH, 'prompts', c.module))) { dangling++; console.log(`    missing module for ${cls}: ${c.module}`) }
+      if (c.catalog && !fs.existsSync(path.join(METH, 'catalogs', c.catalog))) { dangling++; console.log(`    missing catalog for ${cls}: ${c.catalog}`) }
+    }
+    ok('every CLASS module/catalog file resolves on disk (no dangling refs)', dangling === 0, `${dangling} dangling ref(s)`)
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`)
   process.exit(failed ? 1 : 0)
 })().catch(e => { console.error('THREW:', e.stack); process.exit(1) })
