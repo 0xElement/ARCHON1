@@ -80,7 +80,7 @@ against the seeded local `var/intel`. A few framework-internal suites are skippe
 
 The **daemon boots cleanly** on a fresh clone (`npm start` → "NEXUS v3 active"), reads/writes the
 local `var/intel`, and routes models from the seeded config. The **portal** (`npm run dashboard`)
-serves the dispatch/triage/report UI on `127.0.0.1:4000`.
+serves the dispatch/triage/report UI on `http://localhost:4000`.
 
 ## Seeding details
 

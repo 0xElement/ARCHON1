@@ -42,7 +42,7 @@ Status reflects the current `main`.
   grow the newer spec categories into full inline catalogs (see
   `PATTERN_AUTHORING_GUIDE.md`).
 
-## Module graduation (handoff item 6)
+## Module graduation — re-export shims
 
 The Autonomous-OS spec defines a `RECOMMENDED_REPO_STRUCTURE`. To make that layout
 addressable without duplicating logic, several canonical paths currently ship as

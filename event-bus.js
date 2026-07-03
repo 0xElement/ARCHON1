@@ -736,7 +736,7 @@ Execute now.`
  * Sprint B.3 (2026-05-09): publication-status banner.
  * After ARBITER + judge layers run, prepend a status banner to the published
  * report file when the published Critical/High findings have NOT been fully
- * verified — so a downstream reader (Jay, triager, Bugcrowd reviewer) can
+ * verified — so a downstream reader (operator, triager, security reviewer) can
  * tell at-a-glance whether the report is ship-ready or needs manual review.
  *
  * Triggers banner when ANY of:
@@ -3492,7 +3492,7 @@ function spawnAgent(agentName, taskId, message, sessionSuffix, modelOverride, op
       const agentForObserver = String(agentName || '').toUpperCase()
       const taskIdForObserver = String(taskId)
       // 2026-05-10: model resolved via resolveLLMModel({family:'fast'}) — no
-      // longer hardcoded. When Anthropic ships a new fast model and Jay
+      // longer hardcoded. When Anthropic ships a new fast model and the operator
       // updates model-config.json, this path picks it up automatically.
       // Resolved OUTSIDE the IIFE so the test's 200-char "non-blocking marker"
       // scan still finds the `;(async () =>` immediately before the call.
@@ -4413,7 +4413,7 @@ function _enforceBudgetCap(taskId, squad, totalCost, budget, title) {
   // (2026-04-20) Two-tier enforcement:
   //   - Soft cap at 1× budget: notify + block further dispatch (caller sets budgetExceeded flag).
   //   - Hard auto-kill at 3× budget: ALWAYS queue cancel-signal regardless of
-  //     hard_cap_kill config flag. Protects Jay's API bill from runaway spend.
+  //     hard_cap_kill config flag. Protects the operator's API bill from runaway spend.
   //     A rogue task that burns through 1× is forgivable; past 3× we stop.
   // Legacy hard_cap_kill=true still fires at 1× for users who want aggressive cuts.
   const HARD_KILL_MULTIPLIER = 3
@@ -6006,10 +6006,10 @@ Be brief and specific. This is an adversarial check.`
       }
 
       // ── PHASE 3.062: Prod-endpoint validation — flag sandbox-as-PROD ──
-      // 2026-05-15: Q#8 shipped "F-002 PROD PayPal CRITICAL" where AUDITOR
-      // validated against api.sandbox.paypal.com — Jay tested PROD and got
-      // invalid_client. The framework's confidence chain (AUDITOR→ARBITER)
-      // never checked "is the validation endpoint actually production?"
+      // A finding once shipped as "PROD CRITICAL" where AUDITOR actually
+      // validated against a sandbox host (e.g. api.sandbox.example.com) that
+      // returned invalid_client. The framework's confidence chain
+      // (AUDITOR→ARBITER) never checked "is the validation endpoint prod?"
       // This phase classifies each Critical/High finding's URL by
       // environment kind and flags prod-claim-against-sandbox mismatches.
       // SCRIBE reads prod_validation_warning to downgrade or annotate.

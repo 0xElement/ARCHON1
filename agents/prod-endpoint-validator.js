@@ -1,11 +1,11 @@
 // agents/prod-endpoint-validator.js
 //
-// 2026-05-15: Catches findings that claim PRODUCTION impact but validated
-// against sandbox/test/uat/dev endpoints. Q#8 surfaced this hard:
-// F-002 was titled "PROD PayPal CRITICAL", but AUDITOR's actual probe hit
-// api.sandbox.paypal.com — Jay tested api.paypal.com and got
-// invalid_client. The framework's "9 confirmed" claim was inflated because
-// nobody checked "is the validation endpoint actually production?"
+// Catches findings that claim PRODUCTION impact but validated against
+// sandbox/test/uat/dev endpoints. A real case surfaced this: a finding was
+// titled "PROD CRITICAL", but AUDITOR's actual probe hit a sandbox host
+// (e.g. api.sandbox.example.com) that returned invalid_client — so the
+// "confirmed" claim was inflated because nobody checked "is the validation
+// endpoint actually production?"
 //
 // This module classifies each URL by environment kind (production /
 // sandbox / uat / staging / test / dev) and flags Critical/High findings

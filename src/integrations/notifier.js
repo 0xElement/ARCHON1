@@ -1,16 +1,17 @@
 
 const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see paths.js
-// /root/agents/notifier.js
+// src/integrations/notifier.js
 //
-// Telegram alert emitter — drops structured messages into the outbox that
-// telegram-relay PM2 service consumes. Config-driven; handles dedup so a task
-// failure doesn't spam the user with 5 retries.
+// Optional alert emitter — drops structured messages into an outbox that an
+// external relay (e.g. a chat bot) can consume. Config-driven and OFF by
+// default; handles dedup so a task failure doesn't spam with retries.
 //
 // Usage:
 //   notifier.notify('task_failed', { taskId, squad, title, reason, cost })
 //
-// Config: /root/intel/notify-config.json — alert_on.* flags, thresholds,
-// one-per-task rate limit. Rollback: set enabled=false.
+// Config: <intel-root>/notify-config.json — alert_on.* flags, thresholds,
+// one-per-task rate limit, and report_base_url for links (unset ⇒ no link).
+// Rollback: set enabled=false.
 
 const fs = require('fs')
 const path = require('path')
@@ -88,7 +89,8 @@ function formatMessage(event, p, cfg) {
   const squad = p.squad || 'unknown'
   const title = p.title || '(no title)'
   const short = s => String(s || '').slice(0, 160)
-  const link = p.taskId ? `agent.n8nn8n.com/tasks/${p.taskId}/report` : ''
+  const base = (cfg.report_base_url || '').replace(/\/+$/, '')
+  const link = (p.taskId && base) ? `${base}/tasks/${p.taskId}/report` : ''
 
   switch (event) {
     case 'task_failed':

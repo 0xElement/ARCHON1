@@ -14,7 +14,7 @@
 //   - No hallucination. Author assumptions extracted only from observed
 //     evidence (missing validators, user-source paths, etc.).
 //
-// The LLM-driven version (Sonnet call) is a future option if Jay wants
+// The LLM-driven version (Sonnet call) is a future option if desired
 // richer purpose/intent inference. For now we ship the rule-based core.
 
 'use strict'

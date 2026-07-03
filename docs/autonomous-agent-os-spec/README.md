@@ -1,5 +1,10 @@
 # ARCHON Autonomous Agent OS Specification
 
+> **Internal / experimental design spec — not required to use or contribute to ARCHON.** This is a
+> forward-looking architecture pack (its blocks ship behind `ARCHON_ENABLE_*` flags, off by default, so
+> flag-off behavior is unchanged). To *use* ARCHON see the [root README](../../README.md); to
+> *contribute* see [CONTRIBUTING](../../CONTRIBUTING.md).
+
 This pack is the final developer-facing blueprint for evolving ARCHON into an open-source autonomous penetration-testing operating system while keeping the current UI, model, operator workflow, and product identity.
 
 The mandatory golden spine remains:

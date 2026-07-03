@@ -498,9 +498,10 @@ Open an issue or PR to propose or pick up an item.
 
 ---
 
-## License
+## License & authors
 
-[MIT](./LICENSE).
+[MIT](./LICENSE). Created and maintained by Jay
+([@ghostshift-content](https://github.com/ghostshift-content)) — see [AUTHORS.md](./AUTHORS.md).
 
 ---
 

@@ -97,12 +97,12 @@ to `<intel-root>/ACTIVITY-LOG.jsonl`
 ## Relationships
 - **Reads from:** Sentry (VALIDATED-FINDINGS.jsonl), all raw intel files
 - **Reports to:** Atlas (signals completion)
-- **Final consumer:** The human client (Jay, or whoever commissioned the engagement)
+- **Final consumer:** The human client (whoever commissioned the engagement)
 - **Never contacts:** Individual exploit agents — synthesis only, no feedback loops
 
 
 ## 🚫 Report Cleaning — MANDATORY
-The final report is read by Jay and external stakeholders. It must NEVER contain internal agent names.
+The final report is read by the operator and external stakeholders. It must NEVER contain internal agent names.
 - **NEVER use** ATLAS, SCOUT, RELAY, VIPER, GATEWAY, DRILL, WARDEN, SENTRY, RANGER, TRACER, AUDITOR, SCRIBE, NEXUS in the final report
 - **Use professional titles instead:** "Pentest Lead", "Recon Specialist", "SSRF Specialist", "XSS Specialist", "API Security Tester", "SQLi Specialist", "IDOR Specialist", "Compliance Auditor", "RCE Specialist", "Web Crawler", "Validation Specialist", "Report Writer"
 - **NEVER include** internal headers like "MANDATORY SELF-CHECK", "USER'S GOAL", "Task ID" in the report

@@ -1,7 +1,10 @@
 # ARCHON — Bug & Improvement Backlog
 
-Open issues observed during live HTB testing (2026-06-29). Most P1/P2 items fixed; remaining
-are lower-priority features/ops. Each item: symptom → root cause (file) → fix.
+> **For maintainers.** A working engineering backlog, kept in the open for transparency — not user
+> documentation. For using ARCHON, start at the [README](./README.md) and [OPERATOR-RUNBOOK](./OPERATOR-RUNBOOK.md).
+
+Open issues observed during live engagement testing. Most P1/P2 items are fixed; the rest are
+lower-priority features/ops. Each item: symptom → root cause (file) → fix.
 
 ---
 
@@ -37,7 +40,7 @@ are lower-priority features/ops. Each item: symptom → root cause (file) → fi
   authenticated app. Feature-sized (login automation per app), so deferred.
 
 ### P3 — crawl4ai browser can't reach a vhost without `/etc/hosts`
-- **Symptom:** For a vhost box (`aegis.korvia.htb`), the browser can't resolve the name; CLI tools use
+- **Symptom:** For a vhost target (`app.target.example`), the browser can't resolve the name; CLI tools use
   `--resolve`, but the browser (crawl4ai/CDP) can't.
 - **Root cause:** Browsers don't support `--resolve`; the vhost isn't in DNS/`/etc/hosts`; daemon has
   no sudo (event-bus.js `_runtracerAgentInner` ~2390). Only a one-time sudo line is surfaced.

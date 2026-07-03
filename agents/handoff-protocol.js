@@ -17,7 +17,7 @@ const HANDOFFS_INBOX_DIR = (__roots.INTEL_ROOT + '/handoffs/inbox')
 const HANDOFFS_DONE_DIR = (__roots.INTEL_ROOT + '/handoffs/done')
 const HANDOFFS_FAILED_DIR = (__roots.INTEL_ROOT + '/handoffs/failed')
 
-// Locked design decisions (Jay 2026-05-10):
+// Locked design decisions (2026-05-10):
 const MAX_HANDOFFS_PER_FINDING = 3
 const MAX_CHAIN_DEPTH = 2
 const DEFAULT_HANDOFF_BUDGET_USD = 0.50

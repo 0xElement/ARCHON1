@@ -8,7 +8,7 @@ This workspace serves as COMMAND's operational center for Mission Control orches
 - Coordinate between pentest and code-review squads  
 - Handle system administration tasks
 - Optimize performance and reliability
-- Provide operational insights to Jay
+- Provide operational insights to the operator
 
 ## Current Projects
 - Mission Control UI maintenance

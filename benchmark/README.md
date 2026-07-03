@@ -48,7 +48,7 @@ total, and the scorecard also lists any extra findings that did not map to a gro
 3. Start the ARCHON daemon in a separate shell:
 
    ```
-   node event-bus.js
+   npm start
    ```
 
 ## Run

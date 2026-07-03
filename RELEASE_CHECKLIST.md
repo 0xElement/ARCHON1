@@ -1,5 +1,8 @@
 # ARCHON — Release Checklist
 
+> **For maintainers.** This is the release process, not a user launch list — the unchecked boxes are
+> per-release steps run on the release host, not a claim the product is unfinished.
+
 Run before a community release or a developer handoff.
 
 ## Packaging — produce a clean artifact

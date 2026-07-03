@@ -2,7 +2,7 @@
 *Every mistake becomes a rule. Never repeat.*
 
 ## How to use this file
-When you make a mistake or get corrected by Jay:
+When you make a mistake or get corrected by the operator:
 1. Write it here immediately
 2. Add it as a rule to your SOUL.md or AGENTS.md
 3. Never repeat it

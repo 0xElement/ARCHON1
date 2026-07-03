@@ -28,7 +28,7 @@ not a persona.
 
 | File | Role |
 |---|---|
-| `event-bus.js` | The daemon (~10K lines). Dispatch queue → phased pipeline → report. **Be careful editing.** |
+| `event-bus.js` | The daemon (~11K lines). Dispatch queue → phased pipeline → report. **Be careful editing.** |
 | `paths.js` | Persona/squad path resolver. Reads `layout.config.json` + `ownership.json` (mtime-cached, fail-soft). Portable roots via `KURU_AGENTS_ROOT` / `KURU_INTEL_ROOT` / `KURU_CLAUDE_BIN` + `.env.local` autoload. |
 | `ownership.json` / `layout.config.json` | persona→squad-home map + layout knobs. |
 | `scripts/dashboard.js` | The portal — HTTP API + SPA over the data layer (binds `127.0.0.1`). Dispatch/triage/report controls write to the daemon inbox. |

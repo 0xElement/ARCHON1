@@ -5,7 +5,7 @@
 // NOT pentest-only Phase 2 dispatch. Catches accidental regression that
 // would silently disable observer telemetry across one or more squads.
 //
-// Framework-wide directive (Jay, 2026-05-09): the observer MUST fire for
+// Framework-wide directive (2026-05-09): the observer MUST fire for
 // EVERY squad's specialists (pentest, cloud-security, network-pentest,
 // code-review, stocks, etc.) without per-squad changes. The cleanest way
 // to honour that is to hook spawnAgent's resolve path — every squad's

@@ -6,7 +6,7 @@
 - Mission Checker: `<agents-root>/scripts/check-missions.sh`
 
 ## Communication
-- Telegram (primary channel to Jay)
+- Telegram (primary channel to the operator)
 - Inter-agent: Activity log JSONL
 
 ## Workspace

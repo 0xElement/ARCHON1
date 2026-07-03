@@ -9,7 +9,7 @@ const __roots = require('../paths') // portable roots (KURU_*_ROOT) — see path
 // Why this exists
 // ───────────────
 // Those 4 paths previously had hardcoded `claude-haiku-4-5` / `claude-sonnet-4-6`
-// strings. When Anthropic ships a new fast/balanced model and Jay edits
+// strings. When Anthropic ships a new fast/balanced model and the operator edits
 // /root/intel/model-config.json, the hardcoded paths silently keep firing the
 // old model. Same regression class as the 2026-04-20 stocks routing fix.
 //
