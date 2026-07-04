@@ -43,6 +43,17 @@ const ALLOWED_COMMANDS = Object.freeze([
 // Backwards-compat alias kept for any external caller that imported this.
 const ALLOWED_COMMAND = 'curl'
 
+// Loopback fixtures/targets must bypass an inherited proxy — http_proxy/HTTPS_PROXY in the env
+// (common on CI / corporate networks) otherwise routes 127.0.0.1 through a dead proxy and every
+// replay step returns HTTP/STATUS/000, so a valid exploit chain looks unverified when it's fine.
+// Belt-and-suspenders with the per-command --noproxy _augmentCurlArgs adds for loopback URLs;
+// preserves any operator-set NO_PROXY so real proxied engagements keep working.
+function _execEnv() {
+  const base = process.env.NO_PROXY || process.env.no_proxy || ''
+  const merged = base ? `${base},127.0.0.1,localhost` : '127.0.0.1,localhost'
+  return { ...process.env, NO_PROXY: merged, no_proxy: merged }
+}
+
 /**
  * Verify a single chain. Returns { verified, stepResults, reason }.
  */
@@ -125,11 +136,32 @@ function verifyChain(chain, opts = {}) {
         encoding: 'utf-8',
         timeout: (STEP_TIMEOUT_SEC + 2) * 1000,
         maxBuffer: 5 * 1024 * 1024,
+        env: _execEnv(),
       })
       let stdout = (proc.stdout || '').toString()
       const stderr = (proc.stderr || '').toString()
       stepRecord.response = stdout.slice(0, 5000) // cap for storage
       if (stderr) stepRecord.stderr = stderr.slice(0, 500)
+      // Diagnostics for a failed / HTTP-000 replay: distinguish "the real target refused"
+      // from a local mis-config (spawn error, timeout, or a proxy silently eating a loopback
+      // request), so a valid exploit chain is never quietly marked unverified.
+      if (proc.error || proc.status !== 0 || stdout.includes('HTTP/STATUS/000')) {
+        const timedOut = proc.signal === 'SIGTERM' || !!(proc.error && proc.error.code === 'ETIMEDOUT')
+        stepRecord.diag = {
+          argv: [cmdBinary, ...execArgv],
+          exitCode: proc.status,
+          signal: proc.signal || null,
+          timedOut,
+          spawnError: proc.error ? String(proc.error.message || proc.error) : null,
+          stderr: stderr.slice(0, 300),
+          proxyEnv: {
+            http_proxy: process.env.http_proxy || process.env.HTTP_PROXY || null,
+            https_proxy: process.env.https_proxy || process.env.HTTPS_PROXY || null,
+            no_proxy: process.env.NO_PROXY || process.env.no_proxy || null,
+          },
+        }
+        logger(`[chain-verifier] step ${stepRecord.step_id} connection issue — exit=${proc.status} signal=${proc.signal || '-'} timedOut=${timedOut} err=${proc.error ? proc.error.message : '-'} proxy=${!!(process.env.http_proxy || process.env.HTTP_PROXY)}`)
+      }
       stepRecord.status = 'executed'
       if (proc.error) stepRecord.exec_error = String(proc.error.message || proc.error).slice(0, 200)
       if (proc.status != null) stepRecord.exit_code = proc.status
@@ -346,6 +378,12 @@ function _augmentCurlArgs(args) {
   if (!/(^| )-sS?\b/.test(joined) && !/(^| )--silent\b/.test(joined)) {
     out.push('-sS')
   }
+  // Loopback targets (local fixtures / self-hosted apps): bypass any inherited proxy
+  // authoritatively, so an http_proxy env can't turn a valid request into HTTP/STATUS/000.
+  // Added ONLY for loopback — real (possibly proxied) engagements are untouched.
+  if (/\/\/(?:127\.0\.0\.1|localhost|\[::1\]|::1)/i.test(joined) && !/(^| )--noproxy\b/.test(joined)) {
+    out.push('--noproxy', '*')
+  }
   // Ensure our status-code marker is appended exactly once.
   // We intentionally don't collapse existing -w flags — if Constructor passed one,
   // it still works (curl emits both); our marker is unique enough to grep out.
@@ -536,4 +574,5 @@ module.exports = {
   semanticMatch,
   CHAIN_OUTPUT_SCHEMA,
   STEP_TIMEOUT_SEC,
+  _augmentCurlArgs, // exported for tests (argv-augmentation contract)
 }

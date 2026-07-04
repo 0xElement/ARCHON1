@@ -44,7 +44,25 @@ const __fixtureChild = spawn(process.execPath, ['-e',
   `require('http').createServer((q,s)=>{s.writeHead(200,{'Content-Type':'text/html; charset=UTF-8'});s.end(${JSON.stringify(FIXTURE_HTML)})}).listen(${FIXTURE_PORT},'127.0.0.1')`],
   { stdio: 'ignore' })
 const BASE = `http://127.0.0.1:${FIXTURE_PORT}`
-;(() => { for (let i = 0; i < 100; i++) { const r = spawnSync('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', BASE], { encoding: 'utf8', timeout: 1500 }); if (r.stdout === '200') return; spawnSync('sleep', ['0.05']) } })()
+// Deterministic fixture readiness: poll until the server answers 200 (bypassing any proxy),
+// and FAIL LOUDLY if it never comes up — rather than silently proceeding into flaky HTTP-000 checks.
+;(() => {
+  for (let i = 0; i < 100; i++) {
+    const r = spawnSync('curl', ['--noproxy', '*', '-s', '-o', '/dev/null', '-w', '%{http_code}', BASE], { encoding: 'utf8', timeout: 1500 })
+    if (r.stdout === '200') return
+    spawnSync('sleep', ['0.05'])
+  }
+  throw new Error(`[chain-verifier.test] fixture server on ${BASE} never became ready — proxy env? http_proxy=${process.env.http_proxy || process.env.HTTP_PROXY || 'unset'}`)
+})()
+
+test('_augmentCurlArgs injects the exact HTTP/STATUS marker (+ --noproxy for loopback only)', () => {
+  const out = cv._augmentCurlArgs(['http://127.0.0.1:1/x'])
+  const wIdx = out.indexOf('-w')
+  assert.ok(wIdx >= 0, '-w must be injected')
+  assert.strictEqual(out[wIdx + 1], '\nHTTP/STATUS/%{http_code}\n', 'status marker must match exactly')
+  assert.ok(out.includes('--noproxy'), 'loopback target must get --noproxy so a proxy env cannot cause HTTP/STATUS/000')
+  assert.ok(!cv._augmentCurlArgs(['https://example.com/x']).includes('--noproxy'), 'real targets keep the operator proxy')
+})
 
 test('exports CHAIN_OUTPUT_SCHEMA', () => {
   assert.ok(cv.CHAIN_OUTPUT_SCHEMA)
