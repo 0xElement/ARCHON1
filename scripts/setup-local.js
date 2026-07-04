@@ -168,16 +168,9 @@ for (const name of TOUCH) {
   info('touched ' + name)
 }
 
-// Enable the secret/PII pre-commit hook (defense in depth for OSS). Fail-soft: outside a git
-// checkout (e.g. a release tarball) this is simply skipped.
-try {
-  const cp = require('child_process')
-  const inGit = cp.execSync('git rev-parse --is-inside-work-tree', { cwd: __dirname + '/..', stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() === 'true'
-  if (inGit) {
-    cp.execSync('git config core.hooksPath .githooks', { cwd: __dirname + '/..' })
-    console.log('🔒 secret-scan pre-commit hook enabled (core.hooksPath=.githooks)')
-  }
-} catch { /* not a git checkout — skip */ }
+// The pre-commit hook install moved to scripts/install-hooks.js (run by `npm run setup:hooks`
+// and `bash setup.sh`). Keeping it out of this seed means `pretest` / `npm test` stay
+// side-effect-light — no git config writes, no permission warnings in CI.
 
 console.log('\n✅ Local data layer ready at ' + INTEL)
 console.log('   Next: npm test   ·   npm start (daemon)   ·   npm run dashboard (portal → :4000)')

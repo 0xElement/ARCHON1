@@ -69,7 +69,8 @@ Enforcement (defense in depth):
 - **`scripts/scan-secrets.js`** — a self-contained scanner for the classes above, verified by
   `test/scan-secrets.test.js`. Run it any time with `npm run scan`.
 - **Pre-commit hook** (`.githooks/pre-commit`) — blocks a commit that introduces any of the above.
-  Enable it once per clone: `git config core.hooksPath .githooks` (also done by `npm run setup`).
+  Enable it once per clone: `npm run setup:hooks` (also run by `bash setup.sh`), or manually
+  `git config core.hooksPath .githooks`.
 - **CI** runs the scanner on every push and pull request.
 
 If you must commit a genuine false positive (an example key in the KB, a documentation placeholder),

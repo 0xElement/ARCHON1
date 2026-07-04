@@ -29,6 +29,7 @@ ok "dependencies installed"
 bold "Seeding the data layer…"
 node scripts/setup-local.js || die "data-layer setup failed (scripts/setup-local.js)."
 ok "data layer ready (var/intel)"
+node scripts/install-hooks.js || true   # enable the secret-scan pre-commit hook (explicit, side-effecting)
 
 # 4. Preflight — the doctor reports exactly what's present vs missing (Node, the
 #    claude login — the one hard gate — and the optional recon tools). ARCHON runs
