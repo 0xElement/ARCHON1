@@ -18,9 +18,7 @@ whose findings merge into one de-duplicated report.
 
 </div>
 
-<!-- Dashboard screenshot — drop a PNG/GIF at assets/dashboard.png, then uncomment the block below:
-<div align="center"><img src="./assets/dashboard.png" alt="ARCHON portal — dispatch, live progress, triage, report" width="820"></div>
--->
+<p align="center"><img src="./assets/archon-showcase.png" alt="ARCHON operator console — overview, tasks, run detail, findings, CVSS triage, and testing logs" width="880"></p>
 
 > ⚠️ **Authorized testing only.** Only test systems you own or have explicit written permission to
 > assess. ARCHON fails *closed* on missing scope and never fires impact-proving exploits by default,
