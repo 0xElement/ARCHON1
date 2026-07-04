@@ -14,6 +14,7 @@ const http = require('http')
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
+const { deriveConfirmationStatus } = require('../agents/finding-schema')
 const agentPaths = require('../paths')
 const { parseFindingsJsonl } = require('../src/pipeline/loose-jsonl')
 
@@ -587,6 +588,9 @@ function findingsForSingleTask(id, label) {
       codeBlock: d.code_block || d.codeBlock || f.code_block || f.vulnerable_code || '',
       dataFlow: d.data_flow || d.dataFlow || f.data_flow || '', // static taint trace (untrusted input → sink)
       confirmation: f.confirmation || d.confirmation || '',
+      // Canonical runtime-vs-source status (was never projected — the derived split never reached
+      // the operator). Fall back to deriving it from validation_status + runtime proof. See item #8.
+      confirmation_status: f.confirmation_status || deriveConfirmationStatus(f),
       judge: (judgeBy[f.id] && (judgeBy[f.id].verdict || judgeBy[f.id].judgement)) || '',
       enriched: !!detail[f.id], triage: triage[f.id] || null, source: 'validated',
     })

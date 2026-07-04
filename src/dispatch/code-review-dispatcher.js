@@ -370,13 +370,16 @@ Demote anything you cannot substantiate from source.
 Write verdicts to ${outDir}/phase2/AUDITOR-VERDICTS.md (a table: feature | class | finding | status | evidence). Reply one line: runtime-confirmed/source-confirmed/needs-live/disproven counts.`
 }
 
-function scribePrompt(taskId, projectId, squad, sourceDir, outDir, features, classes, deployUrl) {
+function scribePrompt(taskId, projectId, squad, sourceDir, outDir, features, classes, deployUrl, coverage) {
   return `You are SCRIBE, the reporter. Merge the per-feature Phase-2 reports into ONE final code-review report.
 
 Inputs (read all):
 - ${outDir}/phase1-maps/consolidated/phase1_completion_gate.md and phase2_review_queue.md
 - ${outDir}/phase2/**/*.md  (per-feature reports, classes: ${classes.join(', ')})
 - ${outDir}/phase2/AUDITOR-VERDICTS.md  (report RUNTIME_CONFIRMED / SOURCE_CONFIRMED / NEEDS_LIVE_VALIDATION findings; note DISPROVEN separately)
+
+COVERAGE (deterministic — use these EXACT numbers; do NOT imply the whole codebase was deep-reviewed):
+deeply reviewed ${coverage ? coverage.deeplyReviewed : (features ? features.length : 0)} of ${coverage ? coverage.mapped : (features ? features.length : 0)} mapped features${coverage && coverage.capped > 0 ? ` — the other ${coverage.capped} are mapped-only (Phase-2 cap), reviewed at map depth but not deep-assessed` : ''}. Open the report's coverage section with exactly this fact.
 
 Produce an executive white-box code-review report: scope + coverage (features mapped, depth-status rollup), then findings
 ordered by CVSS — each tagged with its **confirmation status** (RUNTIME_CONFIRMED / SOURCE_CONFIRMED / NEEDS_LIVE_VALIDATION),
@@ -565,7 +568,7 @@ async function runCodeReview(dispatch, deps) {
   if (cancelled()) return bail('Phase 3 report')
   if (runPhase('report')) {
     updateProgress(94, 'Phase 3: SCRIBE final report')
-    const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl), `task-${taskId}-scribe`, null)
+    const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl, { mapped: features.length, deeplyReviewed: p2Features.length, capped: Math.max(0, features.length - p2Features.length) }), `task-${taskId}-scribe`, null)
     trackCosts([vRes])
   }
 

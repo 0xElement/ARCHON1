@@ -459,6 +459,17 @@ function stagePill(f) {
   if (s === 'suspected') return `<span class="fstatus muted" title="Suspected — not yet confirmed">Suspected</span>`
   return ''
 }
+// runtime-vs-source confirmation badge (keyed on the derived confirmation_status) — makes clear
+// whether a finding was proven against the live target or only in the code.
+function confirmationBadge(f) {
+  switch (f.confirmation_status) {
+    case 'RUNTIME_CONFIRMED': return `<span class="fstatus ok" title="Proven against the live target — runtime evidence captured">⚡ Runtime</span>`
+    case 'SOURCE_CONFIRMED': return `<span class="fstatus" style="color:#8ab4ff;background:rgba(138,180,255,.13);border:1px solid rgba(138,180,255,.4)" title="Confirmed by reading the code — not fired at a live target">◆ Source</span>`
+    case 'NEEDS_LIVE_VALIDATION': return `<span class="fstatus muted" title="Hypothesis — needs a live target to settle">Needs live</span>`
+    case 'DISPROVEN': return `<span class="fstatus" style="color:#f87171;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4)" title="Checked and refuted">Disproven</span>`
+    default: return ''
+  }
+}
 // severity summary reflects the CURRENT triage across the WHOLE engagement (overrides applied, rejected excluded)
 function recountSummary() {
   const counts = {}; for (const s of SEV) counts[s] = 0
@@ -479,7 +490,7 @@ function renderFindings() {
       <div class="fmain">
         <span class="badge fbadge sev-${sevNow.toLowerCase()}">${esc(sevNow)}</span>
         ${cvssNow != null ? `<span class="fcvss">CVSS ${cvssNow}</span>` : ''}
-        ${v.verdict === 'rejected' ? '<span class="fcancelled">✕ Cancelled</span>' : stagePill(f)}
+        ${v.verdict === 'rejected' ? '<span class="fcancelled">✕ Cancelled</span>' : stagePill(f) + confirmationBadge(f)}
         <span class="ftitle">${esc(f.title)}</span>
         ${f.iteration ? `<span class="iter-tag">${esc(f.iteration)}</span>` : ''}
         <div class="seg fverdict" data-noopen><button data-fv="confirmed" class="${v.verdict !== 'rejected' ? 'on' : ''}" type="button" title="Confirm">✓</button><button data-fv="rejected" class="${v.verdict === 'rejected' ? 'on' : ''}" type="button" title="Reject">✕</button></div>
@@ -557,6 +568,7 @@ function openFindingPage(key) {
     f.cvss != null ? `<span class="fcvss">CVSS ${f.cvss}</span>` : '',
     f.cwe ? `<span class="fcwe">${esc(f.cwe)}</span>` : '',
     stagePill(f),
+    confirmationBadge(f),
   ].filter(Boolean).join(' ')
   $('#fdInfo').innerHTML = `<h3>${esc(f.id)} · ${esc(f.agent || '')} ${tags}</h3>
     ${sec('Description', f.description)}
