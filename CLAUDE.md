@@ -63,7 +63,7 @@ All phases are **fail-soft** — an error logs and continues. Optional phases ar
 | **3.085** | **Exploit-Prover** — gated benign payload that *proves* impact → `proof_of_execution` |
 | **3.087** | **Re-plan** — ATLAS lists follow-ups + chains left to chase |
 | 3.5 / 3.6 / 3.8 | Chain construct + verify (curl) + browser verify |
-| 3.9 | ARBITER judge (3-judge consensus on High/Critical) |
+| 3.9 | Judge-verifier — multi-judge consensus on High/Critical (the `judge-verifier` module, not the ARBITER persona) |
 | 4 | SCRIBE final report (impact + proof + WSTG coverage + correlation) |
 
 ## Safety perimeter

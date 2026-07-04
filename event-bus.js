@@ -936,7 +936,10 @@ function blockReportPublication(taskId, arbiterResult, reason) {
 // Pentest squad agent roles — parallel execution
 // Pentest agents — dynamic with hardcoded fallbacks
 // v2: Added FORGE (SSTI), LEDGER (Business Logic) to always-run list
-const FALLBACK_PENTEST_SPECIALISTS = ['viper', 'drill', 'relay', 'vault', 'warden', 'forge', 'ledger', 'sentry', 'gateway']
+// v3: Added KEYRING — sole coverage-map owner of WSTG-IDNT/ATHN/SESS (Identity/Auth/Session) and
+//     the target of the 'auth'/'session' focus map; without it on the roster those areas were never
+//     actively tested and a focused auth/session scan silently fell back to the full roster.
+const FALLBACK_PENTEST_SPECIALISTS = ['viper', 'drill', 'relay', 'vault', 'warden', 'forge', 'ledger', 'sentry', 'gateway', 'keyring']
 // Apply the per-squad operational cap (maxSpecialists) from squad.json.
 // Fail-soft: no/invalid config → uncapped. Only ever REDUCES the list, never grows it.
 function _applySquadCap(squad, list) {
@@ -6338,7 +6341,7 @@ Be brief and specific. This is an adversarial check.`
 
         // Constructor prompt — explicitly tells the model to emit structured JSON.
         // The --json-schema flag enforces this at the API layer (constrained decoding).
-        const chainVerifier = freshRequire('./chain-verifier')
+        const chainVerifier = freshRequire('./src/pipeline/chain-verifier')
         const constructorPrompt = `# CHAIN CONSTRUCTOR — Phase 3.5
 
 You are analyzing confirmed findings for the ${squad} squad. Identify attack chains

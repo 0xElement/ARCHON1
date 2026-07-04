@@ -15,7 +15,7 @@ const WSTG = [
   { id: 'WSTG-ATHN', name: 'Authentication', owner: ['keyring'] },
   { id: 'WSTG-ATHZ', name: 'Authorization', owner: ['warden'] },
   { id: 'WSTG-SESS', name: 'Session Management', owner: ['keyring'] },
-  { id: 'WSTG-INPV', name: 'Input Validation', owner: ['viper', 'drill', 'relay', 'vault', 'spectre', 'ranger'] },
+  { id: 'WSTG-INPV', name: 'Input Validation', owner: ['viper', 'drill', 'relay', 'vault', 'spectre', 'ranger', 'forge'] },
   { id: 'WSTG-ERRH', name: 'Error Handling', owner: ['all'] },
   { id: 'WSTG-CRYP', name: 'Cryptography', owner: ['sentry'] },
   { id: 'WSTG-BUSL', name: 'Business Logic', owner: ['ledger'] },
