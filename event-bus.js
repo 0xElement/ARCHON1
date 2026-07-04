@@ -6753,35 +6753,35 @@ The output MUST validate against the schema. You cannot emit prose — only the 
       }
     } catch (rqErr) { log(`⚠️ Phase 3.95 (non-fatal): ${rqErr.message}`) }
 
-    // ── TRIAGE GATE (2026-06-17) — stop before the report when meta.triageGate ──
-    // Findings are produced (AUDITOR-validated, ARBITER-judged) but the report is
-    // NOT auto-written. The operator triages findings in the Findings tab, then a
-    // 'generate-report' inbox action runs SCRIBE on the confirmed set. Returns the
-    // partial cost so the caller's accounting stays correct; the caller sees the
-    // 'awaiting-triage' status and skips grading/done.
-    if (dispatch.meta && dispatch.meta.triageGate) {
-      // Reflect the ACTUAL validated-finding count. Labeling a run that produced 0 CONFIRMED
-      // (e.g. a stalled/killed specialist wave) as "findings ready" is misleading — say so,
-      // and hint that the run is incomplete rather than done.
+    // ── COMPLETE (default) — testing + LIVE triage done → the run is DONE; report ON DEMAND ──
+    // (2026-07) Findings are validated LIVE during the scan (streaming triage — every finding a
+    // specialist emits is triaged + written as it lands), so there is no separate "confirm each"
+    // gate. When the waves finish and all findings are validated + pushed, the run is DONE — no
+    // awaiting-triage stop, and the report is NOT auto-written. The operator generates it when they
+    // want (Generate report → generateReportForTask runs SCRIBE over the validated set). One
+    // uniform terminal for black-box / white-box / static. Auto-report stays available only as an
+    // explicit opt-in (meta.autoReport — e.g. the benchmark harness), which falls through to
+    // Phase 4 below. Returns the partial cost so the caller's accounting stays correct.
+    if (!(dispatch.meta && dispatch.meta.autoReport)) {
       let _vfCount = 0
       try { const _vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`; if (fs.existsSync(_vf)) _vfCount = fs.readFileSync(_vf, 'utf8').trim().split('\n').filter(Boolean).length } catch {}
-      const _ready = _vfCount > 0 ? `${_vfCount} finding(s) ready` : 'NO findings validated — run may be incomplete'
-      log(`⏸️ Triage gate ON — ${_ready}, report deferred until operator triage`)
-      logEvent('PHASE_DONE', { taskId, phase: 'findings-ready' })
-      logActivity('NEXUS', `⏸️ AWAITING TRIAGE — ${_ready}`, {
-        type: 'awaiting-triage', squad, taskId, projectId: projectId || '',
-        details: _vfCount > 0 ? 'Triage the findings in the Findings tab, then click Generate report.'
-          : 'Phase 3 validated 0 findings — check the run for a stalled or killed specialist wave before triaging.',
+      const _doneMsg = _vfCount > 0 ? `Testing complete — ${_vfCount} finding(s) · generate the report when ready` : 'Testing complete — 0 findings'
+      log(`✅ ${_doneMsg} (report deferred to on-demand generation)`)
+      logEvent('PHASE_DONE', { taskId, phase: 'testing-complete' })
+      logActivity('NEXUS', `✅ TESTING COMPLETE — ${_vfCount} finding(s)`, {
+        type: 'phase-complete', squad, taskId, projectId: projectId || '',
+        details: _vfCount > 0 ? 'All findings validated live during the scan — open the Findings tab and Generate report when ready.'
+          : 'No findings validated — nothing to report.',
       })
       try {
         const tasks = readJSON(TASKS_FILE); const t = tasks.find(t => String(t.id) === String(taskId))
-        if (t) { t.status = 'awaiting-triage'; t.progress = 90; t.statusMessage = _vfCount > 0 ? `Awaiting triage — ${_vfCount} finding(s)` : 'Awaiting triage — 0 findings (run may be incomplete)'; t.costs = allCosts; t.totalCost = Math.round(totalCost * 10000) / 10000; t.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, tasks) }
-      } catch (e) { log(`⚠️ triage-gate status write failed: ${e.message}`) }
-      updateProgress(90, _vfCount > 0 ? `Awaiting triage — ${_vfCount} finding(s) ready` : 'Awaiting triage — 0 findings (run may be incomplete)')
+        if (t) { t.status = 'done'; t.progress = 100; t.statusMessage = _doneMsg; t.costs = allCosts; t.totalCost = Math.round(totalCost * 10000) / 10000; t.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, tasks) }
+      } catch (e) { log(`⚠️ completion status write failed: ${e.message}`) }
+      updateProgress(100, _doneMsg)
       return { totalCost, allCosts }
     }
 
-    // ── PHASE 4: Report (SCRIBE) ──
+    // ── PHASE 4: Report (SCRIBE) — opt-in only (meta.autoReport); default path completed above ──
     log(`🔄 Phase 4: SCRIBE writing final report`)
     logEvent('PHASE_START', { taskId, phase: 'report-4', agents: ['SCRIBE'] })
     logActivity('NEXUS', `🔄 Phase 4: SCRIBE writing final report`, {
