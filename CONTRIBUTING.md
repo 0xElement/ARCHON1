@@ -66,6 +66,20 @@ ARCHON runs on the **Claude subscription via OAuth** (the `claude` CLI, pointed 
 | Change model selection | `src/routing/model-router.js` + `agents/model-config.js` |
 | Understand the pipeline | `CLAUDE.md` + `docs/ORCHESTRATION.md` |
 
+### The two squad trees (don't mix them up)
+
+ARCHON keeps a squad's **persona content** and its **operational config** in two separate trees — easy
+to confuse when adding an agent or squad:
+
+| Tree | Holds | Example |
+|---|---|---|
+| **`squads/<sq>/agents/<name>/`** | persona **content** — `SOUL.md`, `IDENTITY.md`, skills | `squads/pentest/agents/viper/SOUL.md` |
+| **`agents/squads/<sq>/`** | operational **config** — `squad.json` (`enabledPhases`, caps) | `agents/squads/pentest/squad.json` |
+
+Rule of thumb: prose/skills a *persona* reads → `squads/…`; knobs the *daemon* reads → `agents/squads/…`.
+Never hardcode either path — resolve via `paths.js`. `npm run doctor` flags a persona file that landed
+under `agents/squads/` (or a `squad.json` under `squads/`).
+
 ## Releasing
 
 `npm run pack:release` builds a clean ZIP via `git archive` (tracked files only — no

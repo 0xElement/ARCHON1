@@ -5,6 +5,10 @@
 
 Run before a community release or a developer handoff.
 
+**One command for the automated gates:** `npm run release:check` — seed → unit + gate suite → secret/PII
+scan → schema conformance (fail-fast). It also prints the manual gates (`test:bun`, `test:browser`, a
+mocked smoke dispatch, `doctor`).
+
 ## Packaging — produce a clean artifact
 
 ```bash

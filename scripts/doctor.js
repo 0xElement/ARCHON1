@@ -76,6 +76,34 @@ for (const t of ['nmap', 'naabu', 'httpx', 'katana', 'gau', 'ffuf', 'subfinder']
 try { require.resolve('playwright'); pass('playwright (npm optional dep installed)') }
 catch { warn('playwright — MISSING (optional; `npm i playwright` for Phase 3.8 browser proof)') }
 
+// Squad layout — the two trees are easy to confuse (see CONTRIBUTING § "The two squad trees"):
+//   squads/<sq>/agents/<name>/    = persona CONTENT (SOUL.md + skills)
+//   agents/squads/<sq>/squad.json = operational CONFIG (enabledPhases, caps)
+// Flag files that landed in the wrong tree (fail-soft — warns, never blocks).
+head('Squad layout (persona content vs operational config):')
+{
+  const repo = path.join(__dirname, '..')
+  const walk = (dir, hit, acc = []) => {
+    let ents = []
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }) } catch { return acc }
+    for (const e of ents) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p, hit, acc)
+      else if (hit(e.name)) acc.push(p)
+    }
+    return acc
+  }
+  const personaFile = /^(SOUL|IDENTITY|AGENTS|TOOLS|MISTAKES)\.md$/i
+  const misplacedPersona = walk(path.join(repo, 'agents', 'squads'), (n) => personaFile.test(n))
+  const misplacedConfig = walk(path.join(repo, 'squads'), (n) => n === 'squad.json')
+  if (!misplacedPersona.length && !misplacedConfig.length) {
+    pass('squad trees consistent (no persona files under agents/squads/, no squad.json under squads/)')
+  } else {
+    for (const p of misplacedPersona) warn(`persona file in the OPERATIONAL tree — move under squads/…: ${path.relative(repo, p)}`)
+    for (const p of misplacedConfig) warn(`squad.json in the PERSONA tree — move under agents/squads/…: ${path.relative(repo, p)}`)
+  }
+}
+
 // Summary
 console.log()
 if (blockers === 0) {
