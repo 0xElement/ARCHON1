@@ -13,7 +13,7 @@
 
 const fs = require('fs')
 const path = require('path')
-const { execSync, spawn } = require('child_process')
+const { execSync, execFileSync, spawn } = require('child_process')
 const quotaManager = require('./src/integrations/quota-manager')
 const { MUST_GATES, getSquadConfig, shouldRunChainAnalysis, shouldRunarbiter, getCostBudget, getPriorityOrder,
         getSquadLeader: getConfiguredSquadLeader, getSquadGateStyle, getSquadGates, getSquadMemoryFile, getSquadMemoryNamespace, getSquadDispatchType, listKnownSquads,
@@ -105,6 +105,17 @@ function freshRequire(modulePath) {
 // (newline/CR/tab) that the earlier regex missed. For argv-style calls (spawnSync),
 // no sanitization is needed — but that's not how most of this code is structured.
 const SHELL_METACHARS = /[;|&`$(){}!#\\<>'"\n\r\t\f\v]/g
+// Run curl with an ARGV array (no shell) — a URL/param can't inject a command even before
+// safeUrl() strips metachars. Returns trimmed stdout; on a non-zero exit (e.g. connection
+// failure) returns whatever stdout curl captured (it still writes -w output when it connected).
+// Prefer this over execSync(`curl … "${url}"`) for daemon probes. See item #4 (reduce shell exec).
+function runCurl(args, { timeout = 15000, maxBuffer = 8 * 1024 * 1024 } = {}) {
+  try {
+    return execFileSync('curl', args, { timeout, encoding: 'utf-8', maxBuffer, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+  } catch (e) {
+    return ((e && e.stdout) || '').toString().trim()
+  }
+}
 function safeUrl(u) {
   if (!u || typeof u !== 'string') return ''
   // Bound length to prevent arg-list overflow + strip metacharacters
@@ -4674,8 +4685,7 @@ async function dispatchPentestParallel(dispatch) {
       // and follow redirects (-L) so a 301/302 landing page counts as reachable.
       let httpCode = '000'
       for (let _try = 1; _try <= 3; _try++) {
-        try { httpCode = execSync(`curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "${safeUrl_local}"`, { timeout: 15000 }).toString().trim() || '000' }
-        catch (ce) { httpCode = (ce.stdout || '').toString().trim() || '000' }
+        httpCode = runCurl(['-sL', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', safeUrl_local]) || '000'
         if (/^[1-5]\d\d$/.test(httpCode) && httpCode !== '000') break
         if (_try < 3) { log(`⏳ Pre-flight: ${targetUrl} not answering yet (code ${httpCode}) — retry ${_try}/2 in 2s (target may be booting)`); try { execSync('sleep 2') } catch {} }
       }
@@ -4690,8 +4700,7 @@ async function dispatchPentestParallel(dispatch) {
                       : /^http:\/\//i.test(targetUrl) ? targetUrl.replace(/^http:\/\//i, 'https://')
                       : 'https://' + targetUrl.replace(/^[a-z]+:\/\//i, '')
         let _altCode = '000'
-        try { _altCode = execSync(`curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${safeUrl(_altUrl)}"`, { timeout: 15000 }).toString().trim() || '000' }
-        catch (ce2) { _altCode = (ce2.stdout || '').toString().trim() || '000' }
+        _altCode = runCurl(['-s', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', safeUrl(_altUrl)]) || '000'
         const _altOk = /^[1-5]\d\d$/.test(_altCode) && _altCode !== '000'
         if (_altOk) {
           log(`✅ Pre-flight: ${targetUrl} dead on its scheme (code ${httpCode}) but ${_altUrl} answers (HTTP ${_altCode}) — switching scheme`)
@@ -5108,7 +5117,7 @@ async function dispatchPentestParallel(dispatch) {
     let targetReachable = false
     if (endpointCount === 0) {
       try {
-        const httpCode = execSync(`curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "${safeUrl(targetUrl)}"`, { encoding: 'utf-8', timeout: 15000 }).trim()
+        const httpCode = runCurl(['-sL', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', safeUrl(targetUrl)])
         targetReachable = ['200', '301', '302', '303', '307', '308', '400', '401', '403', '404', '405', '415', '500', '502', '503'].includes(httpCode)
         log(`🔍 Target reachability check: HTTP ${httpCode} → ${targetReachable ? 'REACHABLE' : 'UNREACHABLE'}`)
       } catch (e) {
@@ -5188,7 +5197,7 @@ async function dispatchPentestParallel(dispatch) {
       if (altUrl) {
         let altReachable = false
         try {
-          const altCode = execSync(`curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "${safeUrl(altUrl)}"`, { encoding: 'utf-8', timeout: 15000 }).trim()
+          const altCode = runCurl(['-sL', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', safeUrl(altUrl)])
           altReachable = ['200', '301', '302', '303', '307', '308', '400', '401', '403', '404', '405', '415', '500', '502', '503'].includes(altCode)
           log(`🔁 Alt-scheme probe: ${altUrl} → HTTP ${altCode} (${altReachable ? 'REACHABLE' : 'unreachable'})`)
         } catch (e) {
