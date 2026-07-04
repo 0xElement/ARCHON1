@@ -59,7 +59,10 @@ function writeJudged(findings, taskId, outputDir) {
 function callRealLLM(prompt, opts = {}) {
   const model = resolveLLMModel({ family: 'fast', override: opts.model })
   return new Promise((resolve, reject) => {
-    const env = { ...process.env, HOME: '/root' }
+    // Inherit the real HOME so the claude CLI finds the subscription OAuth creds on ANY host
+    // (a hardcoded HOME=/root broke OAuth on every non-root machine → the judge silently failed,
+    // skipping independent High/Critical validation). Runs on the subscription, never an API key.
+    const env = { ...process.env, HOME: process.env.HOME || require('os').homedir() }
     delete env.ANTHROPIC_API_KEY
     // Structured output (2026-06-09): when a jsonSchema is supplied, run with
     // --output-format json + --json-schema. The model's schema-conforming object lands in

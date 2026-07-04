@@ -934,6 +934,16 @@ function blockReportPublication(taskId, arbiterResult, reason) {
 }
 
 // Pentest squad agent roles — parallel execution
+// ── Report / enrich agent hard-caps (2026-07) ──────────────────────────────────────────
+// The report path (WRITER enrich → SCRIBE) is fired fire-and-forget from the inbox, OUTSIDE
+// any dispatch-level outer timeout, so without a per-agent cap a hung agent inherits
+// AGENT_NO_LIMIT_MS (7 days) and pins the task at 'generating-report' forever (the observed
+// stuck-report symptom). These caps make a hang resolve code 143 → flow continues → the task
+// self-heals to a terminal state. Generous so a legitimately-long report is never truncated.
+const SCRIBE_TIMEOUT_MS = 30 * 60 * 1000        // report writing (white-box/multi-iteration can be long)
+const WRITER_TIMEOUT_MS = 5 * 60 * 1000         // per-finding writeup (matches the streaming triager)
+const REPORT_AUDITOR_TIMEOUT_MS = 20 * 60 * 1000 // fallback batch AUDITOR validation
+
 // Pentest agents — dynamic with hardcoded fallbacks
 // v2: Added FORGE (SSTI), LEDGER (Business Logic) to always-run list
 // v3: Added KEYRING — sole coverage-map owner of WSTG-IDNT/ATHN/SESS (Identity/Auth/Session) and
@@ -4605,9 +4615,13 @@ async function dispatchPentestParallel(dispatch) {
   // other specialist sits done. On timeout the spawn settles as code 143 and the wave
   // advances. Recon (SCOUT/RANGER) stays uncapped — its crawl legitimately runs long.
   const SPECIALIST_TIMEOUT_MS = 20 * 60 * 1000 // 20 min/attempt; tune via this constant
+  // Recon (SCOUT/RANGER) runs external tools (nmap/ffuf/crawl) that can legitimately be slow, so
+  // it gets a generous cap rather than the specialist one — but it is NEVER unbounded (an uncapped
+  // recon agent could otherwise wedge the whole pipeline forever). Also caps RANGER-as-CMDi.
+  const RECON_TIMEOUT_MS = 30 * 60 * 1000
   async function spawnWithRetry(agentName, prompt, suffix, maxRetries = 1) {
     const _spawnOpts = PENTEST_RECON.includes(String(agentName).toLowerCase())
-      ? {} : { timeoutMs: SPECIALIST_TIMEOUT_MS }
+      ? { timeoutMs: RECON_TIMEOUT_MS } : { timeoutMs: SPECIALIST_TIMEOUT_MS }
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const model = getAvailableModel(agentName)
       if (attempt > 0) {
@@ -5246,7 +5260,7 @@ async function dispatchPentestParallel(dispatch) {
       trackCosts([sentryResult])
 
       const scribePrompt = buildscribeReportPrompt(taskTitle, taskId, projectId || '', squad, targetUrl, taskGoal || '', [])
-      const scribeResult = await spawnAgent(PENTEST_REPORTER, taskId, scribePrompt, `task-${taskId}-scribe-earlyexit`, modelOverride)
+      const scribeResult = await spawnAgent(PENTEST_REPORTER, taskId, scribePrompt, `task-${taskId}-scribe-earlyexit`, modelOverride, { timeoutMs: SCRIBE_TIMEOUT_MS })
       trackCosts([scribeResult])
 
       updateProgress(90, 'Early exit — limited assessment complete')
@@ -5683,7 +5697,7 @@ async function dispatchPentestParallel(dispatch) {
       for (const agent of emptySpecialists) {
         log(`♻️ Re-running ${agent.toUpperCase()} (produced no output)`)
         const prompt = buildPentestSpecialistPrompt(agent, taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, techContext, _taskMissedSignals[taskId])
-        const retryResult = await spawnAgent(agent, taskId, prompt, `task-${taskId}-${agent}-retry`, modelOverride)
+        const retryResult = await spawnAgent(agent, taskId, prompt, `task-${taskId}-${agent}-retry`, modelOverride, { timeoutMs: SPECIALIST_TIMEOUT_MS })
         trackCosts([retryResult])
       }
     }
@@ -5789,7 +5803,7 @@ async function dispatchPentestParallel(dispatch) {
       log(`⏭️ Phase 3: skipping batch AUDITOR — streaming triage already validated ${_streamedConfirmed} finding(s) live`)
     } else {
       const auditorPrompt = buildauditorValidationPrompt(taskTitle, taskId, projectId || '', squad, targetUrl, taskGoal || '')
-      auditorResult = await spawnAgent(PENTEST_VALIDATOR, taskId, auditorPrompt, `task-${taskId}-auditor-validate`, modelOverride)
+      auditorResult = await spawnAgent(PENTEST_VALIDATOR, taskId, auditorPrompt, `task-${taskId}-auditor-validate`, modelOverride, { timeoutMs: REPORT_AUDITOR_TIMEOUT_MS })
       trackCosts([auditorResult])
     }
 
@@ -5869,7 +5883,11 @@ async function dispatchPentestParallel(dispatch) {
       // set BEFORE the WRITER writes them, so each REAL issue becomes ONE clean finding
       // (no duplicates, related issues merged) and severity/CVSS are correct. Rewrites
       // VALIDATED-FINDINGS with the merged set. Fail-soft + guarded (never loses findings). ──
-      if (phaseEnabled('3.052', squad)) {
+      // Only on the fallback batch-AUDITOR path — when streaming triage already owns
+      // VALIDATED-FINDINGS (_skipBatchAudit), the LLM re-merge is redundant + confusing (it
+      // rewrote the live-validated set) and hang-prone; it is also disabled in squad.json by
+      // default now. Guarded here too so re-enabling 3.052 can't re-triage the streamed set.
+      if (!_skipBatchAudit && phaseEnabled('3.052', squad)) {
         try { await runTriagerForTask(taskId) }
         catch (__trErr) { log(`⚠️ Phase 3.052 triager (non-fatal): ${__trErr.message}`) }
       }
@@ -6841,7 +6859,7 @@ The output MUST validate against the schema. You cannot emit prose — only the 
     }
 
     const scribePrompt = buildscribeReportPrompt(taskTitle, taskId, projectId || '', squad, targetUrl, taskGoal || '', safeChainResults, defensiveActionsText)
-    const scribeResult = await spawnAgent(PENTEST_REPORTER, taskId, scribePrompt, `task-${taskId}-scribe-report`, modelOverride)
+    const scribeResult = await spawnAgent(PENTEST_REPORTER, taskId, scribePrompt, `task-${taskId}-scribe-report`, modelOverride, { timeoutMs: SCRIBE_TIMEOUT_MS })
     trackCosts([scribeResult])
 
     log(`✅ Phase 4 complete: SCRIBE report written`)
@@ -7741,7 +7759,7 @@ Execute now.`
 
       // (2026-04-20) Defer to modelRouter (SCRIBE → report role → balanced/high).
       const model = modelOverride || null
-      const result = await spawnAgent('scribe', taskId, prompt, `task-${taskId}-scribe-smartretry`, model)
+      const result = await spawnAgent('scribe', taskId, prompt, `task-${taskId}-scribe-smartretry`, model, { timeoutMs: SCRIBE_TIMEOUT_MS })
       return { retryType: 'scribe-report-only', cost: result.cost }
     }
 
@@ -8638,16 +8656,22 @@ async function generateReportForTask(taskId) {
     prompt += `\n\n## OPERATOR TRIAGE (AUTHORITATIVE)\nThe operator has triaged the findings. Read ${triageFile} — JSON shaped { "verdicts": { "<finding id>": { "verdict": "confirmed"|"rejected", "severity": "<override>", "cvss": <0-10 override>, "cvssVector": "CVSS:3.1/…", "notes": "operator note" } } }. Rules:\n- INCLUDE ONLY findings whose verdict is "confirmed"; OMIT every "rejected" finding entirely.\n- The operator's severity, cvss score AND cvssVector OVERRIDE the scanner's — use them verbatim in each finding's CVSS line.\n- If a finding has operator notes, weave them into that finding's writeup (rationale / CVSS justification) — they are authoritative analyst input.\nAlso read ${agentPaths.INTEL_ROOT}/findings-detail-${taskId}.json if present (per-finding description/impact/remediation/raw_request/poc) and use it. If the triage file is absent, fall back to all CONFIRMED VALIDATED-FINDINGS.`
   }
   try {
-    await spawnAgent(PENTEST_REPORTER, taskId, prompt, `task-${taskId}-scribe-triaged`, task.model || null)
+    const _res = await spawnAgent(PENTEST_REPORTER, taskId, prompt, `task-${taskId}-scribe-triaged`, task.model || null, { timeoutMs: SCRIBE_TIMEOUT_MS })
+    const _ok = _res && (_res.code === 0 || _res.code === 1)
     // Stamp the publication-status banner on the triage-gated report too — this
     // is the path that fires if the judge (Phase 3.9) failed earlier.
     try { prependPublicationStatusBanner(taskId, null) } catch {}
     const t2 = readJSON(TASKS_FILE) || []; const tk = t2.find(t => String(t.id) === String(taskId))
-    if (tk) { tk.status = 'done'; tk.progress = 100; tk.statusMessage = 'Report generated'; tk.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, t2) }
-    log(`✅ Generate-report: report written for ${taskId}`)
-    logActivity('SCRIBE', `✅ Report generated (operator-triaged)`, { type: 'report-done', squad, taskId, projectId })
+    if (tk) { tk.status = 'done'; tk.progress = 100; tk.statusMessage = _ok ? 'Report generated' : 'Report generation timed out — click Generate report to retry'; tk.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, t2) }
+    log(_ok ? `✅ Generate-report: report written for ${taskId}` : `⚠️ Generate-report: SCRIBE exit ${_res && _res.code} for ${taskId} (report may be incomplete — retry available)`)
+    logActivity('SCRIBE', _ok ? `✅ Report generated (operator-triaged)` : `⚠️ Report generation did not complete (SCRIBE exit ${_res && _res.code})`, { type: 'report-done', squad, taskId, projectId })
   } catch (e) { log(`❌ generate-report ${taskId} failed: ${e.message}`) }
-  } finally { _reportInFlight.delete(String(taskId)) }
+  } finally {
+    _reportInFlight.delete(String(taskId))
+    // Self-heal: a report attempt must NEVER leave the task pinned at 'generating-report'
+    // (belt-and-suspenders against any early throw/hang before the status reset above).
+    try { const _t = readJSON(TASKS_FILE) || []; const _tk = _t.find(t => String(t.id) === String(taskId)); if (_tk && _tk.status === 'generating-report') { _tk.status = 'done'; _tk.progress = 100; _tk.statusMessage = 'Report generation failed — click Generate report to retry'; _tk.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, _t) } } catch {}
+  }
 }
 
 // ── Amend a run: append instructions to the engagement brief + add in-scope hosts ──
@@ -8997,7 +9021,7 @@ Write STRICT JSON to ${perFile} (ONLY that file):
 { "${f.id}": { "description":"", "cwe":"", "cvss_vector":"", "cvss_score":0.0, "code_block":"", "data_flow":"", "impact":"", "remediation":"" } }
 Reply one line: wrote ${f.id}.`
     const prompt = _isSourceEnrich ? sourceWriterPrompt : liveWriterPrompt
-    try { await spawnAgent('writer', taskId, prompt, `task-${taskId}-writer-${f.id}`, null) }
+    try { await spawnAgent('writer', taskId, prompt, `task-${taskId}-writer-${f.id}`, null, { timeoutMs: WRITER_TIMEOUT_MS }) }
     catch (e) { log(`⚠️ writer ${f.id} failed: ${e.message}`); return }
     try { const one = JSON.parse(fs.readFileSync(perFile, 'utf8')); Object.assign(detail, one); fs.unlinkSync(perFile) }
     catch { log(`⚠️ writer ${f.id}: no detail parsed (left for retry)`) }

@@ -172,8 +172,10 @@ function buildInventories(sourceDir, invDir, stack, log) {
   for (const [name, pattern, globs] of specs) {
     const file = path.join(invDir, `${name}.txt`)
     try {
-      const cmd = `grep -rEn ${globs.join(' ')} -e ${JSON.stringify(pattern)} . 2>/dev/null | head -8000`
-      const out = execSync(cmd, { cwd: sourceDir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, shell: '/bin/bash' })
+      const cmd = `grep -rEn --exclude-dir={node_modules,vendor,.git,dist,build,coverage,.next,target,.venv,__pycache__} ${globs.join(' ')} -e ${JSON.stringify(pattern)} . 2>/dev/null | head -8000`
+      // timeout so a runaway/blocked grep is KILLED rather than freezing the whole daemon; on
+      // timeout execSync throws → the catch below records 0 (fail-soft), same as a no-match exit 1.
+      const out = execSync(cmd, { cwd: sourceDir, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, shell: '/bin/bash', timeout: 120000, killSignal: 'SIGKILL' })
       fs.writeFileSync(file, out)
       counts[name] = out ? out.trimEnd().split('\n').filter(Boolean).length : 0
     } catch (e) {
@@ -568,7 +570,7 @@ async function runCodeReview(dispatch, deps) {
   if (cancelled()) return bail('Phase 3 report')
   if (runPhase('report')) {
     updateProgress(94, 'Phase 3: SCRIBE final report')
-    const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl, { mapped: features.length, deeplyReviewed: p2Features.length, capped: Math.max(0, features.length - p2Features.length) }), `task-${taskId}-scribe`, null)
+    const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl, { mapped: features.length, deeplyReviewed: p2Features.length, capped: Math.max(0, features.length - p2Features.length) }), `task-${taskId}-scribe`, null, { timeoutMs: 30 * 60 * 1000 })
     trackCosts([vRes])
   }
 
