@@ -943,6 +943,10 @@ function blockReportPublication(taskId, arbiterResult, reason) {
 const SCRIBE_TIMEOUT_MS = 30 * 60 * 1000        // report writing (white-box/multi-iteration can be long)
 const WRITER_TIMEOUT_MS = 5 * 60 * 1000         // per-finding writeup (matches the streaming triager)
 const REPORT_AUDITOR_TIMEOUT_MS = 20 * 60 * 1000 // fallback batch AUDITOR validation
+// ATLAS attack-planning (Phase 1.9 strategist + Phase 3.087 re-plan): Opus/high-effort's heaviest
+// single reasoning pass. Was 90s — too tight (timed out on slower/remote hosts, silently losing the
+// ranked plan). Specialists get 20min; planning gets a generous 5min so it completes, not truncates.
+const ATLAS_PLAN_TIMEOUT_MS = 5 * 60 * 1000
 
 // Pentest agents — dynamic with hardcoded fallbacks
 // v2: Added FORGE (SSTI), LEDGER (Business Logic) to always-run list
@@ -2967,7 +2971,7 @@ async function runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerpri
     const _atlasRoute = modelRouter.getModelForAgent('atlas', { squad })
     const { text } = await runAgent({
       agentName: 'ATLAS', taskId, model: _atlasRoute.model,
-      effort: _atlasRoute.effort || 'high', userPrompt: prompt, timeoutMs: 90000,
+      effort: _atlasRoute.effort || 'high', userPrompt: prompt, timeoutMs: ATLAS_PLAN_TIMEOUT_MS,
     })
     const plan = planner.normalizePlan(text)
     fs.writeFileSync(outPath, JSON.stringify(plan, null, 2))
@@ -3012,7 +3016,7 @@ Output ONE JSON array, same shape as the attack plan: {"endpoint","params","vuln
 "priority"(1-5),"suggested_specialist","cve"}. 0-10 entries, ranked. If nothing is left, output [].`
     const _atlasRoute = modelRouter.getModelForAgent('atlas', { squad }) // orchestrator → Opus (was broken resolve())
     const { text } = await runAgent({
-      agentName: 'ATLAS', taskId, model: _atlasRoute.model, effort: _atlasRoute.effort || 'high', userPrompt: prompt, timeoutMs: 90000,
+      agentName: 'ATLAS', taskId, model: _atlasRoute.model, effort: _atlasRoute.effort || 'high', userPrompt: prompt, timeoutMs: ATLAS_PLAN_TIMEOUT_MS,
     })
     const followup = planner.normalizePlan(text)
     fs.writeFileSync(`${agentPaths.INTEL_ROOT}/followup-plan-${taskId}.json`, JSON.stringify(followup, null, 2))
