@@ -11351,6 +11351,7 @@ function startWatcher() {
       const tasks = (readJSON(TASKS_FILE) || []).filter(t => t && t.status === 'in-progress')
       if (!tasks.length) return
       const { normalizeFinding } = require('./agents/finding-schema')
+      const { newFindingsFromActivity } = require('./src/pipeline/activity-ingest')
       const ID = agentPaths.INTEL_ROOT
       let lines = []
       try { lines = fs.readFileSync(`${ID}/ACTIVITY-LOG.jsonl`, 'utf8').trim().split('\n').slice(-1500) } catch {}
@@ -11359,22 +11360,15 @@ function startWatcher() {
       for (const task of tasks) {
         const taskId = String(task.id)
         const lf = `${ID}/live-findings-${taskId}.jsonl`
-        const seen = new Set()
-        try { for (const l of fs.readFileSync(lf, 'utf8').split('\n')) { if (!l.trim()) continue; try { const o = JSON.parse(l); seen.add(`${String(o.url || '').toLowerCase()}|${String(o.details || o.title || '').slice(0, 40)}`) } catch {} } } catch {}
+        // Read what live-findings already holds, then append ONLY genuinely-new findings — deduped
+        // by the pipeline's canonicalKey, computed the SAME way on both sides. Idempotent: this 15s
+        // job can never re-append an existing finding, so live-findings can't balloon (the prior
+        // key-mismatch bug re-appended everything each tick → ~250× blow-up that wedged the run).
+        const existing = []
+        try { for (const l of fs.readFileSync(lf, 'utf8').split('\n')) { if (!l.trim()) continue; try { existing.push(JSON.parse(l)) } catch {} } } catch {}
+        const fresh = newFindingsFromActivity(existing, acts, taskId, { normalizeFinding, isFindingEntry: _looksLikeFinding })
         let added = 0
-        for (const e of acts) {
-          if (String(e.taskId) !== taskId || !_looksLikeFinding(e)) continue
-          const a = String(e.action || '')
-          const title = a.replace(/^(confirmed|suspected)\s+finding:\s*/i, '').slice(0, 120)
-          const url = (a + ' ' + (e.details || '')).match(/https?:\/\/[^\s"')]+/)?.[0] || ''
-          const key = `${url.toLowerCase()}|${(e.details || title).slice(0, 40)}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          const sev = e.severity || (a.match(/^(critical|high|medium|low|info)/i) || [])[1] || 'medium'
-          const type = e.status || (/^(confirmed|critical|high)/i.test(a) ? 'confirmed' : 'suspected')
-          const rec = normalizeFinding({ agent: e.agent, type, severity: sev, url, details: title, reproduction: e.details || '', taskId, source: 'activity-ingest' })
-          try { fs.appendFileSync(lf, JSON.stringify(rec) + '\n'); added++ } catch {}
-        }
+        for (const rec of fresh) { try { fs.appendFileSync(lf, JSON.stringify(rec) + '\n'); added++ } catch {} }
         if (added) log(`📥 Ingested ${added} activity finding(s) → live-findings for ${taskId}`)
       }
     } catch {}
