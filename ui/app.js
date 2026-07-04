@@ -237,13 +237,63 @@ function render(s) {
   renderTasks(s)
   renderReports(s)
 }
+// Overview empty-state: an animated preview of what a run looks like (dispatch →
+// progress → findings stream → report). Uses only .demo-* classes (in app.css); the
+// sample findings are illustrative — rendered ONLY when state.tasks is empty.
+const DEMO_LOOP_HTML = `<p class="empty" style="text-align:left;margin:0 0 12px">No runs yet — here's what one looks like. Queue a target from <b>New dispatch</b> to begin.</p>
+<div class="demo">
+  <div class="demo-chrome">
+    <i style="background:#fb7185"></i><i style="background:#fbbf24"></i><i style="background:#34d399"></i>
+    <span class="u">127.0.0.1:4000</span>
+  </div>
+  <div class="demo-body">
+    <div style="display:flex;align-items:center;gap:11px;margin-bottom:18px">
+      <span style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center"><svg viewBox="0 0 256 256" width="30" height="30" fill="none"><defs><radialGradient id="dt" cx="50%" cy="34%" r="82%"><stop offset="0" stop-color="#1c2a42"/><stop offset="1" stop-color="#0a0e16"/></radialGradient><linearGradient id="dr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a784"/><stop offset="1" stop-color="#cf5d39"/></linearGradient></defs><rect x="8" y="8" width="240" height="240" rx="60" fill="url(#dt)"/><circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="3" stroke-opacity=".3"/><g stroke="url(#dr)" stroke-width="9" stroke-linecap="round"><line x1="24" y1="128" x2="52" y2="128"/><line x1="204" y1="128" x2="232" y2="128"/><line x1="128" y1="204" x2="128" y2="232"/></g><path d="M96 200 L128 52 L160 200" fill="none" stroke="url(#dr)" stroke-width="24" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"/><line x1="106" y1="150" x2="150" y2="150" stroke="url(#dr)" stroke-width="17" stroke-linecap="round"/><circle cx="128" cy="128" r="6" fill="#38bdf8"/></svg></span>
+      <div style="font-weight:650;font-size:15px">ARCHON <small style="display:block;font-weight:400;font-size:10px;color:var(--fg-dim)">offensive operations console</small></div>
+      <span class="pill live" style="margin-left:auto"><span class="dot"></span> daemon live</span>
+    </div>
+    <div class="demo-stage">
+      <div class="demo-s1"><b>▸ DISPATCH</b><small>target accepted · scope gate passed</small></div>
+      <div class="demo-s2"><b>▸ LIVE PROGRESS</b><small>recon → fingerprint → plan → specialist waves</small></div>
+      <div class="demo-s3"><b>▸ AWAITING TRIAGE</b><small>findings verified · you confirm each</small></div>
+      <div class="demo-s4"><b>▸ REPORT GENERATED</b><small>SCRIBE wrote one de-duplicated report</small></div>
+    </div>
+    <div class="demo-cols">
+      <div class="demo-card" style="position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent)"></div>
+        <div style="font-weight:650;font-size:14.5px">juice-shop.local</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--fg-dim);margin-top:3px">ENG-4471 · black-box + source</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;color:var(--accent-2);margin-top:9px"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(124,131,255,.22)"></span>running</div>
+        <div class="demo-bars">
+          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Recon &amp; fingerprint</div><div class="demo-bar b1"><i></i></div></div>
+          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">ATLAS attack plan</div><div class="demo-bar b2"><i></i></div></div>
+          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Specialist waves</div><div class="demo-bar b3"><i></i></div></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:15px;flex-wrap:wrap">
+          <span class="chip" style="color:#22d3ee">SCOUT</span><span class="chip" style="color:#fb7185">VIPER</span><span class="chip" style="color:#fbbf24">DRILL</span><span class="chip" style="color:#34d399">WARDEN</span><span class="chip" style="color:#b08cff">RELAY</span>
+        </div>
+      </div>
+      <div class="demo-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span style="font-size:12.5px;font-weight:600">Findings board</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--fg-dim)">verified · one at a time</span>
+        </div>
+        <div class="demo-find demo-f1"><span class="badge sev-critical">CRIT</span><span class="t">SQL injection · /rest/products/search</span><span class="sc" style="color:var(--emerald)">9.8</span></div>
+        <div class="demo-find demo-f2"><span class="badge sev-high">HIGH</span><span class="t">JWT algorithm confusion</span><span class="sc">8.1</span></div>
+        <div class="demo-find demo-f3"><span class="badge sev-medium">MED</span><span class="t">Stored XSS · product review</span><span class="sc">6.1</span></div>
+        <div class="demo-find demo-f4"><span class="badge sev-high">HIGH</span><span class="t">IDOR · /api/basket/{id}</span><span class="sc">7.5</span></div>
+        <div class="demo-report"><span class="chk">✓</span><div style="flex:1"><div style="font-size:12.5px;font-weight:600">report.md</div><div style="font-family:var(--mono);font-size:10.5px;color:var(--fg-dim)">4 confirmed · correlated + de-duplicated</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>`
 // task-card render — skipped when nothing changed so an inline-open report survives the poll
 function renderTasks(s, force) {
   const sig = JSON.stringify(s.tasks.map(t => [t.id, t.status, t.progress, t.totalCost])) + '|' + REPORTS.length
   if (!force && sig === lastTaskSig) return
   lastTaskSig = sig
   const recent = s.tasks.slice(0, 4)
-  $('#ovTasks').innerHTML = recent.length ? `<div class="grid" style="gap:14px">${recent.map(taskCard).join('')}</div>` : '<div class="empty">No tasks yet — queue one from “New dispatch”.</div>'
+  $('#ovTasks').innerHTML = recent.length ? `<div class="grid" style="gap:14px">${recent.map(taskCard).join('')}</div>` : DEMO_LOOP_HTML
   $('#taskList').innerHTML = s.tasks.length ? s.tasks.map(taskCard).join('') : '<div class="empty">No tasks yet.</div>'
   bindDynamic()
 }
@@ -712,6 +762,26 @@ function credRow(u = '', p = '', role = 'normal') {
 function ensureCredRows() { if (!$('#ptCreds').children.length) $('#ptCreds').appendChild(credRow()) }
 if ($('#ptAddCred')) $('#ptAddCred').onclick = () => $('#ptCreds').appendChild(credRow())
 
+// ATLAS → specialist waves → triage. Pass the squad's roster; falls back to defaults.
+// Purely presentational overview diagram (.dvz-* styles live in app.css); safe to add/remove.
+function squadDispatchViz(sq) {
+  const SPEC_HUE = { SCOUT:'#22d3ee', VIPER:'#fb7185', DRILL:'#fbbf24',
+    RELAY:'#9ba2ff', WARDEN:'#34d399', GATEWAY:'#b08cff' }
+  const lead = (sq && sq.leader) || 'ATLAS'
+  const specs = ((sq && sq.agents) || Object.keys(SPEC_HUE)).slice(0, 6)
+  const pkts = specs.map((_, i) =>
+    `<span class="pkt" style="left:${8 + i * (84 / Math.max(1, specs.length - 1))}%;animation-delay:${(i * .35).toFixed(2)}s"></span>`).join('')
+  const cards = specs.map((a, i) => {
+    const hue = SPEC_HUE[String(a).toUpperCase()] || '#9ba2ff'
+    return `<div class="dvz-spec" style="--sp:${hue};animation-delay:${(i * .3).toFixed(2)}s"><b>${esc(a)}</b><span></span></div>`
+  }).join('')
+  return `<div class="dvz">
+    <div class="dvz-lead-row"><div class="dvz-lead"><b>${esc(lead)}</b><span>lead · plans the attack walk</span></div></div>
+    <div class="dvz-rail"><span class="down"></span><span class="flow"></span>${pkts}</div>
+    <div class="dvz-specs">${cards}</div>
+    <div class="dvz-triage-row"><div class="dvz-triage"><span class="dot"></span><span>every finding → TRIAGER → AUDITOR → you</span></div></div>
+  </div>`
+}
 function updateDispatchInfo() {
   const sq = SQUAD_BY[$('#fSquad').value]; if (!sq) return
   const cr = isCR(), pt = isPT()
@@ -725,7 +795,7 @@ function updateDispatchInfo() {
     : pt
     ? `${sq.leader} runs recon → specialists → AUDITOR verify → ARBITER judge → SCRIBE report. Scope is hard-enforced at Phase 0.`
     : `Leader ${sq.leader} coordinates ${sq.agents.length} personas through ${sq.phases.length} phases.`
-  $('#dispatchInfo').innerHTML = md(cr
+  $('#dispatchInfo').innerHTML = squadDispatchViz(sq) + md(cr
     ? `**Code review (white-box, phase1-maps method)** on a local source tree.\n\n`
       + `1. **Inventories** — scripted multi-language enumeration\n2. **Feature queue** — CURATOR auto-discovers features from the surface\n`
       + `3. **Feature mapping** — one agent per feature → \`features/<slug>.md\`\n4. **Consolidation** — CURATOR → coverage matrices + review queue\n`

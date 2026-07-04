@@ -1,65 +1,57 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 200" role="img" aria-label="ARCHON — autonomous AI web-application pentester">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" fill="none" role="img" aria-label="ARCHON — Autonomous AI web-application penetration tester">
   <defs>
-    <linearGradient id="banner" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#121b2d"/>
-      <stop offset="1" stop-color="#0a0e16"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#121b2d"></stop><stop offset=".7" stop-color="#0a0e16"></stop>
     </linearGradient>
-    <radialGradient id="tile" cx="50%" cy="36%" r="82%">
-      <stop offset="0" stop-color="#1c2a42"/>
-      <stop offset="1" stop-color="#0a0e16"/>
+    <radialGradient id="glow" cx="78%" cy="-10%" r="70%">
+      <stop offset="0" stop-color="#7c83ff" stop-opacity=".22"></stop><stop offset="1" stop-color="#7c83ff" stop-opacity="0"></stop>
     </radialGradient>
-    <linearGradient id="terra" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f4a784"/>
-      <stop offset="1" stop-color="#cf5d39"/>
-    </linearGradient>
-    <linearGradient id="scan" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#38bdf8" stop-opacity="0"/>
-      <stop offset="0.5" stop-color="#38bdf8" stop-opacity="0.8"/>
-      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="word" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f3f6fb"/>
-      <stop offset="1" stop-color="#c4ccd8"/>
-    </linearGradient>
+    <radialGradient id="tile" cx="50%" cy="34%" r="82%"><stop offset="0" stop-color="#1c2a42"></stop><stop offset="1" stop-color="#0a0e16"></stop></radialGradient>
+    <linearGradient id="terra" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a784"></stop><stop offset="1" stop-color="#cf5d39"></stop></linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f6fb"></stop><stop offset="1" stop-color="#c4ccd8"></stop></linearGradient>
   </defs>
 
-  <!-- hero card -->
-  <rect x="1" y="1" width="758" height="198" rx="26" fill="url(#banner)"/>
-  <rect x="1.5" y="1.5" width="757" height="197" rx="25.5" fill="none" stroke="#38bdf8" stroke-opacity="0.14" stroke-width="1.5"/>
+  <rect width="1200" height="340" rx="20" fill="url(#bg)"></rect>
+  <rect width="1200" height="340" rx="20" fill="url(#glow)"></rect>
+  <rect x="1" y="1" width="1198" height="338" rx="19" fill="none" stroke="#38bdf8" stroke-opacity=".16"></rect>
 
-  <!-- icon mark (the refined reticle), scaled into the left -->
-  <g transform="translate(26,28) scale(0.5625)">
-    <rect x="8" y="8" width="240" height="240" rx="50" fill="url(#tile)"/>
-    <rect x="8.75" y="8.75" width="238.5" height="238.5" rx="49.25" fill="none" stroke="#38bdf8" stroke-opacity="0.12" stroke-width="1.5"/>
-    <line x1="40" y1="128" x2="216" y2="128" stroke="url(#scan)" stroke-width="3" stroke-linecap="round"/>
-    <circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-opacity="0.28"/>
-    <g fill="none" stroke="url(#terra)" stroke-width="5" stroke-linecap="round">
-      <path d="M211.8,147.3 A86,86 0 0 1 147.3,211.8"/>
-      <path d="M108.7,211.8 A86,86 0 0 1 44.2,147.3"/>
-      <path d="M44.2,108.7  A86,86 0 0 1 108.7,44.2"/>
-      <path d="M147.3,44.2  A86,86 0 0 1 211.8,108.7"/>
+
+  <g transform="translate(70 66) scale(.8)">
+    <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#tile)"></rect>
+    <rect x="8.75" y="8.75" width="238.5" height="238.5" rx="53.25" fill="none" stroke="#38bdf8" stroke-opacity=".14" stroke-width="1.5"></rect>
+    <circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-opacity=".26"></circle>
+    <g fill="none" stroke="url(#terra)" stroke-width="5.5" stroke-linecap="round">
+      <path d="M211.8,147.3 A86,86 0 0 1 147.3,211.8"></path><path d="M108.7,211.8 A86,86 0 0 1 44.2,147.3"></path>
+      <path d="M44.2,108.7 A86,86 0 0 1 108.7,44.2"></path><path d="M147.3,44.2 A86,86 0 0 1 211.8,108.7"></path>
     </g>
-    <g stroke="url(#terra)" stroke-width="6" stroke-linecap="round">
-      <line x1="28" y1="128" x2="52" y2="128"/>
-      <line x1="204" y1="128" x2="228" y2="128"/>
-      <line x1="128" y1="204" x2="128" y2="228"/>
+    <g stroke="url(#terra)" stroke-width="6.5" stroke-linecap="round">
+      <line x1="26" y1="128" x2="52" y2="128"></line><line x1="204" y1="128" x2="230" y2="128"></line><line x1="128" y1="204" x2="128" y2="230"></line>
     </g>
-    <path d="M96,200 L128,52 L160,200" fill="none" stroke="url(#terra)" stroke-width="20"
-          stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"/>
-    <line x1="108" y1="150" x2="148" y2="150" stroke="url(#terra)" stroke-width="15" stroke-linecap="round"/>
-    <circle cx="128" cy="128" r="11" fill="none" stroke="#38bdf8" stroke-width="1.6" stroke-opacity="0.7"/>
-    <circle cx="128" cy="128" r="4.6" fill="#38bdf8"/>
+    <path d="M96,200 L128,52 L160,200" fill="none" stroke="url(#terra)" stroke-width="21" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"></path>
+    <line x1="107" y1="150" x2="149" y2="150" stroke="url(#terra)" stroke-width="15" stroke-linecap="round"></line>
+    <circle cx="128" cy="128" r="11" fill="none" stroke="#38bdf8" stroke-width="1.8" stroke-opacity=".7"></circle>
+    <circle cx="128" cy="128" r="4.8" fill="#38bdf8"></circle>
   </g>
 
-  <!-- wordmark -->
-  <text x="208" y="104" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif"
-        font-size="66" font-weight="800" letter-spacing="9" fill="url(#word)">ARCHON</text>
-  <!-- accent rule -->
-  <rect x="212" y="124" width="64" height="4" rx="2" fill="url(#terra)"/>
-  <!-- tagline -->
-  <text x="284" y="143" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif"
-        font-size="17.5" font-weight="500" letter-spacing="0.4" fill="#9aa6b6">autonomous AI web-application pentester</text>
-  <!-- sub-tagline -->
-  <text x="212" y="172" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif"
-        font-size="13.5" font-weight="500" letter-spacing="2.5" fill="#5f6b7d">WHITE-BOX + BLACK-BOX · ONE REPORT · YOU TRIAGE</text>
+
+  <text x="290" y="150" font-family="Inter, system-ui, sans-serif" font-size="66" font-weight="800" letter-spacing="9" fill="url(#word)">ARCHON</text>
+  <rect x="292" y="176" width="66" height="4" rx="2" fill="url(#terra)"></rect>
+  <text x="368" y="179" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="500" fill="#c4ccd8">Autonomous AI web-application penetration tester</text>
+  <text x="292" y="214" font-family="&#39;JetBrains Mono&#39;, ui-monospace, monospace" font-size="13" letter-spacing="4" fill="#5f6b7d">WHITE-BOX + BLACK-BOX · EVERY FINDING VERIFIED · YOU TRIAGE</text>
+
+
+  <g font-family="Inter, system-ui, sans-serif" font-size="15" fill="#c4ccd8">
+    <g transform="translate(292 244)">
+      <rect width="250" height="34" rx="9" fill="#ffffff" fill-opacity=".04" stroke="#ffffff" stroke-opacity=".09"></rect>
+      <circle cx="18" cy="17" r="4" fill="#34d399"></circle><text x="34" y="22">Every finding independently verified</text>
+    </g>
+    <g transform="translate(556 244)">
+      <rect width="228" height="34" rx="9" fill="#ffffff" fill-opacity=".04" stroke="#ffffff" stroke-opacity=".09"></rect>
+      <circle cx="18" cy="17" r="4" fill="#38bdf8"></circle><text x="34" y="22">Runs on your Claude subscription</text>
+    </g>
+    <g transform="translate(798 244)">
+      <rect width="214" height="34" rx="9" fill="#ffffff" fill-opacity=".04" stroke="#ffffff" stroke-opacity=".09"></rect>
+      <circle cx="18" cy="17" r="4" fill="#fbbf24"></circle><text x="34" y="22">Field-tested: CVE-2026-4524</text>
+    </g>
+  </g>
 </svg>
