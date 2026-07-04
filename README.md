@@ -61,8 +61,9 @@ de-duplicated report — with **you** as the final triage gate.
 git clone https://github.com/ghostshift-content/ARCHON.git
 cd ARCHON
 
-# 2 · install   (or the one-shot: bash setup.sh — install → seed config → doctor preflight)
-npm install
+# 2 · one-shot setup — installs deps, seeds the local data layer (var/intel) the daemon
+#     needs to boot, and runs a preflight (Node, your Claude login, optional recon tools)
+bash setup.sh
 
 # 3 · start the two processes, in separate shells
 npm start            # the agent daemon      → node event-bus.js
@@ -75,7 +76,9 @@ open http://127.0.0.1:4000
 Then click **New dispatch**, choose a squad, enter your **in-scope** target, and watch the run
 stream: dispatch → recon → specialist waves → verification → report.
 
-**Requirements:** Node ≥ 18 · access to Claude · targets you are **authorised** to test.
+**Requirements:** Node ≥ 18 · the **Claude CLI, logged in** — ARCHON runs on your Claude
+**subscription** via OAuth, no API key · targets you are **authorised** to test. Optional recon
+tools (nmap, ffuf, …) sharpen black-box runs; `npm run doctor` reports what's present.
 _(The console honours `PORT=` to override 4000.)_
 
 ---
@@ -161,6 +164,12 @@ scope is ultimately your responsibility. Unauthorised testing is illegal in most
 > shown as `<ip>` throughout the docs.
 
 ---
+
+## 📚 Docs
+
+- **[SETUP-LOCAL.md](SETUP-LOCAL.md)** — environment, portable roots, and first-run detail.
+- **[OPERATOR-RUNBOOK.md](OPERATOR-RUNBOOK.md)** — authorise → dispatch → read the report.
+- **[benchmark/](benchmark/README.md)** — how ARCHON is evaluated · **[CLAUDE.md](CLAUDE.md)** — architecture, for contributors.
 
 ## 🤝 Contributing
 
