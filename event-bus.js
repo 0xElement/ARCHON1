@@ -9101,7 +9101,10 @@ async function dispatchToAgent(dispatch) {
     const __scopePath = `${agentPaths.INTEL_ROOT}/scope-${taskId}.json`
     let __scopeConfig = null
     if (fs.existsSync(__scopePath)) {
-      try { __scopeConfig = JSON.parse(fs.readFileSync(__scopePath, 'utf8')) } catch { /* leave null */ }
+      // A present-but-corrupt scope file is suspicious — fail CLOSED (don't silently treat as
+      // "no scope"). The outer catch converts this throw into a blocked dispatch.
+      try { __scopeConfig = JSON.parse(fs.readFileSync(__scopePath, 'utf8')) }
+      catch (__pe) { throw new Error(`scope config unreadable / parse-failed at ${__scopePath}: ${__pe.message}`) }
     }
     const { status: __scopeStatus, reason: __scopeReason } = __scopePrevalidator.validateDispatch(dispatch, __squadPolicy, __scopeConfig)
     logActivity('NEXUS', `🛡️ Phase 0.0: scope pre-validate ${__scopeStatus} (${squad}) — ${__scopeReason}`, {
@@ -9127,11 +9130,28 @@ async function dispatchToAgent(dispatch) {
     }
     // 'allowed' and 'warned' both continue. 'warned' is logged for audit.
   } catch (__spErr) {
-    logActivity('NEXUS', `⚠️ Phase 0.0 scope-prevalidate error (non-fatal): ${__spErr.message}`, {
+    logActivity('NEXUS', `🛡️ Phase 0.0 scope-prevalidate ERROR — failing CLOSED: ${__spErr.message}`, {
       type: 'scope-prevalidate-error', squad, taskId, projectId: projectId || '',
       details: String(__spErr && __spErr.message || __spErr),
     })
-    // On adapter/module error, fail-soft and continue to legacy path.
+    if (process.env.ARCHON_SCOPE_OVERRIDE === '1') {
+      log(`⚠️ Phase 0.0 scope check errored but ARCHON_SCOPE_OVERRIDE=1 — continuing: ${__spErr.message}`)
+    } else {
+      // Fail-CLOSED: a crashed scope checker (policy require throws, corrupt scope JSON, adapter
+      // error) must NOT let an unvalidated dispatch run against a live target. Mark failed + abort.
+      try {
+        const __queue = JSON.parse(fs.readFileSync(DISPATCH_FILE, 'utf8'))
+        const __entry = __queue.find(d => String(d.taskId) === String(taskId))
+        if (__entry) {
+          __entry.status = 'failed'
+          __entry.failureReason = `Scope pre-validation error (fail-closed): ${__spErr.message}`
+          __entry.processedAt = new Date().toISOString()
+          fs.writeFileSync(DISPATCH_FILE, JSON.stringify(__queue, null, 2))
+        }
+      } catch (__qe) { log(`⚠️ Phase 0.0 fail-closed queue update failed: ${__qe.message}`) }
+      log(`🛡️ Phase 0.0 FAIL-CLOSED: scope pre-validation errored — aborting dispatch for taskId=${taskId} (set ARCHON_SCOPE_OVERRIDE=1 to bypass)`)
+      return
+    }
   }
 
   if (runningTasks.has(taskId)) {
@@ -10537,7 +10557,10 @@ function _processQueueInner() {
   // and event-bus scheduling slowdowns. 6 concurrent tasks is a comfortable ceiling
   // given the typical per-task fanout.
   const MAX_CONCURRENT_GLOBAL = 6
-  const globalRunning = runningAgents.size
+  // Running counter — must be `let` and incremented on each acceptance below. Was computed once
+  // as `const … = size`, so accepted dispatches never bumped it and the global cap could be
+  // exceeded within a single queue pass (over-fanout → quota/fd/memory pressure).
+  let globalRunning = runningAgents.size
 
   for (const dispatch of pending) {
     if (globalRunning >= MAX_CONCURRENT_GLOBAL) {
@@ -10569,6 +10592,7 @@ function _processQueueInner() {
     dispatch.status = 'processing'
     dispatch.processedAt = new Date().toISOString()
     runningAgents.add(leader)
+    globalRunning++ // count this acceptance so the global cap holds within this pass
     leaderRunCount[leader] = currentCount + 1
     writeJSON(DISPATCH_FILE, queue)
 
