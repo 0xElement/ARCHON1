@@ -24,7 +24,7 @@
   <div class="app">
     <div class="topbar">
       <div class="brand">
-        <span class="mark" aria-hidden="true"><svg viewBox="0 0 256 256" fill="none"><defs><radialGradient id="mkTile" cx="50%" cy="34%" r="82%"><stop offset="0" stop-color="#1c2a42"/><stop offset="1" stop-color="#0a0e16"/></radialGradient><linearGradient id="mkTerra" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a784"/><stop offset="1" stop-color="#cf5d39"/></linearGradient></defs><rect x="8" y="8" width="240" height="240" rx="60" fill="url(#mkTile)"/><rect x="9" y="9" width="238" height="238" rx="59" fill="none" stroke="#38bdf8" stroke-opacity=".16" stroke-width="2"/><circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="2" stroke-opacity=".28"/><g stroke="url(#mkTerra)" stroke-width="8" stroke-linecap="round"><line x1="24" y1="128" x2="52" y2="128"/><line x1="204" y1="128" x2="232" y2="128"/><line x1="128" y1="204" x2="128" y2="232"/></g><path d="M96 200 L128 52 L160 200" fill="none" stroke="url(#mkTerra)" stroke-width="23" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"/><line x1="106" y1="150" x2="150" y2="150" stroke="url(#mkTerra)" stroke-width="16" stroke-linecap="round"/><circle cx="128" cy="128" r="5" fill="#38bdf8"/></svg></span>
+        <span class="mark" aria-hidden="true"><svg viewBox="0 0 256 256" fill="none"><defs><radialGradient id="mkTile" cx="50%" cy="34%" r="82%"><stop offset="0" stop-color="#1c2a42"/><stop offset="1" stop-color="#0a0e16"/></radialGradient><linearGradient id="mkTerra" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a784"/><stop offset="1" stop-color="#cf5d39"/></linearGradient></defs><rect x="8" y="8" width="240" height="240" rx="54" fill="url(#mkTile)"/><rect x="8.75" y="8.75" width="238.5" height="238.5" rx="53.25" fill="none" stroke="#38bdf8" stroke-opacity=".14" stroke-width="1.5"/><circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-opacity=".26"/><g fill="none" stroke="url(#mkTerra)" stroke-width="5.5" stroke-linecap="round"><path d="M211.8,147.3 A86,86 0 0 1 147.3,211.8"/><path d="M108.7,211.8 A86,86 0 0 1 44.2,147.3"/><path d="M44.2,108.7 A86,86 0 0 1 108.7,44.2"/><path d="M147.3,44.2 A86,86 0 0 1 211.8,108.7"/></g><g stroke="url(#mkTerra)" stroke-width="6.5" stroke-linecap="round"><line x1="26" y1="128" x2="52" y2="128"/><line x1="204" y1="128" x2="230" y2="128"/><line x1="128" y1="204" x2="128" y2="230"/></g><path d="M96,200 L128,52 L160,200" fill="none" stroke="url(#mkTerra)" stroke-width="21" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"/><line x1="107" y1="150" x2="149" y2="150" stroke="url(#mkTerra)" stroke-width="15" stroke-linecap="round"/><circle cx="128" cy="128" r="11" fill="none" stroke="#38bdf8" stroke-width="1.8" stroke-opacity=".7"/><circle cx="128" cy="128" r="4.8" fill="#38bdf8"/></svg></span>
         <span class="name">ARCHON<small>Autonomous Research &amp; Code Hunting for Offensive Networks</small></span>
       </div>
       <div class="spacer"></div>
@@ -60,9 +60,11 @@
         <div class="view-head"><h1>Overview</h1><span class="sub" id="ovSub"></span></div>
         <div class="stats" id="stats"></div>
         <div class="card" id="healthCard" style="margin-bottom:16px"><div class="loghead"><h3>System health</h3><span class="sub" id="healthSub">self-verifying · every 10s</span></div><div id="ovHealth"></div></div>
-        <div class="grid cols-2">
-          <div class="card"><h3>Active &amp; recent tasks</h3><div id="ovTasks"></div></div>
-          <div class="card"><h3>Live activity</h3><div id="ovActivity"></div></div>
+        <div class="ov-main">
+          <div class="ov-tasks">
+            <div class="card"><h3>Active &amp; recent tasks</h3><div id="ovTasks"></div></div>
+          </div>
+          <div class="card ov-activity"><h3>Live activity</h3><div id="ovActivity"></div></div>
         </div>
       </section>
 

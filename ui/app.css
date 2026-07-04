@@ -273,8 +273,8 @@ ol.fsteps li { font-size: 13px; line-height: 1.5; }
 .task .who { display: flex; gap: 7px; margin-top: 11px; flex-wrap: wrap; align-items: center; }
 
 /* badges — saturated tinted pills, strong contrast */
-.badge { font-size: 11.5px; padding: 3px 9px; border-radius: 6px; border: 1px solid transparent; color: var(--fg-mut); white-space: nowrap; font-weight: 600; background: rgba(255,255,255,.06); }
-.badge.squad { color: var(--accent-2); background: var(--accent-soft); }
+.badge { display: inline-flex; align-items: center; font-size: 11.5px; line-height: 1.5; padding: 3px 9px; border-radius: 6px; border: 1px solid transparent; color: var(--fg-mut); white-space: nowrap; font-weight: 600; background: rgba(255,255,255,.06); }
+.badge.squad { color: var(--accent-2); background: var(--accent-soft); border-color: rgba(124,131,255,.32); border-radius: 999px; padding: 3px 11px; font-family: var(--mono); font-size: 11px; letter-spacing: .02em; }
 .badge.agent { color: var(--cyan); background: rgba(34,211,238,.13); }
 .s-in-progress { color: var(--amber); background: rgba(251,191,36,.14); }
 .s-completed, .s-done { color: var(--emerald); background: rgba(52,211,153,.14); }
@@ -532,6 +532,8 @@ ol.fsteps li { font-size: 13px; line-height: 1.5; }
 
 /* ── Dashboard demo loop (.demo) — self-contained 16s run, for empty-state / README GIF ── */
 .demo { border-radius: 14px; overflow: hidden; border: 1px solid var(--line-2); box-shadow: var(--shadow); background: radial-gradient(1100px 520px at 82% -12%, rgba(124,131,255,.08), transparent 60%), var(--bg-1); }
+/* .demo-inline — same loop, no browser-chrome, for the in-app Overview empty-state (already inside the shell) */
+.demo-inline { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: radial-gradient(900px 440px at 82% -14%, rgba(124,131,255,.08), transparent 60%), var(--bg-1); }
 .demo-chrome { display: flex; align-items: center; gap: 8px; background: var(--panel); padding: 11px 15px; border-bottom: 1px solid var(--line); }
 .demo-chrome i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
 .demo-chrome .u { margin-left: 12px; flex: 1; max-width: 340px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); }
@@ -571,3 +573,138 @@ ol.fsteps li { font-size: 13px; line-height: 1.5; }
 .demo-report { margin-top: 12px; display: flex; align-items: center; gap: 11px; padding: 12px 14px; border-radius: 9px; background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.4); animation: demo-rise 16s ease-in-out infinite; }
 @keyframes demo-rise { 0%,80%{opacity:0;transform:translateY(14px)} 86%,97%{opacity:1;transform:none} 100%{opacity:0} }
 .demo-report .chk { width: 30px; height: 30px; border-radius: 7px; background: rgba(52,211,153,.16); display: grid; place-items: center; color: var(--emerald); font-size: 15px; }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   OVERVIEW PAGE — production layout (scoped to #view-overview + .ov-* )
+   Pairs with the index.html markup swap: the two bottom cards move from
+   `.grid.cols-2` into `.ov-main` (tasks | activity) so no empty grid track
+   is spawned on wide screens. All render targets (#stats/#ovHealth/#ovTasks/
+   #ovActivity) are unchanged — app.js keeps working.
+   ════════════════════════════════════════════════════════════════════════ */
+#view-overview .stats { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+#view-overview .stat { padding: 16px 18px; }
+#view-overview .stat .l { order: -1; margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-dim); font-weight: 600; }
+#view-overview .stat .n { font-size: 34px; line-height: 1; }
+#view-overview .stat::after { width: 84px; height: 84px; right: -30px; top: -30px; }
+
+/* system health: banner full-width, checks in a responsive multi-column grid */
+#ovHealth { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 2px 22px; }
+#ovHealth .hbanner, #ovHealth .hmeta, #ovHealth .hfixes, #ovHealth .hsent { grid-column: 1 / -1; }
+#ovHealth .hrow { border-bottom: 1px solid var(--line); }
+#ovHealth .hk { min-width: 118px; font-weight: 600; }
+
+/* deliberate two-column body — tasks (wider) | activity (fills the rest) */
+.ov-main { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.ov-tasks { display: flex; flex-direction: column; gap: 14px; }
+.ov-tasks > .card > h3 { display: flex; align-items: center; justify-content: space-between; }
+.ov-activity { position: sticky; top: 0; display: flex; flex-direction: column; max-height: calc(100vh - 128px); padding: 0; overflow: hidden; }
+.ov-activity > h3 { margin: 0; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.ov-activity > h3::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 0 3px rgba(52,211,153,.18); animation: pulse 1.7s infinite; }
+#ovActivity { overflow: auto; padding: 4px 18px 12px; }
+#ovActivity .act:first-child { padding-top: 10px; }
+@media (max-width: 1080px) { .ov-main { grid-template-columns: 1fr; } .ov-activity { position: static; max-height: 520px; } }
+
+/* Two-panel views (run-detail Overview, dispatch, finding, amend) — a fixed,
+   balanced 2-up instead of the task-list's auto-fill, so wide screens don't leave an
+   empty 3rd track squeezing the cards left. #taskList keeps auto-fill (it's a real,
+   growing list). Collapses to one column at the shared ≤860px breakpoint. */
+#td-overview > .grid.cols-2,
+#view-dispatch > .grid.cols-2,
+#view-finding > .grid.cols-2,
+#view-amend > .grid.cols-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 860px) {
+  #td-overview > .grid.cols-2,
+  #view-dispatch > .grid.cols-2,
+  #view-finding > .grid.cols-2,
+  #view-amend > .grid.cols-2 { grid-template-columns: 1fr; }
+}
+
+/* ── in-card LIVE dispatch band — waves + cycling stage strip, rendered inside a RUNNING task card ── */
+.run-dispatch { margin-top: 14px; border-top: 1px solid var(--line); }
+.rd-stagewrap { position: relative; height: 20px; margin-top: 12px; }
+.rd-stage { position: absolute; left: 0; top: 0; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; font-weight: 600; opacity: 0; }
+.rd-stage.s1 { color: var(--accent-2); animation: lrStage 12s ease-in-out infinite; }
+.rd-stage.s2 { color: var(--sky); animation: lrStage 12s ease-in-out infinite -3s; }
+.rd-stage.s3 { color: var(--amber); animation: lrStage 12s ease-in-out infinite -6s; }
+.rd-stage.s4 { color: var(--emerald); animation: lrStage 12s ease-in-out infinite -9s; }
+@keyframes lrStage { 0% { opacity: 0; transform: translateY(4px); } 4%, 21% { opacity: 1; transform: none; } 25%, 100% { opacity: 0; } }
+.dvz.dvz-embed { border: 0; border-radius: 0; background: transparent; padding: 6px 2px 2px; }
+.dvz.dvz-embed .dvz-lead { padding: 9px 20px; }
+.dvz.dvz-embed .dvz-lead b { font-size: 14px; }
+.dvz.dvz-embed .dvz-rail { height: 40px; margin: 2px 0; }
+.dvz.dvz-embed .dvz-specs { gap: 9px; }
+.dvz.dvz-embed .dvz-spec { padding: 9px 5px; }
+.dvz.dvz-embed .dvz-triage-row { margin-top: 14px; }
+/* DONE state — freeze motion, green the flow + triage */
+.run-dispatch.done .rd-stage.done { position: static; opacity: 1; color: var(--emerald); animation: none; }
+.dvz.dvz-done .dvz-spec { animation: none; border-color: rgba(52,211,153,.28); }
+.dvz.dvz-done .dvz-lead { background: linear-gradient(135deg, rgba(52,211,153,.12), rgba(52,211,153,.04)); border-color: rgba(52,211,153,.35); }
+.dvz.dvz-done .dvz-lead b { color: var(--emerald); }
+.dvz.dvz-done .dvz-rail .flow { background: rgba(52,211,153,.4); animation: none; }
+.dvz.dvz-done .dvz-triage.done { background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.4); }
+.dvz.dvz-done .dvz-triage.done .dot { background: var(--emerald); animation: none; }
+.dvz.dvz-done .dvz-triage.done span { color: var(--emerald); }
+/* terminal-but-not-successful (cancelled / failed / blocked) — static + muted slate, never green */
+.run-dispatch.stopped .rd-stage.stop { position: static; opacity: 1; color: var(--fg-mut); animation: none; }
+.dvz.dvz-stopped .dvz-spec { animation: none; opacity: .55; border-color: rgba(148,163,184,.22); }
+.dvz.dvz-stopped .dvz-lead { background: rgba(148,163,184,.07); border-color: rgba(148,163,184,.26); }
+.dvz.dvz-stopped .dvz-lead b { color: var(--fg-mut); }
+.dvz.dvz-stopped .dvz-rail .flow { background: rgba(148,163,184,.28); animation: none; }
+.dvz.dvz-stopped .dvz-triage.stop { background: rgba(148,163,184,.08); border-color: rgba(148,163,184,.28); }
+.dvz.dvz-stopped .dvz-triage.stop .dot { background: var(--fg-dim); animation: none; }
+.dvz.dvz-stopped .dvz-triage.stop span { color: var(--fg-mut); }
+/* queued / pending — created but not yet dispatched: dim + dashed, static. Previews who WILL
+   run, distinct from stopped (terminal). */
+.run-dispatch.queued .rd-stage.queue { position: static; opacity: 1; color: var(--fg-mut); animation: none; }
+.dvz.dvz-queued .dvz-spec { animation: none; opacity: .42; border-style: dashed; }
+.dvz.dvz-queued .dvz-lead { background: rgba(148,163,184,.05); border-color: rgba(148,163,184,.22); border-style: dashed; }
+.dvz.dvz-queued .dvz-lead b { color: var(--fg-mut); }
+.dvz.dvz-queued .dvz-rail .flow { background: rgba(148,163,184,.18); animation: none; }
+.dvz.dvz-queued .dvz-triage.queue { background: rgba(148,163,184,.05); border-color: rgba(148,163,184,.24); border-style: dashed; }
+.dvz.dvz-queued .dvz-triage.queue .dot { background: var(--fg-dim); animation: none; }
+.dvz.dvz-queued .dvz-triage.queue span { color: var(--fg-dim); }
+@media (prefers-reduced-motion: reduce) { .rd-stage.s1 { opacity: 1; } .rd-stage.s2, .rd-stage.s3, .rd-stage.s4, .dvz-spec, .dvz-rail .flow, .dvz-rail .pkt, .dvz-triage .dot { animation: none; } }
+
+/* ════════════════════════════════════════════════════════════════════════
+   #td-overview as a LIVE-RUN panel — additive .lrun-* namespace (run-detail Overview)
+   ════════════════════════════════════════════════════════════════════════ */
+/* stage strip: the 5 phases of a run, current one lit */
+.lrun-stages { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 2px 0 18px; }
+.lrun-stages .st { display: flex; flex-direction: column; gap: 3px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-1); position: relative; overflow: hidden; }
+.lrun-stages .st b { font-family: var(--mono); font-size: 11.5px; font-weight: 700; letter-spacing: .02em; color: var(--fg-dim); }
+.lrun-stages .st small { font-size: 10.5px; color: var(--fg-dim); line-height: 1.35; }
+.lrun-stages .st.done b { color: var(--emerald); } .lrun-stages .st.done::after { content: "✓"; position: absolute; top: 9px; right: 11px; color: var(--emerald); font-size: 11px; }
+.lrun-stages .st.active { border-color: rgba(124,131,255,.5); background: linear-gradient(180deg, rgba(124,131,255,.1), var(--bg-1)); }
+.lrun-stages .st.active b { color: var(--accent-2); }
+.lrun-stages .st.active::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--accent), transparent); background-size: 200% 100%; animation: hub-rail 1.8s linear infinite; }
+
+.lrun-cols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+/* left: live run card */
+.lrun-card { position: relative; overflow: hidden; }
+.lrun-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), transparent); background-size: 200% 100%; animation: hub-rail 2.2s linear infinite; }
+.lrun-card.done::before { animation: none; background: var(--emerald); }
+.lrun-prog { display: flex; flex-direction: column; gap: 13px; margin: 16px 0 4px; }
+.lrun-prog .p .pl { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--fg-mut); margin-bottom: 6px; }
+.lrun-prog .p .pl b { color: var(--fg); font-weight: 600; }
+.lrun-prog .p .pl .pc { font-family: var(--mono); color: var(--accent-2); }
+.lrun-prog .bar { height: 7px; border-radius: 5px; background: rgba(255,255,255,.07); overflow: hidden; }
+.lrun-prog .bar i { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 70%, #fff), var(--accent)); }
+/* right: findings board streaming */
+.lrun-find .row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; margin-bottom: 8px; background: var(--bg-1); }
+.lrun-find .row .t { flex: 1; font-size: 13px; font-weight: 550; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrun-find .row .sc { font-family: var(--mono); font-size: 12px; color: var(--fg-mut); }
+.lrun-find .row[data-fkey] { cursor: pointer; transition: border-color .12s, background .12s; }
+.lrun-find .row[data-fkey]:hover { border-color: var(--accent); background: var(--hover); }
+.lrun-find .row .lrun-open { color: var(--fg-dim); font-size: 13px; opacity: 0; transition: opacity .12s; }
+.lrun-find .row[data-fkey]:hover .lrun-open { opacity: 1; color: var(--accent-2); }
+.lrun-find .lrun-scroll { max-height: min(56vh, 520px); overflow-y: auto; padding-right: 5px; }
+.lrun-sevfilter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.lrun-sev { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--mono); padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-mut); cursor: pointer; }
+.lrun-sev:hover { background: var(--hover); color: var(--fg); }
+.lrun-sev.on { color: var(--fg); border-color: var(--accent); background: var(--accent-soft); }
+.lrun-sev .d { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.lrun-find .stream { animation: fLand .5s ease; }
+@keyframes fLand { from { opacity: 0; transform: translateY(6px); } }
+@media (max-width: 980px) { .lrun-stages { grid-template-columns: repeat(2, 1fr); } .lrun-cols { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .lrun-stages .st.active::before, .lrun-card::before { animation: none; } .lrun-find .stream { animation: none; } }

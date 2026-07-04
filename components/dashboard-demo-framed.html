@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ARCHON — dashboard demo (app frame)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../ui/app.css">
+  <style>
+    html,body{overflow:visible;height:auto}
+    /* record frame: the whole app shell at 1280×800 — clean 16:10 for a README GIF */
+    .frame{width:1280px;height:800px;margin:34px auto;border-radius:16px;overflow:hidden;border:1px solid var(--line-2);box-shadow:var(--shadow)}
+    .frame .app{height:800px}
+    .cap{width:1280px;margin:0 auto;font-family:var(--mono);font-size:12px;color:var(--fg-dim);letter-spacing:.04em;padding-left:4px}
+    /* the demo body sits inside the real .main */
+    .demo-inline{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:radial-gradient(900px 440px at 82% -14%,rgba(124,131,255,.08),transparent 60%),var(--bg-1)}
+  </style>
+</head>
+<body>
+  <p class="cap">▸ DASHBOARD DEMO — full app shell · dispatch → progress → findings → report · 16s loop · record at 1280×800</p>
+  <div class="frame">
+    <div class="app">
+
+      <!-- real topbar -->
+      <div class="topbar">
+        <div class="brand">
+          <span class="mark"><svg viewBox="0 0 256 256" fill="none"><defs><radialGradient id="mkTile" cx="50%" cy="34%" r="82%"><stop offset="0" stop-color="#1c2a42"/><stop offset="1" stop-color="#0a0e16"/></radialGradient><linearGradient id="mkTerra" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a784"/><stop offset="1" stop-color="#cf5d39"/></linearGradient></defs><rect x="8" y="8" width="240" height="240" rx="60" fill="url(#mkTile)"/><circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="2" stroke-opacity=".28"/><g stroke="url(#mkTerra)" stroke-width="8" stroke-linecap="round"><line x1="24" y1="128" x2="52" y2="128"/><line x1="204" y1="128" x2="232" y2="128"/><line x1="128" y1="204" x2="128" y2="232"/></g><path d="M96 200 L128 52 L160 200" fill="none" stroke="url(#mkTerra)" stroke-width="23" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"/><line x1="106" y1="150" x2="150" y2="150" stroke="url(#mkTerra)" stroke-width="16" stroke-linecap="round"/><circle cx="128" cy="128" r="5" fill="#38bdf8"/></svg></span>
+          <span class="name">ARCHON<small>Autonomous Research &amp; Code Hunting for Offensive Networks</small></span>
+        </div>
+        <div class="spacer"></div>
+        <span class="pill live"><span class="dot"></span> daemon live</span>
+        <span class="meta">13:22:07</span>
+      </div>
+
+      <!-- real nav -->
+      <nav class="nav">
+        <button class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg> Overview</button>
+        <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="4.5" cy="18" r="1.5"/></svg> Tasks <span class="count">1</span></button>
+        <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg> New dispatch</button>
+        <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z"/><path d="M12 8l4 2.2v4.4L12 17l-4-2.4v-4.4L12 8z"/></svg> Squads <span class="count">2</span></button>
+        <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5M9 13h7M9 17h7"/></svg> Reports <span class="count">1</span></button>
+        <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg> Activity</button>
+        <div class="sep"></div>
+        <div class="foot">intel ▸<br>…/var/intel/engagements</div>
+      </nav>
+
+      <!-- demo runs inside the real main -->
+      <main class="main">
+        <div class="view-head"><h1>Live run</h1><span class="sub">ENG-4471 · juice-shop.local · one operator, a full squad</span></div>
+
+        <div class="demo-inline">
+          <div class="demo-body" style="padding:22px 24px 26px">
+            <!-- stage strip -->
+            <div class="demo-stage">
+              <div class="demo-s1"><b>▸ DISPATCH</b><small>target accepted · scope gate passed</small></div>
+              <div class="demo-s2"><b>▸ LIVE PROGRESS</b><small>recon → fingerprint → plan → specialist waves</small></div>
+              <div class="demo-s3"><b>▸ AWAITING TRIAGE</b><small>findings verified · you confirm each</small></div>
+              <div class="demo-s4"><b>▸ REPORT GENERATED</b><small>SCRIBE wrote one de-duplicated report</small></div>
+            </div>
+
+            <div class="demo-cols">
+              <!-- run card -->
+              <div class="demo-card" style="position:relative;overflow:hidden">
+                <div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent)"></div>
+                <div style="font-weight:650;font-size:14.5px">juice-shop.local</div>
+                <div style="font-family:var(--mono);font-size:11px;color:var(--fg-dim);margin-top:3px">ENG-4471 · black-box + source</div>
+                <div style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;color:var(--accent-2);margin-top:9px"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(124,131,255,.22)"></span>running</div>
+                <div class="demo-bars">
+                  <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Recon &amp; fingerprint</div><div class="demo-bar b1"><i></i></div></div>
+                  <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">ATLAS attack plan</div><div class="demo-bar b2"><i></i></div></div>
+                  <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Specialist waves</div><div class="demo-bar b3"><i></i></div></div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:15px;flex-wrap:wrap">
+                  <span class="chip" style="color:#22d3ee">SCOUT</span><span class="chip" style="color:#fb7185">VIPER</span><span class="chip" style="color:#fbbf24">DRILL</span><span class="chip" style="color:#34d399">WARDEN</span><span class="chip" style="color:#b08cff">RELAY</span>
+                </div>
+              </div>
+
+              <!-- findings board -->
+              <div class="demo-card">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                  <span style="font-size:12.5px;font-weight:600">Findings board</span>
+                  <span style="font-family:var(--mono);font-size:11px;color:var(--fg-dim)">verified · one at a time</span>
+                </div>
+                <div class="demo-find demo-f1"><span class="badge sev-critical">CRIT</span><span class="t">SQL injection · /rest/products/search</span><span class="sc" style="color:var(--emerald)">9.8</span></div>
+                <div class="demo-find demo-f2"><span class="badge sev-high">HIGH</span><span class="t">JWT algorithm confusion</span><span class="sc">8.1</span></div>
+                <div class="demo-find demo-f3"><span class="badge sev-medium">MED</span><span class="t">Stored XSS · product review</span><span class="sc">6.1</span></div>
+                <div class="demo-find demo-f4"><span class="badge sev-high">HIGH</span><span class="t">IDOR · /api/basket/{id}</span><span class="sc">7.5</span></div>
+                <div class="demo-report"><span class="chk">✓</span><div style="flex:1"><div style="font-size:12.5px;font-weight:600">report-2026-07-04.md</div><div style="font-family:var(--mono);font-size:10.5px;color:var(--fg-dim)">4 confirmed · correlated + de-duplicated</div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

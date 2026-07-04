@@ -148,6 +148,65 @@ function phaseSteps(task) {
 }
 
 /* ── task card ── */
+// Unified dispatch band for a task card — the ATLAS/lead → specialists → TRIAGER waves.
+// Animated while running, static-green when done; falls back to phaseSteps(t) for
+// queued/failed cards and empty rosters. Purely presentational (reads t.status/squad +
+// the squad roster; no API, no state writes).
+function cardPhaseArt(t) {
+  const st = String(t.status || '').toLowerCase()
+  const done = ['completed', 'done'].includes(st)
+  const live = ['in-progress', 'awaiting-triage', 'generating-report'].includes(st)   // actively working
+  // terminal-but-not-successful — show the band muted/greyed, never the green "done" state
+  const stopped = ['cancelled', 'failed', 'blocked', 'aborted', 'error', 'stopped', 'killed', 'timeout'].includes(st)
+  const queued = ['queued', 'pending', 'backlog'].includes(st)   // created, not yet dispatched
+  if (!done && !live && !stopped && !queued) return phaseSteps(t)   // truly unknown → normal stepper
+  const SPEC_HUE = { SCOUT:'#22d3ee', VIPER:'#fb7185', DRILL:'#fbbf24', RELAY:'#9ba2ff',
+    WARDEN:'#34d399', GATEWAY:'#b08cff', RANGER:'#22d3ee', SENTRY:'#9ba2ff',
+    CURATOR:'#f6a623', MARSHAL:'#f6a623', CIPHER:'#fb7185', PROBER:'#22d3ee',
+    AUDITOR:'#34d399', SCRIBE:'#b08cff' }
+  const sq = SQUAD_BY[String(t.squad || '').replace(/-squad$/, '')]
+  const lead = (sq && sq.leader) || 'ATLAS'
+  const roster = ((sq && sq.agents) || Object.keys(SPEC_HUE))
+    .filter(a => String(a).toUpperCase() !== String(lead).toUpperCase()).slice(0, 6)
+  if (!roster.length) return phaseSteps(t)
+  const role = a => (sq && sq.roles && sq.roles[a]) || ''
+  const specs = roster.map((a, i) => {
+    const hue = SPEC_HUE[String(a).toUpperCase()] || '#9ba2ff'
+    const delay = live ? `;animation-delay:${(i*.3).toFixed(2)}s` : ''
+    return `<div class="dvz-spec" style="--sp:${hue}${delay}"><b>${esc(a)}</b><span>${esc(role(a))}</span></div>`
+  }).join('')
+  const pkts = live ? roster.map((_, i) =>
+    `<span class="pkt" style="left:${8 + i*(72/Math.max(1,roster.length-1))}%;animation-delay:${(i*.35).toFixed(2)}s"></span>`).join('') : ''
+  const stopLabel = { cancelled: '■ CANCELLED', failed: '✕ FAILED', blocked: '✕ BLOCKED',
+    aborted: '■ ABORTED', error: '✕ ERROR', timeout: '✕ TIMED OUT' }[st] || '■ STOPPED'
+  const stage = live
+    ? `<span class="rd-stage s1">▸ DISPATCH · scope gate passed</span>
+       <span class="rd-stage s2">▸ LIVE PROGRESS · specialist waves</span>
+       <span class="rd-stage s3">▸ FINDINGS · streaming in</span>
+       <span class="rd-stage s4">▸ ${st === 'generating-report' ? 'GENERATING REPORT · SCRIBE writing' : 'AWAITING TRIAGE · you confirm'}</span>`
+    : done
+    ? `<span class="rd-stage done">✓ COMPLETE · report generated</span>`
+    : queued
+    ? `<span class="rd-stage queue">◷ QUEUED · waiting for the daemon</span>`
+    : `<span class="rd-stage stop">${stopLabel} · run ended early</span>`
+  const triage = live
+    ? `<div class="dvz-triage"><span class="dot"></span><span>every finding → TRIAGER → AUDITOR → you</span></div>`
+    : done
+    ? `<div class="dvz-triage done"><span class="dot"></span><span>findings → verified → report published</span></div>`
+    : queued
+    ? `<div class="dvz-triage queue"><span class="dot"></span><span>waiting to dispatch — nothing tested yet</span></div>`
+    : `<div class="dvz-triage stop"><span class="dot"></span><span>run stopped before completion — no report</span></div>`
+  const leadSub = done ? ' · consolidated the review' : live ? ' · plans the attack walk' : queued ? ' · queued' : ' · run ended early'
+  return `<div class="run-dispatch${done ? ' done' : ''}${stopped ? ' stopped' : ''}${queued ? ' queued' : ''}">
+    <div class="rd-stagewrap">${stage}</div>
+    <div class="dvz dvz-embed${done ? ' dvz-done' : ''}${stopped ? ' dvz-stopped' : ''}${queued ? ' dvz-queued' : ''}">
+      <div class="dvz-lead-row"><div class="dvz-lead"><b>${esc(lead)}</b><span>lead${leadSub}</span></div></div>
+      <div class="dvz-rail"><span class="down"></span><span class="flow"></span>${pkts}</div>
+      <div class="dvz-specs">${specs}</div>
+      <div class="dvz-triage-row">${triage}</div>
+    </div>
+  </div>`
+}
 function taskCard(t) {
   const running = t.status === 'in-progress'
   const completed = ['completed', 'done'].includes(t.status)
@@ -185,7 +244,7 @@ function taskCard(t) {
         ${t.squad ? `<span class="badge squad">${esc(String(t.squad).replace(/-squad$/, ''))}</span>` : ''}
         ${sq && sq.type ? `<span class="badge">${esc(sq.type)}</span>` : ''}
       </div>
-      ${phaseSteps(t)}
+      ${cardPhaseArt(t)}
       ${agentNames.length ? `<div style="margin-top:13px">${avatarStack(agentNames)}</div>` : ''}
       ${metrics ? `<div class="sep-line"></div><div class="footgrid">${metrics}</div>` : ''}
       <div class="card-open">${opener}</div>
@@ -194,7 +253,7 @@ function taskCard(t) {
 }
 
 /* ── render ── */
-let lastTaskSig = '', lastRepSig = ''
+let lastTaskSig = '', lastRepSig = '', lastTdOvSig = '', lrunSevFilter = ''
 function render(s) {
   lastState = s
   REPORTS = s.reports || []
@@ -207,7 +266,12 @@ function render(s) {
   $('#cReports').textContent = s.reports.length
   // if the detail page is open, keep its header (status + Cancel) and overview / live logs current
   if (currentView === 'task') updateTdHeader((s.tasks || []).find(x => String(x.id) === String(tdTaskId)))
-  if (currentView === 'task' && tdSub === 'overview') renderTaskOverview()
+  if (currentView === 'task' && tdSub === 'overview') {
+    const t = (s.tasks || []).find(x => String(x.id) === String(tdTaskId))
+    // stream findings into the live board ONLY while scanning; a done run never re-fetches
+    if (t && t.status === 'in-progress') loadFindings()
+    renderTaskOverview() // gated internally — a done/unchanged run short-circuits (no re-render)
+  }
   if (currentView === 'task' && tdSub === 'log') renderTaskLogs()
   // findings tab: refresh live ONLY while the run is in-progress (no triage yet to clobber),
   // so validated findings appear on the tab as they land
@@ -241,17 +305,8 @@ function render(s) {
 // progress → findings stream → report). Uses only .demo-* classes (in app.css); the
 // sample findings are illustrative — rendered ONLY when state.tasks is empty.
 const DEMO_LOOP_HTML = `<p class="empty" style="text-align:left;margin:0 0 12px">No runs yet — here's what one looks like. Queue a target from <b>New dispatch</b> to begin.</p>
-<div class="demo">
-  <div class="demo-chrome">
-    <i style="background:#fb7185"></i><i style="background:#fbbf24"></i><i style="background:#34d399"></i>
-    <span class="u">127.0.0.1:4000</span>
-  </div>
+<div class="demo-inline">
   <div class="demo-body">
-    <div style="display:flex;align-items:center;gap:11px;margin-bottom:18px">
-      <span style="width:30px;height:30px;border-radius:8px;display:grid;place-items:center"><svg viewBox="0 0 256 256" width="30" height="30" fill="none"><defs><radialGradient id="dt" cx="50%" cy="34%" r="82%"><stop offset="0" stop-color="#1c2a42"/><stop offset="1" stop-color="#0a0e16"/></radialGradient><linearGradient id="dr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a784"/><stop offset="1" stop-color="#cf5d39"/></linearGradient></defs><rect x="8" y="8" width="240" height="240" rx="60" fill="url(#dt)"/><circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="3" stroke-opacity=".3"/><g stroke="url(#dr)" stroke-width="9" stroke-linecap="round"><line x1="24" y1="128" x2="52" y2="128"/><line x1="204" y1="128" x2="232" y2="128"/><line x1="128" y1="204" x2="128" y2="232"/></g><path d="M96 200 L128 52 L160 200" fill="none" stroke="url(#dr)" stroke-width="24" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"/><line x1="106" y1="150" x2="150" y2="150" stroke="url(#dr)" stroke-width="17" stroke-linecap="round"/><circle cx="128" cy="128" r="6" fill="#38bdf8"/></svg></span>
-      <div style="font-weight:650;font-size:15px">ARCHON <small style="display:block;font-weight:400;font-size:10px;color:var(--fg-dim)">offensive operations console</small></div>
-      <span class="pill live" style="margin-left:auto"><span class="dot"></span> daemon live</span>
-    </div>
     <div class="demo-stage">
       <div class="demo-s1"><b>▸ DISPATCH</b><small>target accepted · scope gate passed</small></div>
       <div class="demo-s2"><b>▸ LIVE PROGRESS</b><small>recon → fingerprint → plan → specialist waves</small></div>
@@ -334,14 +389,15 @@ async function openTaskPage(taskId) {
   // resolve to the engagement root so iterations all open the same aggregated page
   try { const ir = await api('GET', '/api/iterations?taskId=' + encodeURIComponent(taskId)); if (ir && ir.engagementId) taskId = ir.engagementId } catch {}
   tdBackTo = currentView === 'task' ? tdBackTo : currentView
-  tdTaskId = taskId; fnTaskId = taskId; tdLogLoaded = false
+  tdTaskId = taskId; fnTaskId = taskId; tdLogLoaded = false; lrunSevFilter = ''
   const t = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(taskId)) || { id: taskId }
   $('#tdTitle').textContent = t.title || taskId
   $('#tdId').textContent = taskId
   updateTdHeader(t)
-  const sub = t.status === 'in-progress' ? 'log'
-    : t.status === 'awaiting-triage' ? 'findings'
-    : (reportForTask(t) ? 'report' : 'overview')
+  // Land on the Overview (the live-run review) first for every card click — including
+  // "View findings & report" and "Open run"; only a run waiting on YOU jumps straight to
+  // Findings to triage (matches its "Triage findings →" opener).
+  const sub = t.status === 'awaiting-triage' ? 'findings' : 'overview'
   show('task'); setTdSub(sub)
   if (sub !== 'findings') loadFindings() // populate the Findings count + summary even when landing elsewhere
 }
@@ -349,7 +405,7 @@ function setTdSub(sub) {
   tdSub = sub
   $$('#tdTabs button').forEach(b => b.classList.toggle('on', b.dataset.td === sub))
   ;['overview', 'findings', 'log', 'report'].forEach(s => { const el = $('#td-' + s); if (el) el.style.display = s === sub ? '' : 'none' })
-  if (sub === 'overview') renderTaskOverview()
+  if (sub === 'overview') renderTaskOverview(true)
   else if (sub === 'findings') loadFindings()
   else if (sub === 'log') renderTaskLogs()
   else if (sub === 'report') renderTaskReport()
@@ -371,32 +427,134 @@ $('#tdCancelHdr').onclick = async () => {
   toast(r && !r.error ? 'Cancel sent' : 'Cancel failed', tdTaskId, r && !r.error ? 'ok' : 'err')
 }
 
-function renderTaskOverview() {
+// Run-detail Overview as a live-run panel: stage strip → (live run card + squad viz | streaming
+// findings) → Goal + model routing. All values come from the task object + the already-loaded
+// fnFindings (the Findings tab's array) — no new API calls.
+function renderTaskOverview(force) {
   const t = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(tdTaskId))
   if (!t) { $('#td-overview').innerHTML = '<div class="empty">Run not found.</div>'; return }
   const running = t.status === 'in-progress'
-  const agentNames = t.costByAgent ? Object.keys(t.costByAgent) : (t.assignee ? [t.assignee] : [])
-  // Agents that ran + their model (runs on the Claude subscription, so no per-agent dollar cost).
+  const done = ['completed', 'done'].includes(t.status)
+  const prog = done ? 100 : (t.progress || 0)
+  const clamp = n => Math.max(0, Math.min(100, Math.round(n)))
+  const sq = SQUAD_BY[String(t.squad || '').replace(/-squad$/, '')]
+  const squadName = esc(String(t.squad || '').replace(/-squad$/, ''))
+  const lead = (sq && sq.leader) || t.assignee || 'ATLAS'
+
+  // stage strip: 5 fixed phases; done/active derived exactly like phaseSteps(t) (floor of progress)
+  const STAGES = [['DISPATCH', 'scope gate passed'], ['RECON', 'surface fingerprinted'],
+    ['SPECIALISTS', 'waves attacking'], ['TRIAGE', 'you confirm each'], ['REPORT', 'de-duplicated dossier']]
+  const nDone = done ? STAGES.length : Math.floor(prog / 100 * STAGES.length)
+  const stagesHtml = STAGES.map((s, i) => {
+    const cls = i < nDone ? 'done' : (running && i === nDone ? 'active' : '')
+    return `<div class="st ${cls}"><b>${s[0]}</b><small>${s[1]}</small></div>`
+  }).join('')
+
+  // three progress bars — reuse the overall % (recon/plan finish early, waves ≈ overall)
+  const barPct = (lo, hi) => prog <= lo ? 0 : (prog >= hi ? 100 : clamp((prog - lo) / (hi - lo) * 100))
+  const bars = [['Recon & fingerprint', done ? 100 : barPct(0, 18)],
+    ['ATLAS attack plan', done ? 100 : barPct(12, 34)], ['Specialist waves', done ? 100 : clamp(prog)]]
+  const barsHtml = bars.map(([label, pct]) =>
+    `<div class="p"><div class="pl"><b>${label}</b><span class="pc">${pct >= 100 ? 'done' : pct + '%'}</span></div>` +
+    `<div class="bar"><i style="width:${pct}%${pct >= 100 ? ';background:var(--emerald)' : ''}"></i></div></div>`).join('')
+
+  // squad-dispatch viz (reuse squadDispatchViz), greened to the done state when finished
+  let viz = squadDispatchViz(sq)
+  if (done) viz = viz.replace('class="dvz"', 'class="dvz dvz-done"').replace('class="dvz-triage"', 'class="dvz-triage done"')
+
+  // findings board — reuse the Findings tab's already-loaded array (no new fetch), top 6 by severity
+  const findings = (String(fnTaskId) === String(tdTaskId)) ? fnFindings : []
+  const sevOf = f => (fnVerdicts[f.key] || {}).severity || f.severity || 'Info'
+  const active = findings.filter(f => (fnVerdicts[f.key] || {}).verdict !== 'rejected')
+  const verified = active.filter(f => ['validated', 'scored'].includes(f.stage) || f.confirmation_status === 'RUNTIME_CONFIRMED').length
+  // Only a live scan needs to refresh: skip the re-render when nothing moved. A done run's
+  // signature is stable, so after the final render it stops re-rendering (no .stream re-flash).
+  // force=true (tab open/switch) always renders.
+  const ovSig = [tdTaskId, t.status, t.progress || 0, active.length, verified, t.statusMessage || ''].join('|')
+  if (!force && ovSig === lastTdOvSig) return
+  lastTdOvSig = ovSig
+  const SEV_ABBR = { Critical: 'CRIT', High: 'HIGH', Medium: 'MED', Low: 'LOW', Info: 'INFO' }
+  // severity filter chips — counts per severity; clicking one narrows the board to it
+  const sevCounts = {}; for (const f of active) { const s = sevOf(f); sevCounts[s] = (sevCounts[s] || 0) + 1 }
+  if (lrunSevFilter && !sevCounts[lrunSevFilter]) lrunSevFilter = ''   // drop a filter that no longer matches
+  const distinctSev = SEV.filter(s => sevCounts[s])
+  const filterChips = distinctSev.length > 1
+    ? `<div class="lrun-sevfilter"><button class="lrun-sev${lrunSevFilter === '' ? ' on' : ''}" data-sev="">All · ${active.length}</button>` +
+      distinctSev.map(s => `<button class="lrun-sev${lrunSevFilter === s ? ' on' : ''}" data-sev="${s}"><span class="d" style="background:var(--sev-${s.toLowerCase()})"></span>${SEV_ABBR[s]} · ${sevCounts[s]}</button>`).join('') + '</div>'
+    : ''
+  const sorted = active.slice().sort((a, b) => SEV.indexOf(sevOf(a)) - SEV.indexOf(sevOf(b)))
+  const shown = lrunSevFilter ? sorted.filter(f => sevOf(f) === lrunSevFilter) : sorted   // render ALL (filtered); .lrun-scroll scrolls
+  const rowsHtml = shown.map(f => {
+    const sev = sevOf(f), v = fnVerdicts[f.key] || {}
+    const score = v.cvss != null ? v.cvss : f.cvss
+    return `<div class="row stream" data-fkey="${esc(f.key)}" title="Open finding"><span class="badge sev-${String(sev).toLowerCase()}">${esc(SEV_ABBR[sev] || sev)}</span>` +
+      `<span class="t">${esc(f.title || '(untitled)')}</span>${score != null ? `<span class="sc">${esc(String(score))}</span>` : ''}<span class="lrun-open">→</span></div>`
+  }).join('')
+  const spinRow = running ? `<div class="row" style="border-style:dashed;opacity:.6"><span class="spin" style="margin:0"></span><span class="t" style="color:var(--fg-mut)">specialists testing…</span></div>` : ''
+  const findBody = (active.length || running)
+    ? `${filterChips}<div class="lrun-scroll">${rowsHtml}${spinRow}</div><div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;gap:18px;color:var(--fg-mut);font-size:12px"><span>${active.length} found</span><span style="color:var(--emerald)">${verified} verified</span>${lrunSevFilter ? `<span>· ${shown.length} shown</span>` : ''}${running ? '<span>testing…</span>' : ''}</div>`
+    : `<div class="empty" style="padding:18px 0">No findings recorded${done ? '' : ' yet'}.</div>`
+
+  // cost/model table (unchanged content, relocated below)
   let costRows = ''
   if (t.costByAgent && Object.keys(t.costByAgent).length) {
     costRows = '<table class="costtable"><tr><th>Agent</th><th>Model</th></tr>' +
       Object.keys(t.costByAgent).map((a) => { const cm = (t.costs || []).find(x => x.agent === a); return `<tr><td><span class="mini-av">${avatar(a, 20)} ${esc(a)}</span></td><td style="color:var(--fg-dim)">${esc(cm ? cm.model : '')}</td></tr>` }).join('') + '</table>'
+  } else {
+    costRows = '<div class="hint">Agent + model routing appears here once specialists run.</div>'
   }
-  const prog = ['completed', 'done'].includes(t.status) ? 100 : (t.progress || 0)
-  $('#td-overview').innerHTML = `<div class="grid cols-2">
-    <div class="card">
-      <h3>Run</h3>
-      <div class="kv"><span>squad <b>${esc(String(t.squad || '').replace(/-squad$/, ''))}</b></span><span>lead <b>${esc(t.assignee || '')}</b></span>${t.cacheHitRate ? `<span>cache <b>${t.cacheHitRate}%</b></span>` : ''}</div>
-      <div class="pbar" style="margin-top:14px"><div class="pfill" style="width:${Math.max(2, Math.min(100, prog))}%"></div></div>
-      ${phaseSteps(t)}
-      ${t.statusMessage ? `<div class="hint">${esc(t.statusMessage)}</div>` : ''}
-      ${agentNames.length ? `<div style="margin-top:12px">${avatarStack(agentNames)}</div>` : ''}
-      ${costRows}
-      ${(running || t.status === 'awaiting-triage') ? `<div class="report-bar" style="margin-top:16px"><button class="btn" id="tdAmend">✎ Amend run</button>${running ? `<button class="btn danger" id="tdCancel">■ Cancel</button>` : ''}</div>` : ''}
+
+  const statusTxt = done ? 'report generated' : running ? `running · ${clamp(prog)}%` : esc(t.status || '')
+  const accent = done ? 'var(--emerald)' : 'var(--accent)'
+  const glow = done ? 'rgba(52,211,153,.22)' : 'rgba(124,131,255,.22)'
+  const cacheBit = t.cacheHitRate ? ` · cache ${t.cacheHitRate}%` : ''
+
+  // Engagement / dispatch config — the structured dispatch summary lives in the goal string
+  // (target, coverage, test-account count); the full scope/creds/focus is in the engagement brief.
+  const goalRaw = t.goal || ''
+  const engUrl = (goalRaw.match(/https?:\/\/[^\s)]+/) || [])[0] || ''
+  const engCov = (goalRaw.match(/full end-to-end|feature[- ]driven|feature[- ]focused|white-box code review|static analysis/i) || [''])[0]
+  const engAcct = goalRaw.match(/(\d+)\s+test account/i)
+  const engObjective = goalRaw.split(/[;.]?\s*scope \+ credentials in engagement brief:/i)[0].trim() || goalRaw
+  const engLink = /^https?:\/\/[^\s"'<>]+$/.test(engUrl)
+  const engRows = [
+    `<div class="rrow"><span class="rk">Squad</span><div class="rv">${squadName || '—'} · lead ${esc(lead)}</div></div>`,
+    engUrl ? `<div class="rrow"><span class="rk">Target</span><div class="rv">${engLink ? `<a href="${esc(engUrl)}" target="_blank" rel="noopener noreferrer" class="fmono" style="color:var(--accent-2)">${esc(engUrl)}</a>` : `<span class="fmono">${esc(engUrl)}</span>`}</div></div>` : '',
+    engCov ? `<div class="rrow"><span class="rk">Coverage</span><div class="rv">${esc(engCov)}</div></div>` : '',
+    engAcct ? `<div class="rrow"><span class="rk">Test accounts</span><div class="rv">${esc(engAcct[1])}</div></div>` : '',
+    `<div class="rrow"><span class="rk">Status</span><div class="rv">${esc(statusTxt)}</div></div>`,
+  ].filter(Boolean).join('')
+
+  $('#td-overview').innerHTML = `
+    <div class="lrun-stages">${stagesHtml}</div>
+    <div class="lrun-cols">
+      <div class="card lrun-card${done ? ' done' : ''}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="min-width:0">
+            <div style="font-weight:650;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title || t.id)}</div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--fg-dim);margin-top:3px">${squadName} · lead ${esc(lead)}${cacheBit}</div>
+          </div>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;color:${done ? 'var(--emerald)' : 'var(--accent-2)'};white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:${accent};box-shadow:0 0 0 3px ${glow}"></span>${statusTxt}</span>
+        </div>
+        <div class="lrun-prog">${barsHtml}</div>
+        <div style="margin-top:16px">${viz}</div>
+        ${t.statusMessage ? `<div class="hint" style="margin-top:12px">${esc(t.statusMessage)}</div>` : ''}
+      </div>
+      <div class="card lrun-find">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <h3 style="margin:0">Findings board</h3>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--fg-dim)">${running ? 'verified · streaming' : 'verified'}</span>
+        </div>
+        ${findBody}
+      </div>
     </div>
-    <div class="card"><h3>Goal</h3><div class="md">${md(t.goal || '_(none)_')}</div></div>
-  </div>`
+    <div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-top:16px">
+      <div class="card"><h3>Engagement</h3><div class="reconbox"><div class="reconhead">Dispatch configuration</div>${engRows}</div><div class="md">${md(engObjective || '_(none)_')}</div><div class="hint" style="margin-top:10px">Full scope, credentials &amp; focus are in the engagement brief — open the <b>Testing logs</b> tab.</div>${(running || t.status === 'awaiting-triage') ? `<div class="report-bar" style="margin-top:12px"><button class="btn sm" id="tdAmend">✎ Amend run</button>${running ? `<button class="btn danger sm" id="tdCancel">■ Cancel</button>` : ''}</div>` : ''}</div>
+      <div class="card"><h3>Squad &amp; model routing</h3>${costRows}</div>
+    </div>`
   const am = $('#tdAmend'); if (am) am.onclick = () => openAmendPage(t.id, t.title)
+  $$('#td-overview .lrun-sev').forEach(b => b.onclick = () => { lrunSevFilter = b.dataset.sev; renderTaskOverview(true) })
+  $$('#td-overview .lrun-find .row[data-fkey]').forEach(r => r.onclick = () => openFindingPage(r.dataset.fkey))
   const cc = $('#tdCancel'); if (cc) cc.onclick = async () => { cc.disabled = true; const r = await api('POST', '/api/cancel', { taskId: t.id }); toast(r && !r.error ? 'Cancel sent' : 'Cancel failed', t.id, r && !r.error ? 'ok' : 'err') }
 }
 async function renderTaskReport() {
