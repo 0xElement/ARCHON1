@@ -274,6 +274,7 @@ it was fixed in GitLab's May 2026 security release and assigned
 
 - **CVE:** [CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)
 - **GitLab advisory:** [patch release 18.11.3 · 2026-05-13](https://about.gitlab.com/releases/2026/05/13/patch-release-gitlab-18-11-3-released/)
+- **More in the pipeline:** Additional vulnerabilities surfaced by ARCHON have been responsibly disclosed and are awaiting vendor remediation — held under coordinated-disclosure embargo, so they're not named here until they're fixed.
 
 That's exactly the class ARCHON's code-review squad specializes in — the same access-control depth ships
 as MARSHAL's 40-pattern access-control catalog.
