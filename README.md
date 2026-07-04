@@ -5,7 +5,8 @@
 **Autonomous AI web-application penetration tester — white-box + black-box in one engagement.**
 
 ARCHON runs a squad of LLM-powered specialist agents against a web target, independently verifies
-every finding, stops for your triage, and writes a professional report. Give it a **URL** for a
+every finding, and validates each one **live onto your Findings board** as it goes. When testing
+finishes the run completes — you generate the professional report on demand. Give it a **URL** for a
 black-box assessment, or a **URL + source code** for a combined white-box + black-box engagement
 whose findings merge into one de-duplicated report.
 
@@ -26,8 +27,27 @@ whose findings merge into one de-duplicated report.
 
 ---
 
+## Install
+
+```bash
+git clone https://github.com/ghostshift-content/ARCHON.git archon && cd archon
+bash setup.sh          # Node check → npm install → seed var/intel → preflight (npm run doctor)
+
+npm start              # 1) the agent daemon (event-bus)
+npm run dashboard      # 2) separate shell → portal at http://localhost:4000
+```
+
+A fresh clone needs **no config** — roots resolve to the repo directory automatically. The one real
+prerequisite is a **Claude subscription + the `claude` CLI, logged in**: ARCHON runs on your
+subscription over OAuth, *not* a metered API key. Then open **http://localhost:4000 → New dispatch**.
+Full prerequisites, optional recon tools, and the `npm run doctor` preflight are in
+[Quickstart](#quickstart).
+
+---
+
 ## Table of contents
 
+- [Install](#install)
 - [Why ARCHON](#why-archon)
 - [Features](#features)
 - [How it works](#how-it-works)
@@ -61,8 +81,9 @@ of a single prompt:
 - **Evidence over claims.** Every finding is re-probed by an independent **AUDITOR**; a finding
   with no replayable evidence is demoted, not reported. A 3-judge **ARBITER** consensus gates
   High/Critical.
-- **You stay in control.** The pipeline runs to *awaiting-triage* and **stops**. You confirm/reject,
-  set CVSS, then explicitly generate the report. Nothing is auto-published.
+- **You stay in control.** Findings are validated **live onto your board** as they're found; when
+  testing finishes the run completes. You review — confirm/reject, adjust CVSS, add notes — then
+  generate the report on demand. Nothing is auto-published.
 - **One report, both views.** White-box (source) and black-box (live) findings are correlated and
   de-duplicated — the same bug shows up as `file:line` *and* an HTTP repro.
 - **Your subscription, no API key.** Agents run the `claude` CLI over your Claude subscription
@@ -80,7 +101,7 @@ of a single prompt:
 | 🧪 **Independent verification** | AUDITOR re-probes findings; the **evidence contract** demotes anything without replayable proof; chain-verifier replays multi-step exploits via curl. |
 | 🏷️ **Honest confirmation status** | Each finding is tagged `RUNTIME_CONFIRMED` (proven live) vs `SOURCE_CONFIRMED` (proven in code only) vs `NEEDS_LIVE_VALIDATION` / `DISPROVEN` — a source read is never dressed up as a live proof. |
 | ⚖️ **Judge consensus** | 4-stage judge + 3-judge ARBITER consensus on High/Critical before publication. |
-| ⏸️ **Triage-gated reporting** | Confirm / reject / set CVSS (built-in 3.1 calculator) / annotate, *then* generate the report. |
+| ⏸️ **On-demand reporting** | Findings validate **live to your board**; review — confirm / reject / set CVSS (built-in 3.1 calculator) / annotate — then generate the report when ready. Nothing auto-publishes. |
 | 🔁 **Iterations** | Add focused passes to an engagement ("now test access control") without disturbing prior results. |
 | 🛡️ **Safety perimeter** | Fail-closed scope gate; impact-proving exploits fire only behind a 3-gate opt-in (off by default). |
 | 🖥️ **Local portal** | Zero-build single-page dashboard (binds `127.0.0.1`) for dispatch, live progress, triage, and reports. |
@@ -109,12 +130,12 @@ of a single prompt:
   │                       → feature map → per-class assessment → AUDITOR)│
   │   each agent → runAgent(spec) → `claude` CLI (OAuth, NO API key)     │
   └───────────────────────────────────────────────────────────────────┘
-      │  agents self-report findings → live-findings
+      │  agents self-report findings → TRIAGER validates each one live → your board
       ▼
   AUDITOR verify → VALIDATED-FINDINGS → judge → JUDGED-FINDINGS
       │
-      ▼  ⏸ AWAITING TRIAGE   (findings ready, no report yet)
-  you triage (confirm / reject / CVSS / notes)
+      ▼  ✔ RUN COMPLETE   (findings validated live on your board — no report yet)
+  you review (confirm / reject / CVSS / notes)   ·   report is on demand
       │
       ▼  Generate report
   SCRIBE → ONE report  (combined runs: correlated + de-duplicated across both views)
@@ -162,9 +183,9 @@ SQL injection on a known stack goes far deeper.
              │   ARBITER   consensus on High +    │
              └────────────────┬──────────────────┘
                               ▼
-                 ⏸   FINDINGS BOARD  ·  awaiting triage
-                              │  you confirm / reject / set CVSS / annotate
-                              ▼
+                 ✔   FINDINGS BOARD  ·  validated live · run completes
+                              │  you review / confirm / reject / CVSS / annotate
+                              ▼  Generate report (on demand)
              ┌───────────────────────────────────┐
              │   SCRIBE   ·   writes ONE report   │
              └───────────────────────────────────┘
@@ -177,7 +198,7 @@ a stack specific attack plan, and dispatches the specialists in parallel waves. 
 findings as it works, with a minimal payload and the evidence it captured. Three universal agents then
 take over. AUDITOR independently verifies every reported finding with fresh probes and refuses to
 forward anything it cannot reproduce. ARBITER runs a consensus judgement on the highest severity findings. SCRIBE writes
-the final report, and only after you have triaged.
+the final report on demand, from the validated set — when you choose to generate it.
 
 ### Streaming triage
 
@@ -190,9 +211,10 @@ written to report quality. Raw or unvalidated agent claims never appear there, w
 and duplication a naive scanner produces. On the run card you can watch every agent hand its findings to
 the triager live, and the board fills in one clean finding at a time.
 
-The run then stops at "awaiting triage" and waits for you. You confirm or reject each finding, adjust
-CVSS or severity, and add notes. Only when you choose to generate the report does SCRIBE assemble it
-from the confirmed set.
+When testing finishes and every finding is on the board, the run **completes** — it does not block.
+Your board already holds the validated set; review it at your own pace: confirm or reject each finding,
+adjust CVSS or severity, and add notes. Report generation is a separate, on-demand step — only when you
+choose to generate it does SCRIBE assemble it from the set.
 
 ### Static and white box: real code review, not only pattern matching
 
@@ -350,10 +372,11 @@ limits, not metered API billing. Point `KURU_CLAUDE_BIN` at your local `claude` 
    `common/config/scope_template.yaml` as your engagement scope and load it in the dispatch form's
    **Scope** field — scope is fail-closed, so a dispatch with no scope config is blocked.
 2. **Dispatch.** Portal → *New dispatch*: target URL, optional source directory, credentials, test
-   type, severity profile, triage gate.
-3. **Watch.** *Tasks* shows live phase progress; the daemon recon→fingerprint→plan→attacks→verifies.
-4. **Triage.** When a run reaches *awaiting-triage*, open its *Findings* tab — confirm/reject each,
-   adjust CVSS and severity, add notes.
+   type, and severity profile.
+3. **Watch.** *Tasks* shows live phase progress; the daemon recon→fingerprint→plan→attacks→verifies,
+   and validated findings land on the run's *Findings* board as they're confirmed.
+4. **Review.** When the run **completes**, open its *Findings* tab — the validated set is already
+   there; confirm/reject each, adjust CVSS and severity, add notes.
 5. **Report.** Click *Generate report*; SCRIBE writes one report (combined runs are correlated and
    de-duplicated). Read it in the *Report* tab; the published file lands under `var/intel/reports/`.
 
@@ -459,7 +482,8 @@ The safety perimeter is **non-negotiable** and enforced in code:
   [SECURITY.md](./SECURITY.md#non-destructive-by-default-production-safety).
 - **Evidence contract.** A `CONFIRMED` finding needs replayable evidence (reproduction / proof /
   nonce-confirmed PoC) or it is demoted — no unverifiable claims in the report.
-- **Triage-gated.** No report is auto-published; the operator confirms findings first.
+- **Nothing auto-published.** Findings validate live to your board; the report is generated on demand
+  by the operator — never automatically.
 - **Local-operator security.** The portal binds `127.0.0.1`; the data layer (which holds
   operator-entered test credentials) is written restrictively and `var/` is gitignored. Set
   `ARCHON_PORTAL_TOKEN` before exposing the portal beyond localhost.
