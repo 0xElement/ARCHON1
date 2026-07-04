@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/archon-banner.svg" alt="ARCHON — autonomous AI web-application penetration tester" width="820">
+<img src="./assets/archon-banner-animated.svg" alt="ARCHON — autonomous AI web-application penetration tester" width="820">
 
 **Autonomous AI web-application penetration tester — white-box + black-box in one engagement.**
 

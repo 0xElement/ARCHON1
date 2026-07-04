@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="232" viewBox="0 0 1160 232" fill="none" role="img" aria-label="ARCHON — Autonomous AI web-application penetration tester">
+  <defs>
+    <linearGradient id="bbg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#121b2d"></stop><stop offset=".7" stop-color="#0a0e16"></stop></linearGradient>
+    <radialGradient id="bglow" cx="80%" cy="-12%" r="70%"><stop offset="0" stop-color="#7c83ff" stop-opacity=".20"></stop><stop offset="1" stop-color="#7c83ff" stop-opacity="0"></stop></radialGradient>
+    <radialGradient id="btile" cx="50%" cy="34%" r="82%"><stop offset="0" stop-color="#1c2a42"></stop><stop offset="1" stop-color="#0a0e16"></stop></radialGradient>
+    <linearGradient id="bterra" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4a784"></stop><stop offset="1" stop-color="#cf5d39"></stop></linearGradient>
+    <linearGradient id="bword" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f6fb"></stop><stop offset="1" stop-color="#c4ccd8"></stop></linearGradient>
+    <clipPath id="bclip"><rect x="52" y="68" width="96" height="96" rx="22"></rect></clipPath>
+    
+  </defs>
+
+  
+  <rect x="1" y="1" width="1158" height="230" rx="20" fill="url(#bbg)"></rect>
+  <rect x="1" y="1" width="1158" height="230" rx="20" fill="url(#bglow)"></rect>
+  <rect x="1.5" y="1.5" width="1157" height="229" rx="19.5" fill="none" stroke="#38bdf8" stroke-opacity=".16"></rect>
+
+  
+  <g transform="translate(52 68) scale(0.375)">
+    <rect x="0" y="0" width="256" height="256" rx="58" fill="url(#btile)"></rect>
+    <rect x="1" y="1" width="254" height="254" rx="57" fill="none" stroke="#38bdf8" stroke-opacity=".14" stroke-width="1.5"></rect>
+  </g>
+  <g clip-path="url(#bclip)">
+    <line class="bscan" x1="100" y1="70" x2="100" y2="162" stroke="#38bdf8" stroke-width="1.4" stroke-linecap="round" opacity="0"></line>
+  </g>
+  <g transform="translate(52 68) scale(0.375)">
+    <circle cx="128" cy="128" r="70" fill="none" stroke="#38bdf8" stroke-width="1.6" stroke-opacity=".26"></circle>
+    <g fill="none" stroke="url(#bterra)" stroke-width="5.5" stroke-linecap="round">
+      <path d="M211.8,147.3 A86,86 0 0 1 147.3,211.8"></path><path d="M108.7,211.8 A86,86 0 0 1 44.2,147.3"></path>
+      <path d="M44.2,108.7 A86,86 0 0 1 108.7,44.2"></path><path d="M147.3,44.2 A86,86 0 0 1 211.8,108.7"></path>
+    </g>
+    <path d="M96,200 L128,52 L160,200" fill="none" stroke="url(#bterra)" stroke-width="21" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="round"></path>
+    <line x1="107" y1="150" x2="149" y2="150" stroke="url(#bterra)" stroke-width="15" stroke-linecap="round"></line>
+  </g>
+  
+  <g class="btick" stroke="url(#bterra)" stroke-width="2.5" stroke-linecap="round">
+    <line x1="61.5" y1="116" x2="71.2" y2="116"></line><line x1="128.8" y1="116" x2="138.5" y2="116"></line><line x1="100" y1="144.2" x2="100" y2="153.9"></line>
+  </g>
+  <g class="bpin">
+    <circle cx="100" cy="116" r="4.1" fill="none" stroke="#38bdf8" stroke-width="0.8" stroke-opacity=".7"></circle>
+    <circle cx="100" cy="116" r="1.9" fill="#38bdf8"></circle>
+  </g>
+
+  
+  <text x="206" y="112" font-family="Inter, system-ui, sans-serif" font-size="60" font-weight="800" letter-spacing="12" fill="url(#bword)">ARCHON</text>
+  <rect x="208" y="132" width="64" height="4" rx="2" fill="url(#bterra)"></rect>
+  <text x="208" y="166" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="500" fill="#c4ccd8">Autonomous AI web-application penetration tester</text>
+  <text x="208" y="196" font-family="&#39;JetBrains Mono&#39;, ui-monospace, monospace" font-size="12.5" letter-spacing="4" fill="#5f6b7d">WHITE-BOX + BLACK-BOX · ONE REPORT · YOU TRIAGE</text>
+
+  
+  <g font-family="Inter, system-ui, sans-serif" font-size="15" fill="#c4ccd8">
+    <g transform="translate(812 56)">
+      <rect width="306" height="34" rx="9" fill="#ffffff" fill-opacity=".045" stroke="#ffffff" stroke-opacity=".10"></rect>
+      <circle class="bd1" cx="18" cy="17" r="4" fill="#34d399"></circle><text x="34" y="22">Every finding independently verified</text>
+    </g>
+    <g transform="translate(812 99)">
+      <rect width="306" height="34" rx="9" fill="#ffffff" fill-opacity=".045" stroke="#ffffff" stroke-opacity=".10"></rect>
+      <circle class="bd2" cx="18" cy="17" r="4" fill="#38bdf8"></circle><text x="34" y="22">Runs on your Claude subscription</text>
+    </g>
+    <g transform="translate(812 142)">
+      <rect width="306" height="34" rx="9" fill="#ffffff" fill-opacity=".045" stroke="#ffffff" stroke-opacity=".10"></rect>
+      <circle class="bd3" cx="18" cy="17" r="4" fill="#fbbf24"></circle><text x="34" y="22">Field-tested: CVE-2026-4524</text>
+    </g>
+  </g>
+</svg>
