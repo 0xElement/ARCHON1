@@ -183,14 +183,14 @@ function cardPhaseArt(t) {
     ? `<span class="rd-stage s1">▸ DISPATCH · scope gate passed</span>
        <span class="rd-stage s2">▸ LIVE PROGRESS · specialist waves</span>
        <span class="rd-stage s3">▸ FINDINGS · streaming in</span>
-       <span class="rd-stage s4">▸ ${st === 'generating-report' ? 'GENERATING REPORT · SCRIBE writing' : 'AWAITING TRIAGE · you confirm'}</span>`
+       <span class="rd-stage s4">▸ ${st === 'generating-report' ? 'GENERATING REPORT · SCRIBE writing' : 'VALIDATED · on your board'}</span>`
     : done
     ? `<span class="rd-stage done">✓ COMPLETE · report generated</span>`
     : queued
     ? `<span class="rd-stage queue">◷ QUEUED · waiting for the daemon</span>`
     : `<span class="rd-stage stop">${stopLabel} · run ended early</span>`
   const triage = live
-    ? `<div class="dvz-triage"><span class="dot"></span><span>every finding → TRIAGER → AUDITOR → you</span></div>`
+    ? `<div class="dvz-triage"><span class="dot"></span><span>every finding → validated live → your board</span></div>`
     : done
     ? `<div class="dvz-triage done"><span class="dot"></span><span>findings → verified → report published</span></div>`
     : queued
@@ -310,7 +310,7 @@ const DEMO_LOOP_HTML = `<p class="empty" style="text-align:left;margin:0 0 12px"
     <div class="demo-stage">
       <div class="demo-s1"><b>▸ DISPATCH</b><small>target accepted · scope gate passed</small></div>
       <div class="demo-s2"><b>▸ LIVE PROGRESS</b><small>recon → fingerprint → plan → specialist waves</small></div>
-      <div class="demo-s3"><b>▸ AWAITING TRIAGE</b><small>findings verified · you confirm each</small></div>
+      <div class="demo-s3"><b>▸ FINDINGS</b><small>verified live as they land</small></div>
       <div class="demo-s4"><b>▸ REPORT GENERATED</b><small>SCRIBE wrote one de-duplicated report</small></div>
     </div>
     <div class="demo-cols">
@@ -443,7 +443,7 @@ function renderTaskOverview(force) {
 
   // stage strip: 5 fixed phases; done/active derived exactly like phaseSteps(t) (floor of progress)
   const STAGES = [['DISPATCH', 'scope gate passed'], ['RECON', 'surface fingerprinted'],
-    ['SPECIALISTS', 'waves attacking'], ['TRIAGE', 'you confirm each'], ['REPORT', 'de-duplicated dossier']]
+    ['SPECIALISTS', 'waves attacking'], ['TRIAGE', 'validated live'], ['REPORT', 'de-duplicated dossier']]
   const nDone = done ? STAGES.length : Math.floor(prog / 100 * STAGES.length)
   const stagesHtml = STAGES.map((s, i) => {
     const cls = i < nDone ? 'done' : (running && i === nDone ? 'active' : '')
@@ -937,7 +937,7 @@ function squadDispatchViz(sq) {
     <div class="dvz-lead-row"><div class="dvz-lead"><b>${esc(lead)}</b><span>lead · plans the attack walk</span></div></div>
     <div class="dvz-rail"><span class="down"></span><span class="flow"></span>${pkts}</div>
     <div class="dvz-specs">${cards}</div>
-    <div class="dvz-triage-row"><div class="dvz-triage"><span class="dot"></span><span>every finding → TRIAGER → AUDITOR → you</span></div></div>
+    <div class="dvz-triage-row"><div class="dvz-triage"><span class="dot"></span><span>every finding → validated live → your board</span></div></div>
   </div>`
 }
 function updateDispatchInfo() {
