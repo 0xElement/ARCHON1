@@ -3055,8 +3055,14 @@ async function runExploitProver({ taskId, squad, projectId, taskConfig, fingerpr
   let findings = []
   try { if (fs.existsSync(vf)) findings = fs.readFileSync(vf, 'utf8').trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean) } catch {}
   const cap = Number(gate.permission && gate.permission.max_total_probes) || 5
-  const targets = findings.filter(f => prover.isExploitable(f)).slice(0, cap)
-  if (!targets.length) { log(`🎯 Phase 3.085: no exploitable confirmed findings to prove`); return { proved: 0 } }
+  const targets = findings
+    .filter(f => prover.isExploitable(f))
+    // Scope confinement — NEVER fire a live payload at a host outside the granted scope, even
+    // behind the 3-gate (mirrors the active-poc runner). A finding with no parseable URL is
+    // skipped: a live prove needs a confirmed in-scope target.
+    .filter(f => { try { return policy.targetInScope(new URL(f.url).hostname, gate.permission) } catch { return false } })
+    .slice(0, cap)
+  if (!targets.length) { log(`🎯 Phase 3.085: no exploitable, in-scope confirmed findings to prove`); return { proved: 0 } }
   const { randomBytes } = require('node:crypto')
   let proved = 0; const proofs = []
   for (const f of targets) {
@@ -9162,6 +9168,10 @@ async function dispatchToAgent(dispatch) {
         log(`⚠️ Phase 0.0 dispatch-queue update failed: ${__qe.message}`)
       }
       log(`🛡️ Phase 0.0 BLOCKED: ${__scopeReason} — aborting dispatch for taskId=${taskId}`)
+      // Release the leader concurrency slot processQueue acquired (runningAgents.add(leader))
+      // for this dispatch — else a scope-blocked dispatch permanently leaks it and the queue
+      // eventually wedges. Same value the normal cleanup releases (getSquadLeader||assignee).
+      try { const __lead = getSquadLeader(squad) || assignee; if (__lead) { runningAgents.delete(__lead); setAgentIdle(__lead) } } catch {}
       return
     }
     // 'allowed' and 'warned' both continue. 'warned' is logged for audit.
@@ -9186,6 +9196,7 @@ async function dispatchToAgent(dispatch) {
         }
       } catch (__qe) { log(`⚠️ Phase 0.0 fail-closed queue update failed: ${__qe.message}`) }
       log(`🛡️ Phase 0.0 FAIL-CLOSED: scope pre-validation errored — aborting dispatch for taskId=${taskId} (set ARCHON_SCOPE_OVERRIDE=1 to bypass)`)
+      try { const __lead = getSquadLeader(squad) || assignee; if (__lead) { runningAgents.delete(__lead); setAgentIdle(__lead) } } catch {}
       return
     }
   }
