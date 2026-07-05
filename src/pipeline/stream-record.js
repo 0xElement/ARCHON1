@@ -35,6 +35,10 @@ function shapeStreamValidated(f, d, meta = {}) {
       file: d.file || f.file || '', line: d.line ?? f.line ?? '',
       confirmation_status: needsLive ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
       validation_status: needsLive ? 'NEEDS-LIVE' : 'CONFIRMED',
+      // M4: carry the live-validation task so white-box source→runtime (buildSourceGuidance) can aim the
+      // deferred pentest at this candidate with the specialist's own required evidence.
+      required_blackbox_proof: d.required_blackbox_proof || f.required_blackbox_proof || '',
+      affected_endpoint: d.endpoint || f.endpoint || '',
     }
   }
   return { ...base, url: f.url || d.url || '', method: f.method || '' }

@@ -34,6 +34,21 @@ test('SOURCE→LIVE: buildSourceGuidance aims the pentest from code-review candi
   assert.ok(fs.existsSync(path.join(TMP, 'source-guidance-pt1.json')), 'guidance file written')
 })
 
+test('M4: source candidate required_blackbox_proof + affected_endpoint aim the live-validation task', () => {
+  seedFeatureQueue('cr-m4', [{ slug: 'orders', name: 'Orders' }])
+  seedFindings('cr-m4', [
+    { id: 'CR-7', title: 'IDOR in /orders', severity: 'High', validation_status: 'NEEDS-LIVE',
+      confirmation_status: 'NEEDS_LIVE_VALIDATION', file: 'app/orders.rb', line: 42,
+      affected_endpoint: 'GET /orders/:id', required_blackbox_proof: 'request /orders/2 as user A, observe user B order' },
+  ])
+  const bundle = wb.buildSourceGuidance('cr-m4', 'pt-m4', { intelRoot: TMP, now: 'fixed' })
+  const c = bundle.candidate_targets.find(x => x.candidate_id === 'CR-7')
+  assert.ok(c, 'candidate present')
+  assert.equal(c.suggested_blackbox_task.required_evidence, 'request /orders/2 as user A, observe user B order',
+    'the specialist required-proof aims the deferred pentest (not the generic fallback)')
+  assert.equal(c.suggested_blackbox_task.entry_point, 'GET /orders/:id', 'affected_endpoint → entry_point (no url on a source finding)')
+})
+
 test('LIVE→SOURCE: buildRootCauseRequests matches by (vuln_class, locus) and never writes pentest findings', () => {
   seedFindings('pt2', [
     { id: 'BB-1', title: 'IDOR in /orders', severity: 'High', validation_status: 'CONFIRMED', url: 'https://x.test/orders/1' },

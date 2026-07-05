@@ -36,6 +36,13 @@ test('NEEDS_LIVE_VALIDATION source candidate → NEEDS-LIVE', () => {
   assert.equal(r.confirmation_status, 'NEEDS_LIVE_VALIDATION')
 })
 
+test('M4: source record carries required_blackbox_proof + affected_endpoint (source→runtime handoff)', () => {
+  const r = shapeStreamValidated(src, { required_blackbox_proof: 'send id=2 as user A, observe user B data', endpoint: 'GET /users/:id' }, meta)
+  assert.equal(r.required_blackbox_proof, 'send id=2 as user A, observe user B data')
+  assert.equal(r.affected_endpoint, 'GET /users/:id')
+  assert.equal(r.url, undefined) // still no url — stays SOURCE_CONFIRMED
+})
+
 test('a live finding keeps the runtime shape (url/method); status derived downstream', () => {
   const r = shapeStreamValidated({ agent: 'drill', url: 'https://x.test/a', method: 'POST' }, { title: 'SQLi' }, meta)
   assert.equal(r.url, 'https://x.test/a')
