@@ -85,9 +85,35 @@ const LOCAL_DESTRUCTIVE_PATTERNS = [
   { re: /\bfind\s+\/[^\n]*-delete\b/i, why: 'find / -delete' },
 ]
 
+// Tools disabled for the current release — blocked at the PreToolUse chokepoint so an
+// agent can't run one even if its persona still references it. nuclei is OFF for the
+// first release until we ship proper rate-limit/config tuning; re-enable per-tool with
+// its env flag (ARCHON_ENABLE_NUCLEI=1). NOT gated by ARCHON_ALLOW_DESTRUCTIVE.
+const RELEASE_DISABLED_TOOLS = [
+  { bin: 'nuclei', env: 'ARCHON_ENABLE_NUCLEI', why: 'nuclei DAST disabled for this release (rate-limit/config tuning pending) — set ARCHON_ENABLE_NUCLEI=1 to enable' },
+]
+
+// Deny a command that invokes a release-disabled tool. Matches the tool as a command
+// token (start, or after a pipe/;/&&/whitespace) so "nuclei -u …", "| nuclei",
+// "&& nuclei" all hit — but a substring like "nucleic" does NOT.
+function guardReleaseDisabledTool(command) {
+  if (!command) return { allow: true }
+  const s = String(command)
+  for (const t of RELEASE_DISABLED_TOOLS) {
+    if (process.env[t.env] === '1') continue
+    if (new RegExp(`(?:^|[|;&]|\\s)${t.bin}\\b`, 'i').test(s)) {
+      return { allow: false, reason: t.why, match: t.bin }
+    }
+  }
+  return { allow: true }
+}
+
 // PreToolUse gate for a shell command the agent wants to run on the LOCAL machine.
 // Returns { allow: true } or { allow: false, reason, match }.
 function guardLocalCommand(command) {
+  // Release-disabled tools are blocked FIRST — enforced even under ARCHON_ALLOW_DESTRUCTIVE.
+  const rel = guardReleaseDisabledTool(command)
+  if (!rel.allow) return rel
   if (allowDestructive()) return { allow: true }
   if (!command) return { allow: true }
   const s = String(command)
@@ -148,9 +174,11 @@ module.exports = {
   LIMITS,
   DESTRUCTIVE_PATTERNS,
   LOCAL_DESTRUCTIVE_PATTERNS,
+  RELEASE_DISABLED_TOOLS,
   scanForDestructive,
   allowDestructive,
   guardRequest,
   guardLocalCommand,
+  guardReleaseDisabledTool,
   PRODUCTION_SAFETY_CONTRACT,
 }
