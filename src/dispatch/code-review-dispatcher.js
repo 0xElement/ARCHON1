@@ -395,7 +395,7 @@ Reply one line: features covered, findings by confirmation status + severity, to
 
 // ── main ──────────────────────────────────────────────────────────────────────
 async function runCodeReview(dispatch, deps) {
-  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled } = deps
+  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled, onFindingsReady } = deps
   const { taskId, projectId, squad } = dispatch
   const meta = dispatch.meta || {}
   const sourceDir = meta.sourceDir
@@ -564,6 +564,14 @@ async function runCodeReview(dispatch, deps) {
     updateProgress(86, 'Phase 2v: AUDITOR reverse-check')
     const kRes = await spawnAgent('auditor', taskId, auditorPrompt(taskId, outDir, p2Features, vulnClasses, deployUrl), `task-${taskId}-auditor`, null)
     trackCosts([kRes])
+  }
+
+  // Live-board parity with black-box: AUDITOR verdicts now exist, so surface findings on the board
+  // NOW (one phase earlier, ~86%) — the daemon's onFindingsReady hook runs the SAME normalize→triage→
+  // enrich chain it would otherwise run only after SCRIBE. Fail-soft; the daemon's end-of-run chain
+  // is a guarded fallback if this didn't materialize.
+  if (typeof onFindingsReady === 'function' && !cancelled()) {
+    try { await onFindingsReady(taskId, outDir) } catch (e) { log(`⚠️ onFindingsReady (non-fatal): ${e.message}`) }
   }
 
   // Phase 3 — SCRIBE report

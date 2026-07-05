@@ -9327,7 +9327,31 @@ async function dispatchToAgent(dispatch) {
       const crResult = await codeReviewDispatcher.runCodeReview(dispatch, {
         spawnAgent, trackCosts: trackCostsLocal, updateProgress: updateProgressLocal,
         log, logActivity, _isTaskCancelled,
+        // Live-board parity: fire the SAME normalize→triage→enrich chain one phase earlier (after
+        // AUDITOR verdicts, before SCRIBE) so findings land on the board DURING the run, not at the end.
+        onFindingsReady: async (tid, oDir) => {
+          try {
+            await normalizeCodeReviewFindings(tid, oDir, (dispatch.meta && dispatch.meta.deployUrl) || '')
+            const vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${tid}.jsonl`
+            if (fs.existsSync(vf) && fs.readFileSync(vf, 'utf8').trim()) {
+              try { await runTriagerForTask(tid) } catch (e) { log(`⚠️ cr triager ${tid} (non-fatal): ${e.message}`) }
+              await enrichFindingsForTask(tid)
+              logActivity('NEXUS', `📥 Code-review findings on the board (live)`, { type: 'triage-flow', squad, taskId: tid, projectId: projectId || '' })
+            }
+          } catch (e) { log(`⚠️ onFindingsReady ${tid} (non-fatal): ${e.message}`) }
+        },
       })
+      // A dispatcher {error} (bad sourceDir / empty feature queue) must FAIL the run — not fall
+      // through to 'done' with no findings, and (white-box) not auto-launch a pentest off a failed
+      // review. Mark terminal + fail the queue entry; the finally releases the leader slot.
+      if (crResult && crResult.error) {
+        log(`❌ code-review failed: ${crResult.error}`)
+        try { withFileLock(TASKS_FILE, () => { const _t = readJSON(TASKS_FILE) || []; const _tk = _t.find(t => String(t.id) === String(taskId)); if (_tk && !['cancelled', 'failed'].includes(String(_tk.status || '').toLowerCase())) { _tk.status = 'failed'; _tk.statusMessage = `Code review failed: ${crResult.error}`.slice(0, 300); _tk.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, _t) } }) } catch {}
+        try { const _q = readJSON(DISPATCH_FILE) || []; const _e = _q.find(d => String(d.taskId) === String(taskId) && d.status === 'processing'); if (_e) { _e.status = 'failed'; _e.failureReason = `code-review: ${crResult.error}`.slice(0, 300); _e.processedAt = new Date().toISOString(); writeJSON(DISPATCH_FILE, _q) } } catch {}
+        try { runningTasks.delete(taskId) } catch {}
+        setTimeout(() => processQueue(), 2000)
+        return
+      }
       // Cancel parity with black-box: if the operator cancelled, stop here — keep status
       // 'cancelled', no normalize/enrich/report/'done' (mirrors the parallel-phases path).
       if (_isTaskCancelled(taskId) || (crResult && crResult.cancelled)) {
@@ -9352,20 +9376,22 @@ async function dispatchToAgent(dispatch) {
         setTimeout(() => processQueue(), 1500)
         return
       }
-      // White-box adapter: materialize VALIDATED-FINDINGS-<taskId>.jsonl so this
-      // code-review iteration aggregates into the engagement + merged report. Fail-soft.
-      await normalizeCodeReviewFindings(taskId, crResult && crResult.outputDir, (dispatch.meta && dispatch.meta.deployUrl) || '')
-      // Findings-tab parity with black-box: run the SAME shared triager (dedup/merge + CVSS,
-      // via the source template) then enrich findings-detail (code block / file:line) — all
-      // in-pipeline, so the board shows clean, deduped, fully-written findings automatically
-      // instead of waiting for a manual report-gen. Both fail-soft; skipped when no findings.
-      try {
-        const _vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
-        if (fs.existsSync(_vf) && fs.readFileSync(_vf, 'utf8').trim()) {
-          try { await runTriagerForTask(taskId) } catch (e) { log(`⚠️ cr triager ${taskId} failed (non-fatal): ${e.message}`) }
-          await enrichFindingsForTask(taskId)
-        }
-      } catch (e) { log(`⚠️ cr auto-enrich ${taskId} failed (non-fatal): ${e.message}`) }
+      // White-box adapter → board. The onFindingsReady hook already materialized VALIDATED-FINDINGS
+      // + triaged/enriched one phase earlier (during the run). Re-run here ONLY as a fallback when it
+      // didn't (verify phase disabled, hook threw, or 0 findings) — so we never pay the AUDITOR twice.
+      const _vf = `${agentPaths.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
+      const _crMaterialized = (() => { try { return fs.existsSync(_vf) && fs.readFileSync(_vf, 'utf8').trim().length > 0 } catch { return false } })()
+      if (!_crMaterialized) {
+        await normalizeCodeReviewFindings(taskId, crResult && crResult.outputDir, (dispatch.meta && dispatch.meta.deployUrl) || '')
+        try {
+          if (fs.existsSync(_vf) && fs.readFileSync(_vf, 'utf8').trim()) {
+            try { await runTriagerForTask(taskId) } catch (e) { log(`⚠️ cr triager ${taskId} failed (non-fatal): ${e.message}`) }
+            await enrichFindingsForTask(taskId)
+          }
+        } catch (e) { log(`⚠️ cr auto-enrich ${taskId} failed (non-fatal): ${e.message}`) }
+      } else {
+        log(`✅ code-review findings already on the board (surfaced live during the run) — skipping end-of-run re-materialize`)
+      }
       // A cancel/fail can land DURING post-processing (normalize/triager/enrich take real time).
       // If the task went terminal meanwhile, do NOT launch the deferred pentest and do NOT mark
       // it 'done' — that would resurrect a cancelled run and fire an unwanted pentest at the box.
@@ -9407,9 +9433,19 @@ async function dispatchToAgent(dispatch) {
       setTimeout(() => processQueue(), 2000)
     } catch (e) {
       log(`❌ code-review dispatch error: ${e.message}`)
+      // Mark terminal so a throwing run can't hang non-terminal + wedge the queue (guard against
+      // clobbering an operator cancel/done), and fail the dispatch-queue entry like the scope-block path.
+      try { withFileLock(TASKS_FILE, () => { const _t = readJSON(TASKS_FILE) || []; const _tk = _t.find(t => String(t.id) === String(taskId)); if (_tk && !['cancelled', 'failed', 'done'].includes(String(_tk.status || '').toLowerCase())) { _tk.status = 'failed'; _tk.statusMessage = `Code review error: ${e.message}`.slice(0, 300); _tk.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, _t) } }) } catch {}
+      try { const _q = readJSON(DISPATCH_FILE) || []; const _e = _q.find(d => String(d.taskId) === String(taskId) && d.status === 'processing'); if (_e) { _e.status = 'failed'; _e.failureReason = `code-review dispatch error: ${e.message}`.slice(0, 300); _e.processedAt = new Date().toISOString(); writeJSON(DISPATCH_FILE, _q) } } catch {}
       try { runningTasks.delete(taskId) } catch {}
       setTimeout(() => processQueue(), 2000)
-    } finally { try { if (_crHb) clearInterval(_crHb) } catch {} }
+    } finally {
+      try { if (_crHb) clearInterval(_crHb) } catch {}
+      // Release the leader slot on EVERY exit (success, cancel-returns, error-return, throw). On
+      // success/cancel the consolidate curator spawn already released it, so this is a harmless no-op;
+      // on a throw it's the one line that closes the watchdog-defeating slot leak.
+      try { runningAgents.delete(leader); setAgentIdle(leader) } catch {}
+    }
     return
   }
 
