@@ -35,6 +35,11 @@ const NODE_TYPES = {
   CORRELATION: 'correlation',   // a typed correlation record
   HYPOTHESIS: 'hypothesis',     // a planner/source hypothesis
   ENDPOINT: 'endpoint',         // a discovered endpoint
+  EVIDENCE: 'evidence',         // an evidence blob backing a candidate (code block / trace / response)
+  COVERAGE: 'coverage',         // per-engagement coverage summary (tiers, confirmed/candidate counts)
+  ROLE: 'role',                 // an authorization role
+  PERMISSION: 'permission',     // a permission / capability
+  AUTH_CHECK: 'auth_check',     // an authorization checkpoint in source
 }
 
 /**

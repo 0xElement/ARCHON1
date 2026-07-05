@@ -16,6 +16,7 @@ const fs = require('fs')
 const path = require('path')
 const agentPaths = require('../../paths')
 const attackGraph = require('../pipeline/attack-graph')
+const { evidenceTier } = require('../pipeline/evidence-tier') // M6: tier the evidence when a record lacks it
 
 const NODE = attackGraph.NODE_TYPES
 const EDGE = attackGraph.EDGE_TYPES
@@ -97,14 +98,22 @@ function syncEngagement(engagementId, deps = {}) {
         const id = f.id || f.findingId
         if (!id) continue
         const confirmed = String(f.validation_status || '').toUpperCase() === 'CONFIRMED'
+        const tier = f.evidence_tier || evidenceTier(f) // M6: tier every finding for the coverage node
         upsertNode(graph, id, confirmed ? NODE.CONFIRMED : NODE.CANDIDATE, {
           title: f.title || '', severity: f.severity || '', validation_status: f.validation_status || '',
+          confirmation_status: f.confirmation_status || '', evidence_tier: tier,
           iteration: it.kind, taskId: tid, file: f.file || (Array.isArray(f.source_files) ? f.source_files[0] : undefined),
         })
         // feature handled by source file (code-review iteration)
         for (const sf of (Array.isArray(f.source_files) ? f.source_files : (f.file ? [f.file] : []))) {
           upsertNode(graph, `SF:${sf}`, NODE.SOURCE_FILE, { path: sf })
           upsertEdge(graph, id, `SF:${sf}`, EDGE.FEATURE_HANDLED_BY_SOURCE_FILE)
+        }
+        // M6: an EVIDENCE node backs each finding (the code block / trace / captured response).
+        const evText = String(f.reproduction_response || f.reproduction_result || f.reproduction || f.evidence || f.vulnerable_code || '').trim()
+        if (evText) {
+          upsertNode(graph, `EV:${id}`, NODE.EVIDENCE, { tier, summary: evText.slice(0, 200) })
+          upsertEdge(graph, `EV:${id}`, id, EDGE.EVIDENCE_SUPPORTS_CANDIDATE)
         }
       }
       // code-review feature queue → Feature nodes
@@ -142,6 +151,19 @@ function syncEngagement(engagementId, deps = {}) {
       break // shadow chain records are engagement-scoped, read once
     }
 
+    // M6: COVERAGE node — engagement-wide tier distribution + confirmed/candidate counts. Only when
+    // there is something to cover, so an empty engagement stays an empty graph (fail-soft invariant).
+    const fnodes = Object.values(graph.nodes).filter(n => n.type === NODE.CANDIDATE || n.type === NODE.CONFIRMED)
+    if (fnodes.length > 0) {
+      const tiers = {}; let confirmed = 0
+      for (const n of fnodes) { if (n.type === NODE.CONFIRMED) confirmed++; const t = n.evidence_tier || 'L0'; tiers[t] = (tiers[t] || 0) + 1 }
+      upsertNode(graph, `COVERAGE:${engagementId}`, NODE.COVERAGE, {
+        features: Object.values(graph.nodes).filter(n => n.type === NODE.FEATURE).length,
+        source_files: Object.values(graph.nodes).filter(n => n.type === NODE.SOURCE_FILE).length,
+        total_findings: fnodes.length, confirmed, candidates: fnodes.length - confirmed, tiers,
+      })
+    }
+
     graph.generatedAt = deps.now || new Date().toISOString()
     const file = _graphFile(engagementId)
     _withLock(file, () => _writeAtomic(file, graph))
@@ -175,7 +197,10 @@ function observe(engagementId) {
     mode: 'whitebox', type: 'validate.candidate', target: n.id,
     objective: `Validate candidate ${n.id} (${n.title || ''}) to CONFIRMED`,
   }))
-  return { coverageGaps: [], unprovenCandidates, openChains, recommendedTasks }
+  // M6: surface the COVERAGE node (tier distribution + counts) so the Mission Director can see where
+  // the review is thin (many L1/L2, few L3+) and prioritize accordingly.
+  const coverage = nodes.find(n => n.type === NODE.COVERAGE) || null
+  return { coverageGaps: [], unprovenCandidates, openChains, recommendedTasks, coverage }
 }
 
 module.exports = {

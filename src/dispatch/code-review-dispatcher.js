@@ -45,6 +45,7 @@ const path = require('path')
 const { execSync } = require('child_process')
 const sourcePlanner = require('./source-planner') // M3: rank the Phase-2 queue + re-plan from findings
 const candidateIndex = require('../pipeline/candidate-index') // M5: deduped candidate index + validation queue
+const decisionLog = require('../pipeline/decision-log') // M6: agentic decision log
 
 const METH = path.join(__roots.AGENTS_ROOT, 'squads/code-review/methodology')
 
@@ -643,6 +644,13 @@ async function runCodeReview(dispatch, deps) {
       if (extra.length) {
         log(`🧠 Re-plan: +${extra.length} follow-up assessment(s) from live findings`)
         logActivity('CURATOR', `🧠 Re-plan: +${extra.length} follow-up job(s) from findings`, { taskId, squad, projectId: projectId || '' })
+        // M6: record the self-tasking decision to the agentic decision log (auditable reasoning trail).
+        try {
+          decisionLog.append(taskId, { agent: 'CURATOR', decision: `re-plan: +${extra.length} follow-up assessment(s)`,
+            reason: 'live findings surfaced feature×class pairs not yet assessed', evidence: extra.map(e => `${e.cls}/${e.feature.slug}`).join(', ').slice(0, 300),
+            task_created: extra.map(e => `p2r-${e.cls}-${e.feature.slug}`).join(', ').slice(0, 300), confidence: 75, result: 'queued',
+            next_recommendation: 'assess the follow-up jobs, then re-triage' }, { intelRoot: __roots.INTEL_ROOT })
+        } catch { /* fail-soft */ }
         const more = await runWaves(extra, WAVE, async ({ cls, feature }) => {
           const agent = CLASS[cls].agent
           const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2r-${cls}-${feature.slug}`, null)
