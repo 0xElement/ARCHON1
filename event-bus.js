@@ -8887,8 +8887,38 @@ const REPRO_STEP_FORMAT = `NUMBERED, action-oriented MANUAL reproduction steps a
 // The prompt for a single streamed finding: the TRIAGER validates it (is it real? does the
 // captured evidence prove it?) and EITHER drops it OR writes the full board-ready finding —
 // using the REAL tested URL/host (never a placeholder). Output goes to perFile as strict JSON.
+// M1 source-mode triage: a code review has NO live target, so the triager validates a source
+// candidate by RE-READING the cited source (file:line, source→sink), writes a vulnerable-code-block
+// finding, and MUST NOT invent a url / curl PoC / live response. The written record carries NO url →
+// deriveConfirmationStatus keeps it SOURCE_CONFIRMED (a source-only finding can never be RUNTIME_CONFIRMED).
+function buildSourceStreamTriagePrompt(id, f, taskId, EX, perFile, agent) {
+  return `You are TRIAGER. Read your identity: cat ${agentPaths.soulPath('triager')}
+${agent} reported ONE suspected SOURCE-CODE finding mid-review. VALIDATE it against the source, then EITHER drop it OR write it up — one finding, now.
+This is a STATIC source review: there is NO live target. You CANNOT and MUST NOT fire a request, invent a URL/host, or claim a runtime response.
+
+THE SOURCE FINDING (id ${id}, from ${agent}):
+- title: ${f.title || f.hypothesis || f.details || ''}
+- file:line: ${f.file || '?'}:${f.line ?? '?'}
+- source → sink: ${f.source || '?'} → ${f.sink || '?'}
+- pattern: ${f.pattern || ''}   class: ${f.cwe || ''}   endpoint: ${f.endpoint || ''}
+- vulnerable code / evidence: ${String(f.evidence || f.details || '').slice(0, 1600)}
+- claimed severity: ${f.severity || ''}
+
+STEP 1 — VALIDATE by RE-READING THE SOURCE (be ruthless about false positives). Open ${f.file || 'the cited file'} and confirm the source→sink flow is real, reachable, and unsanitized.
+  If the code does NOT prove a real issue (sanitized, guarded, dead/unreachable, misread) → write STRICT JSON to ${perFile}:  { "drop": true, "reason": "<one line why>" }  and reply: dropped ${id}.
+
+STEP 2 — if REAL, write the complete finding. Match the gold SOURCE format: cat the closest example in ${EX}/ (idor/xss/rce/access-control/static-sqli). Score CVSS with: cat ${agentPaths.AGENTS_ROOT}/common/reporting/templates/cvss-scoring-guide.md
+  Evidence is the VULNERABLE CODE BLOCK + a file:line source→sink trace — NEVER a curl PoC, URL, or HTTP response.
+  Confirmation: a bug you substantiate by reading code is SOURCE_CONFIRMED; if proving it truly needs a live hit, mark NEEDS_LIVE_VALIDATION and say what a live test must show. NEVER RUNTIME_CONFIRMED — no live evidence exists here.
+  Write STRICT JSON to ${perFile} (ONLY that file):
+  { "${id}": { "title":"", "severity":"Critical|High|Medium|Low|Info", "description":"… ending with **Root cause:** …", "cwe":"CWE-…", "cvss_vector":"CVSS:3.1/…", "cvss_score":0.0, "file":"${f.file || ''}", "line":${Number(f.line) || 0}, "source":"", "sink":"", "vulnerable_code":"<the exact code block>", "source_trace":["file:line — <step>"], "confirmation_status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION", "required_blackbox_proof":"", "impact":"", "remediation":"" } }
+  A field with no evidence → "UNPROVEN — <what's missing>", never filler. Reply: wrote ${id}.`
+}
+
 function buildStreamTriagePrompt(id, f, taskId, targetUrl, EX, perFile) {
   const agent = (f.agent || f.original_agent || 'AGENT').toUpperCase()
+  // Source candidate (file/line, no url) → the code-review triage above (no live hit, code-block evidence).
+  if (require('./src/pipeline/stream-record').isSourceFinding(f)) return buildSourceStreamTriagePrompt(id, f, taskId, EX, perFile, agent)
   const evidence = `Captured evidence (USE VERBATIM — never invent a different result):\n- request/command fired: ${String(f.reproduction || f.reproduction_method || f.proof || '(none captured)').slice(0, 1400)}\n- response/output observed: ${String(f.reproduction_result || '(none captured)').slice(0, 1400)}`
   return `You are TRIAGER. Read your identity: cat ${agentPaths.soulPath('triager')}
 ${agent} just reported ONE suspected finding mid-scan. VALIDATE it, then EITHER drop it OR write it up — one finding, now.
@@ -8949,8 +8979,10 @@ function startStreamingTriage(taskId, squad, projectId, targetUrl) {
     const detail = {}; try { Object.assign(detail, JSON.parse(fs.readFileSync(detailFile, 'utf8'))) } catch {}
     detail[id] = d
     try { writeAtomic(detailFile, JSON.stringify(detail, null, 2)) } catch (e) { log(`⚠️ streaming-triage detail write: ${e.message}`); return }
-    // append a VALIDATED record so the board (VALIDATED ∩ enriched) shows it live
-    const rec = { id, title: d.title || title, severity: d.severity || f.severity || 'Medium', validation_status: 'CONFIRMED', original_agent: agent, url: f.url || d.url || '', method: f.method || '', cvss_vector: d.cvss_vector || '', cvss_score: (typeof d.cvss_score === 'number' ? d.cvss_score : null), cwe: d.cwe || '', taskId: String(taskId), source: 'streaming-triage' }
+    // append a VALIDATED record so the board (VALIDATED ∩ enriched) shows it live. shapeStreamValidated
+    // is the SINGLE source-vs-live decision — a source finding stays SOURCE_CONFIRMED with NO url, so it
+    // can never be promoted to RUNTIME_CONFIRMED (pure + tested in src/pipeline/stream-record.js).
+    const rec = require('./src/pipeline/stream-record').shapeStreamValidated(f, d, { id, title, agent, taskId })
     try { fs.appendFileSync(valFile, JSON.stringify(rec) + '\n') } catch (e) { log(`⚠️ streaming-triage validated write: ${e.message}`) }
     confirmed++
     flow('TRIAGER', `✅ → board: ${rec.title} (${rec.severity})`, `Validated + written — now #${confirmed} on the Findings tab.`)
@@ -9366,6 +9398,9 @@ async function dispatchToAgent(dispatch) {
             return true
           } catch { return false }
         },
+        // M1: the dispatcher starts/stops this around Phase 2 so source candidates triage to the board
+        // DURING the run (parity with black-box Phase 2.7). squad='code-review', targetUrl=deployUrl||''.
+        startStreamingTriage: (tid) => startStreamingTriage(tid, 'code-review', projectId, (dispatch.meta && dispatch.meta.deployUrl) || ''),
         // Live-board parity: fire the SAME normalize→triage→enrich chain one phase earlier (after
         // AUDITOR verdicts, before SCRIBE) so findings land on the board DURING the run, not at the end.
         onFindingsReady: async (tid, oDir) => {
@@ -9433,6 +9468,18 @@ async function dispatchToAgent(dispatch) {
       } else {
         log(`✅ code-review findings already on the board (surfaced live during the run) — skipping end-of-run re-materialize`)
       }
+      // M1 — Phase 3.9 parity: independent JUDGE over the validated board, same as black-box. For a
+      // static review target='' (no live URL) → the judge degrades gracefully; source findings stay
+      // SOURCE_CONFIRMED (they carry no url). Fail-soft: judging never blocks 'done'.
+      try {
+        if (fs.existsSync(_vf) && fs.readFileSync(_vf, 'utf8').trim()) {
+          const { runJudge, callRealLLM } = freshRequire('./scripts/run-judge-verifier')
+          const _judgeLLM = (p, o) => callRealLLM(p, { model: 'claude-haiku-4-5', ...(o || {}) })
+          const _jr = await runJudge({ taskId, file: _vf, target: (dispatch.meta && dispatch.meta.deployUrl) || '', outputDir: agentPaths.INTEL_ROOT, callLLM: _judgeLLM, promotionMode: true })
+          const _js = _jr && _jr.summary
+          if (_js) logActivity('NEXUS', `⚖️ Judge complete: ${_js.confirmed} confirmed / ${_js.downgraded} downgraded`, { type: 'phase-complete', squad, taskId, projectId: projectId || '', details: `Output: ${_jr.outFile || ''}` })
+        }
+      } catch (e) { log(`⚠️ cr judge ${taskId} (non-fatal): ${e.message}`) }
       // A cancel/fail can land DURING post-processing (normalize/triager/enrich take real time).
       // If the task went terminal meanwhile, do NOT launch the deferred pentest and do NOT mark
       // it 'done' — that would resurrect a cancelled run and fire an unwanted pentest at the box.

@@ -449,7 +449,7 @@ Reply one line: features covered, findings by confirmation status + severity, to
 
 // ── main ──────────────────────────────────────────────────────────────────────
 async function runCodeReview(dispatch, deps) {
-  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled, onFindingsReady, emitCandidate } = deps
+  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled, onFindingsReady, emitCandidate, startStreamingTriage } = deps
   const { taskId, projectId, squad } = dispatch
   const meta = dispatch.meta || {}
   const sourceDir = meta.sourceDir
@@ -569,6 +569,16 @@ async function runCodeReview(dispatch, deps) {
     trackCosts([cRes])
   }
 
+  // M1: stream candidates to the LIVE board WHILE Phase 2/3 run (parity with black-box Phase 2.7).
+  // The streamer tails live-findings-<taskId>.jsonl (filled by emitCandidate) and triages each source
+  // candidate → VALIDATED-FINDINGS live. We STOP it after freehand, BEFORE the AUDITOR reverse-check
+  // (Phase 2v) + onFindingsReady reconcile — so there is never a concurrent VALIDATED writer.
+  let _streamer = null
+  if (typeof startStreamingTriage === 'function' && (runPhase('phase2') || (FH_MODE !== 'off' && runPhase('freehand')))) {
+    try { _streamer = startStreamingTriage(taskId); log(`📥 streaming triage ONLINE — source candidates triaged live as specialists report them`) }
+    catch (e) { log(`⚠️ streaming-triage start failed (non-fatal): ${e.message}`) }
+  }
+
   // Phase 2 — vuln assessment (top-N features × each class, routed to specialists)
   const p2Features = features.slice(0, maxPhase2)
   if (maxPhase2 < features.length) log(`ℹ️ Phase 2 capped to top ${maxPhase2}/${features.length} features (raise meta.maxPhase2 for full coverage)`)
@@ -612,6 +622,13 @@ async function runCodeReview(dispatch, deps) {
       return spawnAgent(agent, taskId, freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir), `task-${taskId}-fh-${feature.slug}`, null)
     })
     trackCosts(results)
+  }
+
+  // Drain + stop the live streamer before the authoritative AUDITOR pass overwrites the board.
+  if (_streamer) {
+    try { const n = await _streamer.stop(); log(`📥 streaming triage drained — ${n} finding(s) surfaced live during the run`) }
+    catch (e) { log(`⚠️ streaming-triage stop (non-fatal): ${e.message}`) }
+    _streamer = null
   }
 
   // Phase 2v — AUDITOR verify (+ PROBER runtime if deployUrl)
