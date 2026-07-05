@@ -100,9 +100,21 @@ const cleanup = () => {
   d.enrichFindings({ taskId: TID })
   ok('enrich-findings queues inbox action', inboxFiles().some(f => { try { const j = JSON.parse(fs.readFileSync(F('inbox/task-actions/' + f), 'utf8')); return j.action === 'enrich-findings' && j.taskId === TID } catch { return false } }))
 
-  // validation: empty taskId rejected
-  ok('saveTriage requires taskId', (() => { try { d.saveTriage({ verdicts: {} }); return false } catch { return true } })())
+	  // validation: empty taskId rejected
+	  ok('saveTriage requires taskId', (() => { try { d.saveTriage({ verdicts: {} }); return false } catch { return true } })())
   ok('amend requires something to change', (() => { try { d.amendRun({ taskId: TID }); return false } catch { return true } })())
+
+  // ── buildCodeReviewMeta: complete static-review controls pass through ──
+  const srcRoot = path.resolve(__dirname, '..')
+  const crm = d.buildCodeReviewMeta({ meta: {
+    sourceDir: srcRoot,
+    vulnClasses: ['all', 'sqli', 'bogus-class'],
+    maxFeatures: 125,
+    maxPhase2: 125,
+  } })
+  ok('code-review meta: all classes accepted', JSON.stringify(crm.vulnClasses) === JSON.stringify(['all']), JSON.stringify(crm.vulnClasses))
+  ok('code-review meta: maxFeatures not capped at 50', crm.maxFeatures === 125, String(crm.maxFeatures))
+  ok('code-review meta: maxPhase2 not capped at 50', crm.maxPhase2 === 125, String(crm.maxPhase2))
 
   // ── buildPentestMeta: comprehensive profile + triage gate + scope host normalization ──
   const pm = d.buildPentestMeta({ meta: { targetUrl: 'http://localhost:4000/', inScope: ['localhost:4000', 'https://api.example.com/x'], credentials: [{ username: 'admin', password: 'p', role: 'admin' }] } })

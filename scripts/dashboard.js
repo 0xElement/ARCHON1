@@ -211,15 +211,24 @@ function buildCodeReviewMeta(body) {
   const _chk = checkSourceDir(sourceDir)
   if (!_chk.ok) throw new Error(`sourceDir: ${_chk.error}${sourceDir ? ` (${sourceDir})` : ''}`)
   const out = { sourceDir }
-  const VALID_CLASSES = ['access-control', 'xss', 'sqli', 'ssrf', 'rce', 'account-takeover']
+  const VALID_CLASSES = [
+    'all',
+    'access-control', 'multi-tenant', 'admin-privileged', 'business-logic',
+    'account-takeover', 'authentication-session', 'cryptography-secrets',
+    'xss', 'data-exposure', 'logging-audit', 'sqli', 'injection',
+    'deserialization', 'ssrf', 'webhooks', 'cloud-infra', 'api-security',
+    'graphql', 'rce', 'path-traversal', 'file-handling', 'race-conditions',
+    'supply-chain',
+  ]
   if (Array.isArray(m.vulnClasses)) {
-    const vc = m.vulnClasses.filter(c => VALID_CLASSES.includes(c))
-    if (vc.length) out.vulnClasses = vc
+    const vc = m.vulnClasses.map(c => String(c || '').trim()).filter(c => VALID_CLASSES.includes(c))
+    if (vc.includes('all')) out.vulnClasses = ['all']
+    else if (vc.length) out.vulnClasses = [...new Set(vc)]
   }
   if (m.deployUrl && /^https?:\/\//.test(String(m.deployUrl))) out.deployUrl = String(m.deployUrl)
   if (m.testAccounts && typeof m.testAccounts === 'object') out.testAccounts = m.testAccounts // UTTARA runtime-validation auth
-  if (Number.isFinite(+m.maxFeatures) && +m.maxFeatures > 0) out.maxFeatures = Math.min(50, Math.floor(+m.maxFeatures))
-  if (Number.isFinite(+m.maxPhase2) && +m.maxPhase2 > 0) out.maxPhase2 = Math.min(50, Math.floor(+m.maxPhase2))
+  if (Number.isFinite(+m.maxFeatures) && +m.maxFeatures > 0) out.maxFeatures = Math.floor(+m.maxFeatures)
+  if (Number.isFinite(+m.maxPhase2) && +m.maxPhase2 > 0) out.maxPhase2 = Math.floor(+m.maxPhase2)
   return out
 }
 

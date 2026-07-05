@@ -60,6 +60,7 @@ const { evaluateConvergence } = require('./agents/goal-evaluator')
 // adapter is 'sdk' (subscription OAuth, no API key); ADAPTER=cli is the rollback floor.
 const { runAgent, resolvedAdapterName } = require('./agents/runner/agent-runner')
 const { bridgeSpawnAgent } = require('./agents/runner/run-agent-bridge')
+const { classifyEngagementMode } = require('./src/core/engagement-mode')
 
 // (2026-05-09) Sprint C.1 trajectory observer — TrajAD-inspired specialist
 // output classifier. Wired into spawnAgent's resolve path below so EVERY
@@ -2977,13 +2978,13 @@ async function runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerpri
     let endpointData = ''
     try { if (fs.existsSync(endpointFile)) endpointData = fs.readFileSync(endpointFile, 'utf-8').slice(0, 4000) } catch {}
 
-    // White-box source guidance (Autonomous OS, flag-gated). Absent / flag-off ⇒ undefined ⇒ byte-identical plan.
+    // White-box source guidance. The dashboard now defers white-box pentest by default and writes
+    // source-guidance-<taskId>.json when code review produced candidates, so consume the persisted
+    // file whenever present. A normal black-box run has no such file.
     let __sourceGuidance = null
     try {
-      if (agentPaths.flagEnabled && agentPaths.flagEnabled('SOURCE_GUIDED_PENTEST')) {
-        const __sg = `${agentPaths.INTEL_ROOT}/source-guidance-${taskId}.json`
-        if (fs.existsSync(__sg)) __sourceGuidance = JSON.parse(fs.readFileSync(__sg, 'utf8'))
-      }
+      const __sg = `${agentPaths.INTEL_ROOT}/source-guidance-${taskId}.json`
+      if (fs.existsSync(__sg)) __sourceGuidance = JSON.parse(fs.readFileSync(__sg, 'utf8'))
     } catch { /* fail-soft */ }
     const prompt = planner.buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData, sourceGuidance: __sourceGuidance, focusClasses })
     // ATLAS = pentest orchestrator → Opus (was modelRouter.resolve, a non-existent method → errored)
@@ -3658,16 +3659,14 @@ function buildPentestSpecialistPrompt(agentName, taskTitle, taskId, projectId, s
   const scrubbedGoal = scrubBaselineFromGoal(goalContext)
   const goalLine = scrubbedGoal ? `Goal: ${scrubbedGoal}\n` : ''
   const techLine = techStack ? `Detected Tech Stack: ${techStack}. Prioritize payloads and techniques specific to this stack.\n` : ''
-  // White-box source guidance (Autonomous OS, flag-gated). Empty (byte-identical) when off / absent.
+  // White-box source guidance. Empty when no persisted source-guidance bundle exists.
   const __sgBlock = (() => {
     try {
-      if (agentPaths.flagEnabled && agentPaths.flagEnabled('SOURCE_GUIDED_PENTEST')) {
-        const f = `${agentPaths.INTEL_ROOT}/source-guidance-${taskId}.json`
-        if (fs.existsSync(f)) {
-          const sg = JSON.parse(fs.readFileSync(f, 'utf8'))
-          const cands = (sg.candidate_targets || []).slice(0, 15)
-          if (cands.length) return `\n\n## SOURCE GUIDANCE (white-box) — confirm these source candidates LIVE (each is a HYPOTHESIS, never a finding):\n` + cands.map(c => `- [${c.vuln_class}] ${c.candidate_id} @ ${c.file || c.url || '?'} — ${(c.suggested_blackbox_task && c.suggested_blackbox_task.objective) || 'live-confirm'}`).join('\n')
-        }
+      const f = `${agentPaths.INTEL_ROOT}/source-guidance-${taskId}.json`
+      if (fs.existsSync(f)) {
+        const sg = JSON.parse(fs.readFileSync(f, 'utf8'))
+        const cands = (sg.candidate_targets || []).slice(0, 15)
+        if (cands.length) return `\n\n## SOURCE GUIDANCE (white-box) — confirm these source candidates LIVE (each is a HYPOTHESIS, never a finding):\n` + cands.map(c => `- [${c.vuln_class}] ${c.candidate_id} @ ${c.file || c.url || '?'} — ${(c.suggested_blackbox_task && c.suggested_blackbox_task.objective) || 'live-confirm'}`).join('\n')
       }
     } catch { /* fail-soft */ }
     return ''
@@ -6262,7 +6261,7 @@ Be brief and specific. This is an adversarial check.`
     // pentest live-findings (buildRootCauseRequests is read-only). Flag-off ⇒ skipped.
     try {
       const __isWb = !!(dispatch.meta && dispatch.meta.sourceGuided)
-      if (__isWb && agentPaths.flagMode && agentPaths.flagMode('SOURCE_GUIDED_PENTEST') !== 'off' && phaseEnabled('3.088', squad)) {
+      if (__isWb && phaseEnabled('3.088', squad)) {
         const __engId = (dispatch.meta && dispatch.meta.engagementId) || taskId
         let __crTaskId = null
         try {
@@ -8598,12 +8597,13 @@ Read:
 - the cited per-feature reports under ${outDir}/phase2/**/*.md (file:line traces, CVSS, impact, remediation)
 ${deployUrl ? `- ${outDir}/phase2/PROBER-RUNTIME.md if present (runtime confirmation against ${deployUrl})` : ''}
 
-Keep ONLY verdicts that are CONFIRMED or NEEDS-LIVE (treat NEEDS-LIVE as CONFIRMED only if PROBER reproduced it live; otherwise still include it as CONFIRMED source-side). OMIT DISPROVEN.
+Keep ONLY verdicts that are RUNTIME_CONFIRMED, SOURCE_CONFIRMED, or NEEDS_LIVE_VALIDATION. OMIT DISPROVEN.
+Do NOT flatten NEEDS_LIVE_VALIDATION into CONFIRMED: it must stay validation_status="NEEDS-LIVE" and confirmation_status="NEEDS_LIVE_VALIDATION" unless PROBER reproduced it live.
 
 Write STRICT JSON, ONE object per line, to ${outFile} (overwrite). Each line:
-{"id":"CR-<n>","title":"...","severity":"Critical|High|Medium|Low|Info","cvss_score":<number>,"cvss_vector":"CVSS:3.1/...","url":"<live URL if PROBER reproduced it, else empty string>","file":"<source path>","line":<number>,"original_agent":"<phase2 specialist>","validation_status":"CONFIRMED","reproduction_method":"<file:line trace + curl/PROBER step if live>","reproduction_result":"<evidence>","taskId":"${taskId}","source":"code-review-normalizer"}
+{"id":"CR-<n>","title":"...","severity":"Critical|High|Medium|Low|Info","cvss_score":<number>,"cvss_vector":"CVSS:3.1/...","url":"<live URL if PROBER reproduced it, else empty string>","file":"<source path>","line":<number>,"original_agent":"<phase2 specialist>","validation_status":"CONFIRMED|NEEDS-LIVE","confirmation_status":"RUNTIME_CONFIRMED|SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","reproduction_method":"<file:line trace + curl/PROBER step if live>","reproduction_result":"<evidence>","taskId":"${taskId}","source":"code-review-normalizer"}
 
-EVERY line MUST include "taskId":"${taskId}" and "validation_status":"CONFIRMED". Write ONLY that file, then reply one line: wrote N validated findings.`
+EVERY line MUST include "taskId":"${taskId}". Use validation_status="CONFIRMED" only for RUNTIME_CONFIRMED or SOURCE_CONFIRMED records; use validation_status="NEEDS-LIVE" for NEEDS_LIVE_VALIDATION records. Write ONLY that file, then reply one line: wrote N validated findings.`
     log(`🔁 cr-normalize: AUDITOR → VALIDATED-FINDINGS-${taskId}.jsonl`)
     await spawnAgent('auditor', taskId, prompt, `task-${taskId}-cr-normalize`, null, { timeoutMs: REPORT_AUDITOR_TIMEOUT_MS })
     const n = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf8').trim().split('\n').filter(Boolean).length : 0
@@ -9295,6 +9295,15 @@ async function dispatchToAgent(dispatch) {
   // 'parallel-phases' = pentest-style. Adding a new dispatchType requires extending
   // this router + SQUAD_TYPES + the dispatchers themselves.
   const dispatchType = getSquadDispatchType(squad)
+  // Label the engagement mode (black-box / static / white-box) for observability. Behaviour is driven
+  // by the dispatch's own fields (squad → dispatchType; meta.deployUrl → PROBER), so this is fail-soft:
+  // a classification hiccup must never block a dispatch.
+  try {
+    const mode = classifyEngagementMode(dispatch)
+    if (mode) logActivity('NEXUS', `🧭 Engagement mode: ${mode}`, {
+      type: 'engagement-mode', squad, taskId, projectId: projectId || '', details: `dispatchType=${dispatchType}`,
+    })
+  } catch { /* observability only — never block a dispatch on the mode label */ }
 
   // (2026-04-23) code-review squad routes through code-review-dispatcher module.
   // White-box source code review — 6 framework specialists + PROBER runtime validator.

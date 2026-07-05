@@ -1,12 +1,12 @@
 // test/mode-contract.test.js
-// P0 — the engagement-mode contract engine (ULTRAPLAN §3.1, audit Issues 1/4/5).
-// black-box = pentest only; static = code-review only (no live hit); white-box = both.
+// Engagement-mode CLASSIFIER (ULTRAPLAN §3.1): black-box = pentest only; static = source-only code
+// review (no live hit); white-box = source + a live URL (code review + PROBER runtime validation).
 
 'use strict'
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 
-const { classifyEngagementMode, assertModeContract } = require('../src/core/engagement-mode')
+const { classifyEngagementMode } = require('../src/core/engagement-mode')
 
 // Inject a fake engagement resolver so tests never touch disk.
 const noEng = { resolveEngagement: () => null }
@@ -17,9 +17,17 @@ test('pentest dispatch with no source signal classifies blackbox', () => {
   assert.equal(classifyEngagementMode({ squad: 'pentest-squad', meta: {} }, noEng), 'blackbox')
 })
 
-test('standalone code-review classifies static', () => {
+test('source-only code-review classifies static (no live target)', () => {
   assert.equal(classifyEngagementMode({ squad: 'code-review', meta: { sourceDir: '/src' } }, noEng), 'static')
   assert.equal(classifyEngagementMode({ squad: 'code-review-squad', meta: {} }, noEng), 'static')
+})
+
+test('code-review WITH a deployUrl classifies whitebox — source + URL keeps PROBER alive', () => {
+  // The exact shape both operator UI flows emit (Code Review form + Pentest > Static Analysis): a
+  // standalone code-review carrying a live URL, no engagement marker. It MUST stay white-box so
+  // deployUrl survives and PROBER runtime-validates the source findings. (Regression guard: this
+  // used to classify 'static' and get its deployUrl stripped, silently disabling PROBER.)
+  assert.equal(classifyEngagementMode({ squad: 'code-review', meta: { sourceDir: '/src', deployUrl: 'https://x.test' } }, noEng), 'whitebox')
 })
 
 test('white-box: source-guided pentest dispatch classifies whitebox at the event-bus boundary (Issue 1)', () => {
@@ -39,23 +47,6 @@ test('white-box: combined code-review iteration classifies whitebox (keeps deplo
   assert.equal(
     classifyEngagementMode({ squad: 'code-review', meta: { engagementId: 'E1', deployUrl: 'https://x.test' } }, withEng({ sourceDir: '/src', targetUrl: 'https://x.test' })),
     'whitebox')
-})
-
-test('assertModeContract throws when a black-box engagement would spawn code review', () => {
-  assert.throws(() => assertModeContract('blackbox', { meta: {}, willSpawnCodeReview: true }), /MODE-CONTRACT/)
-  assert.doesNotThrow(() => assertModeContract('blackbox', { meta: {}, willSpawnCodeReview: false }))
-})
-
-test('assertModeContract strips deployUrl for static so PROBER never fires (Issue 5)', () => {
-  const meta = { sourceDir: '/src', deployUrl: 'https://x.test' }
-  assertModeContract('static', { meta })
-  assert.equal(meta.deployUrl, null, 'static dispatch must have deployUrl stripped at the boundary')
-})
-
-test('assertModeContract leaves a whitebox code-review deployUrl intact (PROBER legitimate)', () => {
-  const meta = { sourceDir: '/src', deployUrl: 'https://x.test' }
-  assertModeContract('whitebox', { meta })
-  assert.equal(meta.deployUrl, 'https://x.test')
 })
 
 test('a non-mode squad is passthrough (null) — contract does not apply', () => {

@@ -8,6 +8,9 @@
 
 const assert = require('assert')
 const cv = require('../src/pipeline/chain-verifier')
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
 
 let failures = 0
 let passed = 0
@@ -38,21 +41,37 @@ const { spawn, spawnSync } = require('child_process')
 // Make curl bypass any inherited proxy for the local fixture (some CI/Docker envs
 // set http_proxy, which would otherwise route 127.0.0.1 through a dead proxy).
 process.env.NO_PROXY = process.env.no_proxy = '127.0.0.1,localhost'
-const FIXTURE_PORT = 38291
 const FIXTURE_HTML = '<!doctype html><html><head><title>Example Domain</title></head><body><h1>Example Domain</h1><p>This domain is for use in illustrative examples.</p></body></html>'
+const FIXTURE_PORT_FILE = path.join(os.tmpdir(), `archon-chain-fixture-${process.pid}.port`)
+try { fs.unlinkSync(FIXTURE_PORT_FILE) } catch {}
 const __fixtureChild = spawn(process.execPath, ['-e',
-  `require('http').createServer((q,s)=>{s.writeHead(200,{'Content-Type':'text/html; charset=UTF-8'});s.end(${JSON.stringify(FIXTURE_HTML)})}).listen(${FIXTURE_PORT},'127.0.0.1')`],
+  `const fs=require('fs');const pf=${JSON.stringify(FIXTURE_PORT_FILE)};const server=require('http').createServer((q,s)=>{s.writeHead(200,{'Content-Type':'text/html; charset=UTF-8'});s.end(${JSON.stringify(FIXTURE_HTML)})});server.on('error',e=>{try{fs.writeFileSync(pf,'ERROR:'+e.code)}catch{};process.exit(0)});server.listen(0,'127.0.0.1',()=>fs.writeFileSync(pf,String(server.address().port)))`],
   { stdio: 'ignore' })
-const BASE = `http://127.0.0.1:${FIXTURE_PORT}`
+let FIXTURE_PORT = ''
+let BASE = ''
 // Deterministic fixture readiness: poll until the server answers 200 (bypassing any proxy),
 // and FAIL LOUDLY if it never comes up — rather than silently proceeding into flaky HTTP-000 checks.
 ;(() => {
   for (let i = 0; i < 100; i++) {
-    const r = spawnSync('curl', ['--noproxy', '*', '-s', '-o', '/dev/null', '-w', '%{http_code}', BASE], { encoding: 'utf8', timeout: 1500 })
-    if (r.stdout === '200') return
+    if (!FIXTURE_PORT) {
+      try {
+        FIXTURE_PORT = fs.readFileSync(FIXTURE_PORT_FILE, 'utf8').trim()
+        if (FIXTURE_PORT.startsWith('ERROR:EPERM')) {
+          console.log('  ⏭ chain-verifier.test.js — skipped (local listen blocked by sandbox EPERM)')
+          try { __fixtureChild.kill() } catch {}
+          try { fs.unlinkSync(FIXTURE_PORT_FILE) } catch {}
+          process.exit(0)
+        }
+        BASE = `http://127.0.0.1:${FIXTURE_PORT}`
+      } catch {}
+    }
+    if (BASE) {
+      const r = spawnSync('curl', ['--noproxy', '*', '-s', '-o', '/dev/null', '-w', '%{http_code}', BASE], { encoding: 'utf8', timeout: 1500 })
+      if (r.stdout === '200') return
+    }
     spawnSync('sleep', ['0.05'])
   }
-  throw new Error(`[chain-verifier.test] fixture server on ${BASE} never became ready — proxy env? http_proxy=${process.env.http_proxy || process.env.HTTP_PROXY || 'unset'}`)
+  throw new Error(`[chain-verifier.test] fixture server never became ready — port=${FIXTURE_PORT || 'unset'} proxy env? http_proxy=${process.env.http_proxy || process.env.HTTP_PROXY || 'unset'}`)
 })()
 
 test('_augmentCurlArgs injects the exact HTTP/STATUS marker (+ --noproxy for loopback only)', () => {
@@ -290,5 +309,6 @@ test('verifyChains filters falsy finding_ids', () => {
 })
 
 try { __fixtureChild.kill() } catch {}
+try { fs.unlinkSync(FIXTURE_PORT_FILE) } catch {}
 console.log(`\n${passed} passed, ${failures} failed`)
 process.exit(failures > 0 ? 1 : 0)

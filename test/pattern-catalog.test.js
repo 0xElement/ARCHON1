@@ -66,8 +66,10 @@ test('coverage-map exposes a PURE CATALOG_BY_CLASS const (no I/O)', () => {
   assert.equal(coverage.CATALOG_BY_CLASS.sqli, 'sqli.json')
 })
 
-test('flag-off: dispatcher phase2Prompt catalog line is byte-identical (no engine resolution)', () => {
-  // Load the dispatcher with the pattern flag OFF; the null-catalog classes keep the literal "(no catalog…)" line.
+test('dispatcher phase2Prompt resolves structured catalogs even when pattern flag is off', () => {
+  // Static-review quality must not depend on an env flag. The flag still controls
+  // experimental downstream pattern-id correlation, but Phase 2 should receive the
+  // class catalog whenever one exists.
   const DISPATCHER = require.resolve('../src/dispatch/code-review-dispatcher.js')
   const keys = ['ARCHON_ENABLE_AUTONOMOUS_OS', 'ARCHON_ENABLE_PATTERN_REVIEW', 'ARCHON_ENABLE_THREE_PHASE_SOURCE_REVIEW']
   const saved = {}
@@ -75,9 +77,9 @@ test('flag-off: dispatcher phase2Prompt catalog line is byte-identical (no engin
   delete require.cache[DISPATCHER]
   try {
     const mod = require(DISPATCHER)
-    // sqli is a null-catalog class today; flag-off must keep the literal fallback line.
-    const p = mod.freehandPrompt ? true : true // module loaded
-    assert.ok(mod.PHASES, 'dispatcher loads')
+    const prompt = mod.phase2Prompt('sqli', 'quill', { slug: 'search' }, 't1', '/src', '/out')
+    assert.match(prompt, /Pattern catalog \(apply EVERY pattern\): .*common\/patterns\/sqli\.json/)
+    assert.doesNotMatch(prompt, /\(no catalog/)
   } finally {
     for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k] }
     delete require.cache[DISPATCHER]

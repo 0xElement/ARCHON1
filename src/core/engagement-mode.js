@@ -1,17 +1,18 @@
 // src/core/engagement-mode.js
 //
-// THE engagement-mode contract engine (a flag-INDEPENDENT hard invariant, like
-// scope fail-closed). Enforces the operator's three-mode rule:
+// Engagement-mode classifier. Labels a dispatch by the operator's three-mode rule
+// (observability — the 🧭 mode line in the activity log):
 //
-//   BLACK-BOX (live URL only)   → live pentest ONLY            · MUST NOT code-review
-//   STATIC    (source only)     → code review ONLY             · MUST NOT make a live hit
-//   WHITE-BOX (source + URL)    → code review + source-guided pentest, bidirectional
+//   BLACK-BOX (live URL only)   → live pentest, no source
+//   STATIC    (source only)     → code review, no live hit (no deployUrl ⇒ PROBER can't fire)
+//   WHITE-BOX (source + URL)    → code review + runtime validation (deployUrl kept ⇒ PROBER runs)
 //
-// classifyEngagementMode reads the fields a dispatch ACTUALLY carries at each
-// wiring boundary (the pentest dispatch has no sourceDir — it self-identifies as
-// white-box via meta.sourceGuided or the resolved engagement record). See
-// ULTRAPLAN.md §3. assertModeContract throws on a violation and strips a static
-// dispatch's deployUrl so PROBER can never fire a live hit.
+// Behaviour is driven by the dispatch's OWN fields — squad → dispatchType (routing) and
+// meta.deployUrl → PROBER — so a code-review that carries a deployUrl IS white-box, and
+// source-only is static. This module only names that; it enforces nothing the routing +
+// deployUrl gate don't already guarantee. classifyEngagementMode reads the fields a dispatch
+// ACTUALLY carries at each wiring boundary (the pentest dispatch has no sourceDir — it self-
+// identifies as white-box via meta.sourceGuided or the resolved engagement record). ULTRAPLAN §3.
 
 'use strict'
 
@@ -57,10 +58,12 @@ function classifyEngagementMode(dispatch, opts = {}) {
   }
 
   if (squad === 'code-review') {
-    // The code-review ITERATION of a combined white-box engagement is part of
-    // white-box (keeps its deployUrl for PROBER). A standalone source review is
-    // static (no live hit).
+    // Source + a live URL = WHITE-BOX: keep deployUrl so PROBER runtime-validates the source
+    // findings against the running target (the operator UI advertises exactly this). Source ONLY,
+    // no URL = static. A combined-engagement iteration carries the marker/engagementId; a standalone
+    // review carries deployUrl directly — both are white-box.
     if (meta.engagementMode === 'whitebox') return 'whitebox'
+    if (meta.deployUrl) return 'whitebox'
     if (meta.engagementId) {
       const eng = resolveEngagement(meta.engagementId)
       if (eng && eng.sourceDir && (eng.targetUrl || meta.deployUrl)) return 'whitebox'
@@ -72,26 +75,4 @@ function classifyEngagementMode(dispatch, opts = {}) {
   return null
 }
 
-/**
- * Enforce the contract. Throws on a violation (flag-independent, fail-closed).
- * Mutates a static dispatch's meta.deployUrl → null so PROBER cannot fire.
- * @param ctx.meta the dispatch meta (mutated for static)
- * @param ctx.willSpawnCodeReview whether the caller is about to spawn code review
- */
-function assertModeContract(mode, ctx = {}) {
-  const meta = ctx.meta || {}
-  if (mode === 'blackbox' && ctx.willSpawnCodeReview) {
-    throw new Error('MODE-CONTRACT violation: black-box engagement must not perform code review')
-  }
-  if (mode === 'static') {
-    // Strip the live target at the boundary (not relying on the caller) so a
-    // standalone source review can never make a live hit (PROBER suppressed).
-    if (meta.deployUrl) meta.deployUrl = null
-    if (ctx.willFireLive) {
-      throw new Error('MODE-CONTRACT violation: static analysis must not make a live hit')
-    }
-  }
-  return mode
-}
-
-module.exports = { classifyEngagementMode, assertModeContract }
+module.exports = { classifyEngagementMode }
