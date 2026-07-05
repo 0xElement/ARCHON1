@@ -43,6 +43,11 @@ test('M4: source record carries required_blackbox_proof + affected_endpoint (sou
   assert.equal(r.url, undefined) // still no url — stays SOURCE_CONFIRMED
 })
 
+test('M5: every validated record carries an evidence_tier (L0–L4)', () => {
+  const r = shapeStreamValidated(src, { source: 'p', sink: 's', required_blackbox_proof: 'x' }, meta)
+  assert.equal(r.evidence_tier, 'L3') // file+line + source→sink + required-proof
+})
+
 test('a live finding keeps the runtime shape (url/method); status derived downstream', () => {
   const r = shapeStreamValidated({ agent: 'drill', url: 'https://x.test/a', method: 'POST' }, { title: 'SQLi' }, meta)
   assert.equal(r.url, 'https://x.test/a')

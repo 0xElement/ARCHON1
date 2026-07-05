@@ -44,6 +44,7 @@ const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
 const sourcePlanner = require('./source-planner') // M3: rank the Phase-2 queue + re-plan from findings
+const candidateIndex = require('../pipeline/candidate-index') // M5: deduped candidate index + validation queue
 
 const METH = path.join(__roots.AGENTS_ROOT, 'squads/code-review/methodology')
 
@@ -391,6 +392,10 @@ Each object MUST have exactly these fields:
 {"feature":"${feature.slug}","pattern":"<pattern / test-case name>","pattern_id":"<catalog id or ''>","file":"<source path>","line":<number>,"source":"<where untrusted input enters>","sink":"<the dangerous sink>","endpoint":"<affected route/action or ''>","severity":"Critical|High|Medium|Low|Info","confidence":<0-100>,"hypothesis":"<what an attacker does>","evidence":"<the vulnerable code snippet / file:line trace>","status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","required_blackbox_proof":"<what a live test must show, or ''>"}
 Status rule: a source-only finding is SOURCE_CONFIRMED (you read the bug in the code) or NEEDS_LIVE_VALIDATION (needs a live hit to prove) — NEVER RUNTIME_CONFIRMED (you have no live evidence here). Emit candidates AS you confirm them, not only at the end.
 
+## Audit trail (REQUIRED — proves the FULL ${cls} catalog was considered, not just the hits)
+- Pattern coverage: write ${outDir}/phase2/${cls}/${feature.slug}_pattern_review.md — for EACH pattern in the ${cls} catalog, one line: pattern name + result state (matched_candidate / reviewed_no_issue / not_applicable / needs_more_context).
+- Rejected patterns: for each pattern you REJECT, append one JSON line to ${outDir}/rejected/${cls}-${feature.slug}.jsonl (mkdir -p first): {"pattern":"…","file":"…","reason":"false_positive|not_applicable|reviewed_no_issue|duplicate","note":"…"}
+
 Write the report to: ${outFile} (mkdir -p first). Then reply one line: rows reverse-checked, findings (by severity), residual gaps.`
 }
 
@@ -680,6 +685,20 @@ async function runCodeReview(dispatch, deps) {
     catch (e) { log(`⚠️ streaming-triage stop (non-fatal): ${e.message}`) }
     _streamer = null
   }
+
+  // M5: deterministic audit artifacts from the streamed candidates — a deduped, CAND-numbered index +
+  // the black-box validation queue (NEEDS-LIVE subset, keyed to CAND-ids for white-box). Fail-soft.
+  try {
+    const cands = readLiveFindings(taskId).filter(f => f && (f.type === 'candidate' || f.source === 'code-review'))
+    if (cands.length) {
+      const idx = candidateIndex.buildCandidateIndex(cands)
+      const cdir = `${outDir}/phase1-maps/consolidated`
+      fs.mkdirSync(cdir, { recursive: true })
+      fs.writeFileSync(`${cdir}/candidate_findings_index.md`, candidateIndex.renderIndexMd(idx))
+      fs.writeFileSync(`${cdir}/blackbox_validation_queue.md`, candidateIndex.renderQueueMd(candidateIndex.buildValidationQueue(idx)))
+      log(`🗂️  Audit artifacts: ${idx.length} candidate(s) indexed → candidate_findings_index.md + blackbox_validation_queue.md`)
+    }
+  } catch (e) { log(`⚠️ audit-artifact write (non-fatal): ${e.message}`) }
 
   // Phase 2v — AUDITOR verify (+ PROBER runtime if deployUrl)
   if (cancelled()) return bail('Phase 2v verify')

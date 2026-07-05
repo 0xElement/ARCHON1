@@ -28,9 +28,10 @@ function shapeStreamValidated(f, d, meta = {}) {
   }
   // Source finding → source shape, ALWAYS. Even if the triager tried to write a url/response, a
   // source candidate stays SOURCE_CONFIRMED with no url (that fabrication is exactly what this guards).
+  let rec
   if (isSourceFinding(f)) {
     const needsLive = d.confirmation_status === 'NEEDS_LIVE_VALIDATION'
-    return {
+    rec = {
       ...base,
       file: d.file || f.file || '', line: d.line ?? f.line ?? '',
       confirmation_status: needsLive ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
@@ -40,8 +41,12 @@ function shapeStreamValidated(f, d, meta = {}) {
       required_blackbox_proof: d.required_blackbox_proof || f.required_blackbox_proof || '',
       affected_endpoint: d.endpoint || f.endpoint || '',
     }
+  } else {
+    rec = { ...base, url: f.url || d.url || '', method: f.method || '' }
   }
-  return { ...base, url: f.url || d.url || '', method: f.method || '' }
+  // M5: stamp the evidence quality tier (L0–L4), computed over the full evidence view (finding + detail).
+  try { rec.evidence_tier = require('./evidence-tier').evidenceTier({ ...f, ...d, ...rec }) } catch { /* fail-soft */ }
+  return rec
 }
 
 module.exports = { isSourceFinding, shapeStreamValidated }
