@@ -227,6 +227,40 @@ function writeAnalysisForTask({ taskId, analysis, intelDir = INTEL_DIR }) {
 // Read JS URLs that TRACER's crawl wrote. The convention (since round-9):
 //   /root/intel/crawl-{taskId}/g1-js-urls.txt — one URL per line
 // Returns array of URLs, or empty if file missing.
+// Pure: pull JS bundle URLs out of a page's HTML (NO external tool — no subjs/LinkFinder needed).
+// Covers <script src>, modulepreload/preload <link href>, and bare "*.js" references in inline
+// scripts (SPA lazy-loaded chunks). Relative URLs resolve against baseUrl; only .js/.mjs/.cjs kept.
+function extractScriptUrls(html, baseUrl) {
+  if (!html) return []
+  const out = new Set()
+  const add = (u) => {
+    if (!u) return
+    try {
+      const abs = new URL(u, baseUrl).href.split('#')[0]
+      if (/\.[cm]?js(\?|$)/i.test(abs)) out.add(abs)
+    } catch { /* un-resolvable → skip */ }
+  }
+  for (const m of html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)) add(m[1])
+  for (const m of html.matchAll(/<link\b[^>]*\bhref\s*=\s*["']([^"']+?\.[cm]?js[^"']*)["']/gi)) add(m[1])
+  for (const m of html.matchAll(/["'`]([^"'`\s<>()]+?\.[cm]?js)(?:\?[^"'`\s<>]*)?["'`]/gi)) add(m[1])
+  return [...out]
+}
+
+// Fetch each seed page's HTML and extract its JS bundle URLs (built-in fetch; tool-independent).
+// This is the fallback so JS-heavy SPAs ALWAYS get their bundle analyzed even when subjs/LinkFinder
+// aren't installed — an SPA's entire API surface lives in the bundle. Fail-soft per seed. Deduped.
+async function discoverJsUrls(seedUrls, { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, maxSeeds = 20, fetchImpl = defaultFetchImpl } = {}) {
+  const seeds = [...new Set((Array.isArray(seedUrls) ? seedUrls : []).filter(Boolean))].slice(0, maxSeeds)
+  const found = new Set()
+  for (const seed of seeds) {
+    try {
+      const html = await fetchImpl(seed, { timeoutMs })
+      for (const u of extractScriptUrls(html, seed)) found.add(u)
+    } catch { /* fail-soft per seed */ }
+  }
+  return [...found]
+}
+
 function readJsUrlsForTask(taskId, { intelDir = INTEL_DIR } = {}) {
   const crawlDir = path.join(intelDir, `crawl-${taskId}`)
   const candidates = [
@@ -254,6 +288,8 @@ module.exports = {
   extractBuildMetadata,
   writeAnalysisForTask,
   readJsUrlsForTask,
+  extractScriptUrls,
+  discoverJsUrls,
   defaultFetchImpl,
   MAX_BUNDLE_BYTES,
   MAX_ENDPOINTS_PER_BUNDLE,

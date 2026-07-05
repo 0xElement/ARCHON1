@@ -2630,13 +2630,29 @@ async function _runtracerAgentInner(target, taskId) {
     const seedUrls = [target, ...[...discovered].slice(0, 20)].join('\n')
     fs.writeFileSync(seedFile, seedUrls)
 
-    // subjs: extracts .js URLs from HTML of seed pages
+    // subjs (external, optional): extracts .js URLs from the HTML of seed pages
     const jsListFile = `${outDir}/g1-js-urls.txt`
     run(`cat ${seedFile} | subjs -c 5 2>/dev/null | sort -u > ${jsListFile}`, 60000)
-    const jsFileUrls = fs.existsSync(jsListFile)
+    const subjsUrls = fs.existsSync(jsListFile)
       ? fs.readFileSync(jsListFile, 'utf-8').trim().split('\n').filter(Boolean)
       : []
-    log(`   subjs found ${jsFileUrls.length} JS file URLs`)
+    log(`   subjs found ${subjsUrls.length} JS file URLs`)
+
+    // Built-in fallback (NO external tool): fetch the seed pages' HTML and regex-extract
+    // <script src>/<link modulepreload>/*.js references, so a JS-heavy SPA's bundle is ALWAYS
+    // discovered even when subjs/LinkFinder aren't installed (an SPA's whole API lives in the bundle).
+    let builtinJsUrls = []
+    try {
+      const _jsa = require('./agents/js-bundle-analyzer')
+      builtinJsUrls = await _jsa.discoverJsUrls([target, ...[...discovered].slice(0, 20)], { timeoutMs: 10000, maxSeeds: 20 })
+      if (builtinJsUrls.length) log(`   built-in JS discovery found ${builtinJsUrls.length} bundle URL(s) from page HTML`)
+    } catch (e) { log(`   built-in JS discovery skipped (non-fatal): ${e.message}`) }
+
+    // Union subjs + built-in → rewrite g1-js-urls.txt so BOTH LinkFinder (below) and Phase 1.6
+    // (readJsUrlsForTask) analyze the full set. This is what closes the "missed the SPA's API" gap.
+    const jsFileUrls = [...new Set([...subjsUrls, ...builtinJsUrls])]
+    try { fs.writeFileSync(jsListFile, jsFileUrls.join('\n')) } catch {}
+    log(`   JS bundle URLs to analyze: ${jsFileUrls.length} (subjs ${subjsUrls.length} + built-in ${builtinJsUrls.length})`)
 
     // LinkFinder: extract endpoint references FROM each JS file
     // Cap at 30 JS files to bound runtime (~2s per file)
