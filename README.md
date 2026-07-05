@@ -4,11 +4,11 @@
 
 **Autonomous AI web-application penetration tester — white-box + black-box in one engagement.**
 
-ARCHON runs a squad of LLM-powered specialist agents against a web target, independently verifies
-every finding, and validates each one **live onto your Findings board** as it goes. When testing
-finishes the run completes — you generate the professional report on demand. Give it a **URL** for a
-black-box assessment, or a **URL + source code** for a combined white-box + black-box engagement
-whose findings merge into one de-duplicated report.
+ARCHON points a *squad* of LLM specialist agents at a web target, independently verifies every finding,
+and validates each one **live onto your Findings board** as it goes. When testing finishes the run
+completes — you generate the professional report on demand. Give it a **URL** for a black-box assessment,
+or a **URL + source code** for a combined white-box + black-box engagement whose findings merge into one
+de-duplicated report.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml/badge.svg)](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml)
@@ -37,11 +37,17 @@ npm start              # 1) the agent daemon (event-bus)
 npm run dashboard      # 2) separate shell → portal at http://localhost:4000
 ```
 
-A fresh clone needs **no config** — roots resolve to the repo directory automatically. The one real
-prerequisite is a **Claude subscription + the `claude` CLI, logged in**: ARCHON runs on your
-subscription over OAuth, *not* a metered API key. Then open **http://localhost:4000 → New dispatch**.
-Full prerequisites, optional recon tools, and the `npm run doctor` preflight are in
-[Quickstart](#quickstart).
+Then open **http://localhost:4000 → New dispatch**.
+
+**The one real prerequisite** is a **Claude subscription + the `claude` CLI, logged in** — ARCHON runs
+every agent on your subscription over OAuth, *not* a metered API key (install
+[Claude Code](https://claude.ai/code) and run `claude` once). Beyond that you need **Node ≥ 18** and
+**git** (macOS / Linux, or Windows via WSL). A fresh clone needs **no config** — roots resolve to the repo
+directory automatically. Optional black-box recon tools (`nmap`, `naabu`, …) are all fail-soft, so you can
+skip them; a static code-review run needs only Node + `claude`.
+
+`bash setup.sh` ends by running **`npm run doctor`** — a preflight that prints exactly what's present vs
+missing (Node, the `claude` login, optional tools). Run **`npm run doctor`** any time a dispatch fails.
 
 ---
 
@@ -49,15 +55,12 @@ Full prerequisites, optional recon tools, and the `npm run doctor` preflight are
 
 - [Install](#install)
 - [Why ARCHON](#why-archon)
+- [How ARCHON works](#how-archon-works)
 - [Features](#features)
-- [How it works](#how-it-works)
-- [How the agents and triage work](#how-the-agents-and-triage-work)
+- [The squads](#the-squads)
+- [Engagement modes](#engagement-modes)
 - [Benchmark](#benchmark)
 - [Field-tested — a real CVE](#field-tested--a-real-cve)
-- [Engagement modes](#engagement-modes)
-- [The squads](#the-squads)
-- [Quickstart](#quickstart)
-- [Authentication — subscription, not API key](#authentication--subscription-not-api-key)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Project structure](#project-structure)
@@ -66,121 +69,61 @@ Full prerequisites, optional recon tools, and the `npm run doctor` preflight are
 - [Development & contributing](#development--contributing)
 - [Documentation](#documentation)
 - [Roadmap & status](#roadmap--status)
-- [License](#license)
+- [License](#license--authors)
 
 ---
 
 ## Why ARCHON
 
-A pentest is mostly orchestration: map the surface, fingerprint the stack, decide what to attack,
-try it, **prove it's real**, write it up. ARCHON does that as a durable multi-agent system instead
-of a single prompt:
+A pentest is mostly orchestration: map the surface, fingerprint the stack, decide what to attack, try it,
+**prove it's real**, write it up. ARCHON runs that as a durable multi-agent system instead of a single
+prompt:
 
-- **Specialists, not a monolith.** A lead agent plans a stack-specific attack walk; per-class
-  specialists (SQLi, XSS, SSRF, IDOR, …) each go deep on their domain.
-- **Evidence over claims.** Every finding is re-probed by an independent **AUDITOR**; a finding
-  with no replayable evidence is demoted, not reported. A 3-judge **ARBITER** consensus gates
-  High/Critical.
-- **You stay in control.** Findings are validated **live onto your board** as they're found; when
-  testing finishes the run completes. You review — confirm/reject, adjust CVSS, add notes — then
-  generate the report on demand. Nothing is auto-published.
+- **Specialists, not a monolith.** A lead agent plans a stack-specific attack walk; per-class specialists
+  (SQLi, XSS, SSRF, IDOR, …) each go deep on their own domain — far deeper than one prompt told to "find
+  every bug."
+- **Evidence over claims.** Every finding is re-probed by an independent **AUDITOR**; anything without
+  replayable evidence is demoted, not reported. A multi-judge consensus gates High/Critical.
+- **You stay in control.** Findings validate **live onto your board**; when testing finishes the run
+  completes and you generate the report on demand. Nothing is auto-published.
 - **One report, both views.** White-box (source) and black-box (live) findings are correlated and
   de-duplicated — the same bug shows up as `file:line` *and* an HTTP repro.
-- **Your subscription, no API key.** Agents run the `claude` CLI over your Claude subscription
-  (OAuth); there is no metered `ANTHROPIC_API_KEY`.
+- **Your subscription, no API key.** Agents run the `claude` CLI over your Claude subscription (OAuth);
+  there is no metered `ANTHROPIC_API_KEY`.
 
 ---
 
-## Features
+## How ARCHON works
 
-| | |
-|---|---|
-| 🎯 **Black-box** | Recon → stack fingerprint → ranked attack plan → parallel specialist waves (fire → observe → mutate → re-fire), WAF-adaptive. |
-| 🔬 **White-box** | Reads the actual code: inventories → app blueprint → feature mapping → per-class assessment → AUDITOR reverse-check. Pattern recognition surfaces candidates, then each is **reviewed in context** to confirm the data flow reaches a sink, and reported at file and line with the vulnerable code block as proof. Review classes are **auto-selected from the discovered surface** (all 23 catalog classes available). |
-| 🔗 **Merged engagement** | Run both; findings aggregate and a single report **de-duplicates** the same vuln seen from source and over the wire. |
-| 🧪 **Independent verification** | AUDITOR re-probes findings; the **evidence contract** demotes anything without replayable proof; chain-verifier replays multi-step exploits via curl. |
-| 🏷️ **Honest confirmation status** | Each finding is tagged `RUNTIME_CONFIRMED` (proven live) vs `SOURCE_CONFIRMED` (proven in code only) vs `NEEDS_LIVE_VALIDATION` / `DISPROVEN` — a source read is never dressed up as a live proof. |
-| ⚖️ **Judge consensus** | 4-stage judge + 3-judge ARBITER consensus on High/Critical before publication. |
-| ⏸️ **On-demand reporting** | Findings validate **live to your board**; review — confirm / reject / set CVSS (built-in 3.1 calculator) / annotate — then generate the report when ready. Nothing auto-publishes. |
-| 🔁 **Iterations** | Add focused passes to an engagement ("now test access control") without disturbing prior results. |
-| 🛡️ **Safety perimeter** | Fail-closed scope gate; impact-proving exploits fire only behind a 3-gate opt-in (off by default). |
-| 🖥️ **Local portal** | Zero-build single-page dashboard (binds `127.0.0.1`) for dispatch, live progress, triage, and reports. |
-| 📚 **Scored A–Z coverage** | Per-area coverage **scores** ("Authentication: 90%") across OWASP WSTG, reporting transport/config hygiene (TLS, HSTS, headers, cookie flags) alongside exploitable bugs — untested areas stated honestly. |
-
----
-
-## How it works
-
-```
-  OPERATOR (browser)
-      │  HTTP 127.0.0.1:4000
-      ▼
-  DASHBOARD  scripts/dashboard.js + ui/      (read-only over the data layer;
-      │  writes ONLY inbox files              dispatch/triage/report → daemon inbox)
-      ▼
-  var/intel/inbox/…           ← the filesystem is the IPC boundary
-      │  (fs.watch + poll)
-      ▼
-  ┌───────────────────────────────────────────────────────────────────┐
-  │ DAEMON  event-bus.js  (codename NEXUS) — single writer of core state │
-  │   dispatch queue → Phase 0.0 scope gate (fail-closed) → route        │
-  │     ├─ pentest     → dispatchPentestParallel (recon → fingerprint →  │
-  │     │                 plan → specialist waves → verify → judge)      │
-  │     └─ code-review → code-review-dispatcher (inventories → blueprint │
-  │                       → feature map → per-class assessment → AUDITOR)│
-  │   each agent → runAgent(spec) → `claude` CLI (OAuth, NO API key)     │
-  └───────────────────────────────────────────────────────────────────┘
-      │  agents self-report findings → TRIAGER validates each one live → your board
-      ▼
-  AUDITOR verify → VALIDATED-FINDINGS → judge → JUDGED-FINDINGS
-      │
-      ▼  ✔ RUN COMPLETE   (findings validated live on your board — no report yet)
-  you review (confirm / reject / CVSS / notes)   ·   report is on demand
-      │
-      ▼  Generate report
-  SCRIBE → ONE report  (combined runs: correlated + de-duplicated across both views)
-```
-
-The pipeline is **phased and fail-soft** — any single phase can error, log, and continue. For the
-full, accurate phase-by-phase walkthrough see [`docs/ARCHON-SYSTEM-MAP.md`](./docs/ARCHON-SYSTEM-MAP.md)
-and [`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md). `CLAUDE.md` documents the pipeline table for
-contributors.
-
----
-
-## How the agents and triage work
-
-ARCHON is organised as squads of specialist agents coordinated by a durable daemon. Each squad has a
-lead agent that plans the work and a set of specialists that each own one vulnerability domain. A
-separate group of universal agents verifies, judges, and reports. This division is deliberate. A
-single prompt asked to "find every bug" spreads itself thin, whereas a specialist asked only about
-SQL injection on a known stack goes far deeper.
+You dispatch a target. Behind the portal, a durable daemon (**NEXUS**, `event-bus.js`) spins up a *squad*
+— a lead, ~15 vulnerability specialists, and a team of validators — and drives them through a phased
+pentest while findings land on your board live.
 
 ```
         OPERATOR dispatches a target (URL, source, or both)
                               │
                               ▼
              ┌───────────────────────────────────┐
-             │   LEAD   ·   ATLAS / CURATOR       │   fingerprint the stack,
-             │   plans a stack specific walk      │   rank the attack plan
+             │   LEAD   ·   ATLAS / CURATOR       │   fingerprint the exact stack,
+             │   plans a stack-specific walk      │   rank a stack-specific attack plan
              └────────────────┬──────────────────┘
                               │  dispatches specialists in parallel waves
         ┌─────────┬───────────┼───────────┬───────────┬─────────┐
         ▼         ▼           ▼           ▼           ▼         ▼
       SCOUT     VIPER       DRILL       RELAY       WARDEN    GATEWAY   …each owns
-      recon      XSS        SQLi        SSRF         IDOR       API      one domain
+      recon      XSS        SQLi        SSRF     access-ctrl   API      one domain
         │         │           │           │           │         │
         └─────────┴───────────┴─────┬─────┴───────────┴─────────┘
-                                    │  every finding, the moment it is found
+                                    │  every finding, the moment it's found
                                     ▼
              ┌───────────────────────────────────┐
-             │   TRIAGER   ·   streaming triage   │   validate → drop duplicates →
-             │   one finding at a time            │   merge related → CVSS 3.1 → full writeup
+             │  TRIAGER squad  ·  validates live  │   validate → drop duplicates →
+             │  (scales with the backlog)         │   merge → CVSS 3.1 → full writeup
              └────────────────┬──────────────────┘
                               ▼
              ┌───────────────────────────────────┐
-             │   AUDITOR   verify (fresh probes)  │   no replayable evidence → demoted
-             │   ARBITER   consensus on High +    │
+             │  AUDITOR  re-probes (fresh)        │   no replayable evidence → demoted
+             │  judges   consensus on High/Crit   │
              └────────────────┬──────────────────┘
                               ▼
                  ✔   FINDINGS BOARD  ·  validated live · run completes
@@ -191,106 +134,48 @@ SQL injection on a known stack goes far deeper.
              └───────────────────────────────────┘
 ```
 
-### The agents
+- **The lead plans.** ATLAS (live pentest) / CURATOR (source review) fingerprints the exact stack —
+  product, framework, WAF vendor, CVE leads — and ranks a **stack-specific attack plan** (AEM → dispatcher
+  bypass; WordPress → WP CVEs), walking the OWASP WSTG A–Z map so nothing is skipped.
+- **Specialists attack, in parallel.** The roster runs in throttled waves; each specialist owns one domain
+  and goes deep — generate stack-specific payloads, fire → observe → mutate → re-fire, adapt to the WAF.
+  A **focused scan** ("test XSS + access-control only") runs *just* those specialists; a full scan runs the
+  whole A–Z.
+- **A triager squad validates live.** The moment a specialist reports a finding, a pool of **TRIAGER**
+  agents — it scales up as the backlog grows — validates it, drops duplicates, merges related issues,
+  scores CVSS 3.1, and writes it to report quality *while the scan is still running*. Clean, de-duplicated
+  findings appear on your board one at a time; raw agent chatter never does.
+- **Independent verification gates everything.** AUDITOR re-probes each finding with fresh requests and
+  refuses anything it can't reproduce (the **evidence contract**); a multi-judge consensus gates
+  High/Critical. Nothing reaches the board on a specialist's word alone.
+- **You stay in control.** When testing finishes the run completes — your board holds the validated set.
+  Review at your pace, then generate the report on demand. **SCRIBE** writes one professional dossier;
+  nothing auto-publishes.
 
-The lead agent (ATLAS for a live pentest, CURATOR for a source review) fingerprints the target, ranks
-a stack specific attack plan, and dispatches the specialists in parallel waves. Each specialist reports
-findings as it works, with a minimal payload and the evidence it captured. Three universal agents then
-take over. AUDITOR independently verifies every reported finding with fresh probes and refuses to
-forward anything it cannot reproduce. ARBITER runs a consensus judgement on the highest severity findings. SCRIBE writes
-the final report on demand, from the validated set — when you choose to generate it.
-
-### Streaming triage
-
-Triage is continuous rather than a single step at the end. The moment a specialist reports a finding it
-is handed to the triager, one finding at a time. The triager validates the finding, removes duplicates
-and merges related issues into one canonical entry, scores it with CVSS 3.1, and writes the complete
-finding: title, CWE, a description with the root cause, reproduction steps, a proof of concept, impact,
-and remediation. Only findings that pass this full pipeline reach the Findings board, each already
-written to report quality. Raw or unvalidated agent claims never appear there, which removes the noise
-and duplication a naive scanner produces. On the run card you can watch every agent hand its findings to
-the triager live, and the board fills in one clean finding at a time.
-
-When testing finishes and every finding is on the board, the run **completes** — it does not block.
-Your board already holds the validated set; review it at your own pace: confirm or reject each finding,
-adjust CVSS or severity, and add notes. Report generation is a separate, on-demand step — only when you
-choose to generate it does SCRIBE assemble it from the set.
-
-### Static and white box: real code review, not only pattern matching
-
-For a source review ARCHON reads the actual code. It inventories the codebase, builds an application
-blueprint, maps features to the routes and functions that implement them, and traces user controlled
-input from entry point to sink. Pattern recognition surfaces candidate weaknesses, for example a raw SQL
-string built from a request parameter, a template rendered with autoescaping disabled, or a missing
-authorization check on a privileged route. Every candidate is then reviewed in context to confirm the
-data flow genuinely reaches a dangerous sink, so a pattern alone is never enough to raise a finding. The
-result is reported at file and line with the vulnerable code block shown as the proof, which is why a
-static finding needs no HTTP request.
-
-ARCHON does not stop at the pattern. In a white box engagement it verifies what the code review found
-against the running target. The code review runs first, and its candidates then aim a source guided live
-pentest: each suspected sink is confirmed against the deployed application rather than fired blindly, and
-PROBER also runtime validates source findings during the review. A bug proven both ways is labelled
-clearly, and cross view deduplication merges the source view and the runtime view of the same issue into
-one entry that carries both the file and line trace and the live reproduction. Every finding states its
-confirmation status honestly: RUNTIME_CONFIRMED when it was proven live, SOURCE_CONFIRMED when it was
-proven in code only. A source read is never presented as a live exploit.
+Every phase is **fail-soft** — any single agent can error, log, and the run keeps going. Under the hood
+the portal writes *only* to the daemon's inbox (`var/intel/inbox/`, the filesystem is the IPC boundary),
+the daemon is the single writer of core state, and each agent runs the `claude` CLI (OAuth, no API key).
+Full phase-by-phase walkthrough: [`docs/ARCHON-SYSTEM-MAP.md`](./docs/ARCHON-SYSTEM-MAP.md) ·
+[`docs/ORCHESTRATION.md`](./docs/ORCHESTRATION.md); the pipeline table is in `CLAUDE.md`.
 
 ---
 
-## Benchmark
+## Features
 
-OWASP Juice Shop, scored on the vulnerability classes it is known to contain — the same ground
-truth and scorer grade **both** run types against the same app. Full reports with charts and the
-per-class breakdown: [`benchmark/RESULTS-blackbox.md`](./benchmark/RESULTS-blackbox.md) ·
-[`benchmark/RESULTS-codereview.md`](./benchmark/RESULTS-codereview.md).
-
-| Run type | Class coverage | Confirmed findings |
-|---|---|---|
-| **Black box** (live pentest) | **12 of 15 (80%)** | 26 |
-| **Static / white-box** (code review) | **12 of 15 (80%)** | 48 (36 beyond the 15 classes) |
-
-```mermaid
-pie showData title Vulnerability class coverage (both run types)
-  "Covered" : 12
-  "Missed" : 3
-```
-
-Same class coverage from both angles — but the source review goes **deeper**: reading all the code
-surfaces roughly twice the confirmed findings (YAML-deserialization RCE, JWT algorithm confusion,
-unsalted-MD5 password storage, and more), each pinned to a file and line. Between them the black box
-covers SSRF that the per-feature source pass mapped elsewhere, and the source review reaches code the
-live scan never hit. Reproduce both with the harness in [`benchmark/`](./benchmark).
-
----
-
-## Field-tested — a real CVE
-
-Beyond the Juice Shop benchmark, ARCHON's **white-box review** found a real broken-access-control flaw in
-a large production codebase — confidential issue data exposed through a missing authorization check. Jay
-([@ghostshift-content](https://github.com/ghostshift-content)) reported it to **GitLab** via **HackerOne**;
-it was fixed in GitLab's May 2026 security release and assigned
-**[CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)** (CVSS 6.5, CWE-288).
-
-- **CVE:** [CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)
-- **GitLab advisory:** [patch release 18.11.3 · 2026-05-13](https://about.gitlab.com/releases/2026/05/13/patch-release-gitlab-18-11-3-released/)
-- **More in the pipeline:** Additional vulnerabilities surfaced by ARCHON have been responsibly disclosed and are awaiting vendor remediation — held under coordinated-disclosure embargo, so they're not named here until they're fixed.
-
-That's exactly the class ARCHON's code-review squad specializes in — the same access-control depth ships
-as MARSHAL's 40-pattern access-control catalog.
-
----
-
-## Engagement modes
-
-| Mode | Input | What runs |
-|---|---|---|
-| **Black-box** | URL | Live pentest: recon → fingerprint → ATLAS attack plan → specialist waves firing payloads → AUDITOR → judge → SCRIBE. |
-| **Static / white-box** | source dir | Reads the code, no payloads fired: inventories → blueprint → feature mapping → per-class assessment → AUDITOR → SCRIBE. Pattern recognition finds candidates, each is confirmed in context, and findings are reported at file and line with the vulnerable code block as proof (no HTTP request needed). |
-| **White-box (combined)** | URL + source dir | The code review runs **first**; its findings then aim a **source-guided** live pentest that verifies each candidate against the running target (PROBER also runtime-validates during the review). `cross-view-dedup` merges the source and runtime views into one report. |
-
-An **engagement** holds N independent iterations (the white-box + black-box pair, plus any focused
-re-runs you add). Findings aggregate across iterations and one report is generated over all of them.
+| | |
+|---|---|
+| 🎯 **Black-box** | Recon → stack fingerprint → ranked attack plan → parallel specialist waves (fire → observe → mutate → re-fire), WAF-adaptive. |
+| 🔬 **White-box** | Reads the actual code: inventories → app blueprint → feature mapping → per-class assessment → AUDITOR reverse-check. Candidates are **reviewed in context** to confirm the data flow reaches a sink, then reported at file and line with the vulnerable code block as proof. Review classes are **auto-selected from the discovered surface** (all 23 catalog classes available). |
+| 🔗 **Merged engagement** | Run both; findings aggregate and one report **de-duplicates** the same vuln seen from source and over the wire. |
+| 🧪 **Independent verification** | AUDITOR re-probes findings; the **evidence contract** demotes anything without replayable proof; chain-verifier replays multi-step exploits via curl. |
+| 🏷️ **Honest confirmation status** | Each finding is tagged `RUNTIME_CONFIRMED` (proven live) vs `SOURCE_CONFIRMED` (proven in code only) vs `NEEDS_LIVE_VALIDATION` / `DISPROVEN` — a source read is never dressed up as a live proof. |
+| 🧑‍⚖️ **Live triage + judge consensus** | A scaling **triager squad** writes report-quality findings during the scan; a multi-judge consensus gates High/Critical. |
+| 🎛️ **Focused scans** | Pick specific classes ("XSS + access-control only") and the lead runs *only* those specialists — or run the full A→Z. |
+| ⏸️ **On-demand reporting** | Review — confirm / reject / set CVSS (built-in 3.1 calculator) / annotate — then generate the report when ready. Nothing auto-publishes. |
+| 🔁 **Iterations** | Add focused passes to an engagement ("now test access control") without disturbing prior results. |
+| 🛡️ **Safety perimeter** | Fail-closed scope gate; impact-proving exploits fire only behind a 3-gate opt-in (off by default). |
+| 🖥️ **Local portal** | Zero-build single-page dashboard (binds `127.0.0.1`) for dispatch, live progress, triage, and reports. |
+| 📚 **Scored A–Z coverage** | Per-area coverage **scores** ("Authentication: 90%") across OWASP WSTG, reporting transport/config hygiene (TLS, HSTS, headers, cookie flags) alongside exploitable bugs — untested areas stated honestly. |
 
 ---
 
@@ -315,55 +200,75 @@ one role (they use operator call-signs). **NEXUS** is the daemon itself (`event-
 ### `code-review` — white-box (lead: **CURATOR**)
 
 `MARSHAL` (access control) · `CIPHER` (injection/XSS) · `QUILL` · `BEACON` · `BREAKER` · `SIPHON`
-— feature mappers and per-class specialists · `PROBER` — runtime validator (live-checks source
-findings against a deploy URL).
+— feature mappers and per-class specialists · `PROBER` — runtime validator (live-checks source findings
+against a deploy URL).
 
 ### Universal agents (`_universal/agents/`)
 
-**AUDITOR** (independent verifier) · **ARBITER** (confidence judge / publication gate) ·
-**SCRIBE** (final reporter) · **COMMAND** (coordination) · **TRIAGER** (dedup + merge, owns the
-Findings board) · **WRITER** (per-finding writeup).
+**AUDITOR** (independent verifier) · **ARBITER** (confidence judge / publication gate) · **SCRIBE**
+(final reporter) · **COMMAND** (coordination) · **TRIAGER** (validate + dedup + merge, owns the Findings
+board) · **WRITER** (per-finding writeup).
 
 ---
 
-## Quickstart
+## Engagement modes
 
-**Prerequisites** — the first one is what actually gates a run:
+The three modes differ only in the input and whether payloads are fired — they all flow through the same
+[lead → specialists → triager → verify → report](#how-archon-works) pipeline.
 
-1. **A Claude subscription + the `claude` CLI, logged in.** ARCHON runs on your Claude subscription
-   via OAuth — *not* a metered API key. Install [Claude Code](https://claude.ai/code) and run
-   `claude` once to log in. **Nothing dispatches until this is done.**
-2. **Node ≥ 18** and **git** (macOS / Linux, or Windows via WSL).
-3. *Optional:* recon tools (`nmap`, `naabu`, …) for black-box recon — every one is fail-soft, so you
-   can skip them. A **static code-review** run needs only Node + the `claude` CLI.
+| Mode | Input | What runs |
+|---|---|---|
+| **Black-box** | URL | Live pentest — specialists fire payloads against the running target. |
+| **Static / white-box** | source dir | Reads the code, **no payloads fired**: pattern recognition finds candidates, each is confirmed in context, and findings are reported at file and line with the vulnerable code block as proof (no HTTP request needed). |
+| **White-box (combined)** | URL + source dir | The code review runs **first**; its findings then aim a **source-guided** live pentest that verifies each candidate against the running target (PROBER also runtime-validates during the review). `cross-view-dedup` merges the source and runtime views into one report. |
 
-```bash
-git clone https://github.com/ghostshift-content/ARCHON.git archon && cd archon
-bash setup.sh             # Node check → npm install → seed var/intel → preflight (npm run doctor)
+An **engagement** holds N independent iterations (the white-box + black-box pair, plus any focused re-runs
+you add). Findings aggregate across iterations and one report is generated over all of them. Every finding
+states its confirmation status honestly: `RUNTIME_CONFIRMED` when proven live, `SOURCE_CONFIRMED` when
+proven in code only — a source read is never presented as a live exploit.
 
-npm start                 # 1) the agent daemon (event-bus)
-npm run dashboard         # 2) separate shell → portal at http://localhost:4000
+---
+
+## Benchmark
+
+OWASP Juice Shop, scored on the vulnerability classes it is known to contain — the same ground truth and
+scorer grade **both** run types against the same app. Full reports with charts and the per-class breakdown:
+[`benchmark/RESULTS-blackbox.md`](./benchmark/RESULTS-blackbox.md) ·
+[`benchmark/RESULTS-codereview.md`](./benchmark/RESULTS-codereview.md).
+
+| Run type | Class coverage | Confirmed findings |
+|---|---|---|
+| **Black box** (live pentest) | **12 of 15 (80%)** | 26 |
+| **Static / white-box** (code review) | **12 of 15 (80%)** | 48 (36 beyond the 15 classes) |
+
+```mermaid
+pie showData title Vulnerability class coverage (both run types)
+  "Covered" : 12
+  "Missed" : 3
 ```
 
-`bash setup.sh` (also `npm run bootstrap`) is the one-shot installer, and it ends by running
-**`npm run doctor`** — a preflight that prints exactly what's present vs missing (Node, the `claude`
-login, optional tools). Run **`npm run doctor`** anytime a dispatch fails. Roots resolve to the **repo
-directory** automatically, so a fresh clone needs **no `.env.local`** — override only if your layout
-differs (`cp .env.local.example .env.local`, edit the `KURU_*` paths); point `KURU_CLAUDE_BIN` at your
-`claude` binary if it isn't on `PATH`.
-
-Open **http://localhost:4000 → New dispatch**, enter a source directory (lightest first run) and/or a
-target URL, and dispatch. Watch progress under **Tasks**, triage under the run's **Findings** tab, and
-read the **Report** tab once generated.
+Same class coverage from both angles — but the source review goes **deeper**: reading all the code surfaces
+roughly twice the confirmed findings (YAML-deserialization RCE, JWT algorithm confusion, unsalted-MD5
+password storage, and more), each pinned to a file and line. Between them the black box covers SSRF that the
+per-feature source pass mapped elsewhere, and the source review reaches code the live scan never hit.
+Reproduce both with the harness in [`benchmark/`](./benchmark).
 
 ---
 
-## Authentication — subscription, not API key
+## Field-tested — a real CVE
 
-Agents spawn the `claude` CLI, which authenticates with your **Claude subscription via OAuth**
-(`~/.claude`). No `ANTHROPIC_API_KEY` is set or required — runs count against your subscription's
-limits, not metered API billing. Point `KURU_CLAUDE_BIN` at your local `claude` binary
-(`which claude`).
+Beyond the Juice Shop benchmark, ARCHON's **white-box review** found a real broken-access-control flaw in
+a large production codebase — confidential issue data exposed through a missing authorization check. Jay
+([@ghostshift-content](https://github.com/ghostshift-content)) reported it to **GitLab** via **HackerOne**;
+it was fixed in GitLab's May 2026 security release and assigned
+**[CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)** (CVSS 6.5, CWE-288).
+
+- **CVE:** [CVE-2026-4524](https://www.cve.org/CVERecord?id=CVE-2026-4524)
+- **GitLab advisory:** [patch release 18.11.3 · 2026-05-13](https://about.gitlab.com/releases/2026/05/13/patch-release-gitlab-18-11-3-released/)
+- **More in the pipeline:** Additional vulnerabilities surfaced by ARCHON have been responsibly disclosed and are awaiting vendor remediation — held under coordinated-disclosure embargo, so they're not named here until they're fixed.
+
+That's exactly the class ARCHON's code-review squad specializes in — the same access-control depth ships as
+MARSHAL's 40-pattern access-control catalog.
 
 ---
 
@@ -372,17 +277,17 @@ limits, not metered API billing. Point `KURU_CLAUDE_BIN` at your local `claude` 
 1. **Authorize.** Confirm you have written permission for the target. Copy
    `common/config/scope_template.yaml` as your engagement scope and load it in the dispatch form's
    **Scope** field — scope is fail-closed, so a dispatch with no scope config is blocked.
-2. **Dispatch.** Portal → *New dispatch*: target URL, optional source directory, credentials, test
-   type, and severity profile.
-3. **Watch.** *Tasks* shows live phase progress; the daemon recon→fingerprint→plan→attacks→verifies,
-   and validated findings land on the run's *Findings* board as they're confirmed.
-4. **Review.** When the run **completes**, open its *Findings* tab — the validated set is already
-   there; confirm/reject each, adjust CVSS and severity, add notes.
+2. **Dispatch.** Portal → *New dispatch*: target URL, optional source directory, credentials, test type,
+   focus classes (optional), and severity profile.
+3. **Watch.** *Tasks* shows live phase progress, which agents are working, and the test plan; validated
+   findings land on the run's *Findings* board as they're confirmed.
+4. **Review.** When the run **completes**, open its *Findings* tab — the validated set is already there;
+   confirm/reject each, adjust CVSS and severity, add notes.
 5. **Report.** Click *Generate report*; SCRIBE writes one report (combined runs are correlated and
-   de-duplicated). Read it in the *Report* tab; the published file lands under `var/intel/reports/`.
+   de-duplicated) and it lands under `var/intel/reports/`.
 
-The full operator workflow — authorization checklist, field-by-field dispatch guide, and
-troubleshooting — is in **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)**.
+The full operator workflow — authorization checklist, field-by-field dispatch guide, and troubleshooting —
+is in **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)**.
 
 ---
 
@@ -392,15 +297,19 @@ troubleshooting — is in **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)**.
 non-default layout or a server deploy.
 
 `paths.js` is the single root resolver. It auto-loads `.env.local` (gitignored) at require time so the
-daemon, dashboard, and every spawned subprocess pick the roots up — but all three are **optional**:
-roots resolve to the repo dir (and `var/intel` under it) when unset, falling back to the `/root/agents`
+daemon, dashboard, and every spawned subprocess pick the roots up — but all three roots are **optional**:
+they resolve to the repo dir (and `var/intel` under it) when unset, falling back to the `/root/agents`
 server layout only when it actually exists. So a clone, a container, and a server all work unconfigured.
 
 | Var | Meaning |
 |---|---|
 | `KURU_AGENTS_ROOT` / `ARCHON_ROOT` | Code root (where `event-bus.js`, `paths.js`, `squads/` live). Default: the repo dir. |
 | `KURU_INTEL_ROOT`  | Data-layer root (runtime state). Default: `var/intel` under the code root. `npm run setup` seeds it. |
-| `KURU_CLAUDE_BIN`  | Path to the `claude` CLI the agents spawn (default: resolve `claude` on `PATH`). |
+| `KURU_CLAUDE_BIN`  | Path to the `claude` CLI the agents spawn (default: resolve `claude` on `PATH`, e.g. `which claude`). |
+
+**Authentication is your Claude subscription, not an API key.** Agents spawn the `claude` CLI, which
+authenticates via OAuth (`~/.claude`); no `ANTHROPIC_API_KEY` is set or required, so runs count against your
+subscription's limits, not metered API billing.
 
 Optional, **off by default**:
 
@@ -416,8 +325,8 @@ Optional, **off by default**:
 | `ARCHON_ENABLE_AUTONOMOUS_OS=1` (+ `ARCHON_ENABLE_<block>` / `ARCHON_DRIVE_<block>`) | Master switch for the experimental **Autonomous Agent OS** layer (Mission Director, knowledge graph, pattern catalogs, decision logging). Tri-state per block: enable ⇒ *shadow* (observe + write to `var/intel/shadow`, drives nothing); add `DRIVE` ⇒ *active*. **Off by default; flag-off is byte-identical to the deterministic pipeline.** See [ROADMAP.md](./ROADMAP.md). |
 | `ADAPTER=cli` | Use the CLI runner adapter (rollback floor) instead of the default SDK adapter. |
 
-`var/` (all runtime state, findings, reports) is gitignored. See **[SETUP-LOCAL.md](./SETUP-LOCAL.md)**
-for the portable-roots model in detail.
+`var/` (all runtime state, findings, reports) is gitignored. See **[SETUP-LOCAL.md](./SETUP-LOCAL.md)** for
+the portable-roots model in detail.
 
 ---
 
@@ -440,13 +349,13 @@ ARCHON/
 │   └── *.js                  # finding schema, judge, handoff, browser verify, scope gates …
 ├── src/
 │   ├── dispatch/             # code-review-dispatcher (white-box engine, surface-driven class selection)
-│   ├── pipeline/             # env-fingerprint, attack-planner, chain-verifier, evidence-contract …
+│   ├── pipeline/             # env-fingerprint, attack-planner, chain-verifier, focus-map, streaming-triage …
 │   ├── routing/              # model router + target classifier
 │   ├── core/                 # squad framework + WSTG coverage map (graded per-area scoring)
 │   ├── intel/                # knowledge-graph + pattern-catalog engine
 │   ├── orchestrator/         # Mission Director + task/queue/scope/safety governors (flag-gated autonomy)
 │   ├── source-review/ · evidence/ · reporting/ · shadow/   # Autonomous-OS canonical paths (see ROADMAP)
-│   ├── safety/               # scope/goal scrubbers, quarantine, offensive-vaccine
+│   ├── safety/               # scope/goal scrubbers, quarantine, production-safety guard
 │   ├── learning/             # feedback loop, memory ranker
 │   ├── grading/ · ops/ · integrations/ · rendering/ · utils/
 ├── common/                   # static KB: taxonomy (CWE/OWASP/WSTG), payloads, remediation, reporting
@@ -468,26 +377,25 @@ ARCHON/
 
 The safety perimeter is **non-negotiable** and enforced in code:
 
-- **Scope is fail-closed.** Phase 0.0 (`agents/scope-prevalidator.js`) blocks any dispatch with no
-  scope config unless `ARCHON_SCOPE_OVERRIDE=1`.
-- **Detecting ≠ exploiting.** Generating and firing payloads to *detect* vulns is the specialists'
-  normal remit. *Demonstrating* impact (a real exploit that proves RCE) fires **only** behind a
-  3-gate opt-in: `engagement_mode: active-poc` + a permission token + `ARCHON_ACTIVE_POC=enabled`.
-  By default ARCHON fires nothing impact-proving.
-- **Non-destructive by default.** Built for pointing at live production: detection never deletes or
-  modifies data, changes credentials/passwords, or runs a DoS; access-control (IDOR) is tested
-  read-only; and repeated actions (rate-limit / brute-force) are capped at **10 attempts**. Enforced by
-  a contract in every agent prompt (`GATE-14`), a destructive-pattern guard on ARCHON-executed requests,
-  and a PreToolUse hook that hard-blocks destructive **local** commands (`rm -rf`, `curl | sh`) on your
-  own machine — details and residual risk in
-  [SECURITY.md](./SECURITY.md#non-destructive-by-default-production-safety).
+- **Scope is fail-closed.** Phase 0.0 (`agents/scope-prevalidator.js`) blocks any dispatch with no scope
+  config unless `ARCHON_SCOPE_OVERRIDE=1`.
+- **Detecting ≠ exploiting.** Generating and firing payloads to *detect* vulns is the specialists' normal
+  remit. *Demonstrating* impact (a real exploit that proves RCE) fires **only** behind a 3-gate opt-in:
+  `engagement_mode: active-poc` + a permission token + `ARCHON_ACTIVE_POC=enabled`. By default ARCHON fires
+  nothing impact-proving.
+- **Non-destructive by default.** Built for pointing at live production: detection never deletes or modifies
+  data, changes credentials/passwords, or runs a DoS; access-control (IDOR) is tested read-only; and
+  repeated actions (rate-limit / brute-force) are capped at **10 attempts**. Enforced by a contract in every
+  agent prompt (`GATE-14`), a destructive-pattern guard on ARCHON-executed requests, and a PreToolUse hook
+  that hard-blocks destructive **local** commands (`rm -rf`, `curl | sh`) on your own machine — details and
+  residual risk in [SECURITY.md](./SECURITY.md#non-destructive-by-default-production-safety).
 - **Evidence contract.** A `CONFIRMED` finding needs replayable evidence (reproduction / proof /
   nonce-confirmed PoC) or it is demoted — no unverifiable claims in the report.
-- **Nothing auto-published.** Findings validate live to your board; the report is generated on demand
-  by the operator — never automatically.
-- **Local-operator security.** The portal binds `127.0.0.1`; the data layer (which holds
-  operator-entered test credentials) is written restrictively and `var/` is gitignored. Set
-  `ARCHON_PORTAL_TOKEN` before exposing the portal beyond localhost.
+- **Nothing auto-published.** Findings validate live to your board; the report is generated on demand by the
+  operator — never automatically.
+- **Local-operator security.** The portal binds `127.0.0.1`; the data layer (which holds operator-entered
+  test credentials) is written restrictively and `var/` is gitignored. Set `ARCHON_PORTAL_TOKEN` before
+  exposing the portal beyond localhost.
 
 ---
 
@@ -499,12 +407,10 @@ npm run test:ui  # browser e2e (Playwright) — drives the portal + dispatch/tri
 npm run test:bun # the few bun-only suites (node:test async semantics)
 ```
 
-`npm test` is the product gate (green — the `run-all.js` unit suites pass, framework-internal
-suites are skipped) and runs **fully offline** — no test touches the public internet (HTTP-dependent
-suites start a local fixture server). A handful
-of deeper framework-internal suites are kept in `test/` but skipped by the gate (they target a full
-multi-squad / PM2 deployment); run them individually with `node test/<file>`. New `src/pipeline/*`
-modules ship with a matching `test/*.test.js`.
+`npm test` is the product gate (green) and runs **fully offline** — no test touches the public internet
+(HTTP-dependent suites start a local fixture server). A handful of deeper framework-internal suites are kept
+in `test/` but skipped by the gate (they target a full multi-squad / PM2 deployment); run them individually
+with `node test/<file>`. New `src/pipeline/*` modules ship with a matching `test/*.test.js`.
 
 ---
 
@@ -512,16 +418,16 @@ modules ship with a matching `test/*.test.js`.
 
 - Work from the repo root. Run `bash setup.sh` once (installs deps, seeds `var/intel`, runs the
   `npm run doctor` preflight). `.env.local` is optional — only for a non-default layout.
-- **Read [`CLAUDE.md`](./CLAUDE.md) first** — it documents the architecture, the pipeline phases,
-  and the critical invariants (atomic writes, the evidence contract, never hardcode model strings,
-  always resolve persona paths through `paths.js`).
-- Keep changes test-backed: `npm test` must stay green (offline). Stage specific files (never
-  `git add -A`); runtime drift under `var/` is gitignored — don't commit it.
-- Contributions welcome via PR — see **[CONTRIBUTING.md](./CONTRIBUTING.md)** for the rules that block
-  a PR. Extending ARCHON? Start from **[PLUGIN_SDK.md](./PLUGIN_SDK.md)**,
+- **Read [`CLAUDE.md`](./CLAUDE.md) first** — it documents the architecture, the pipeline phases, and the
+  critical invariants (atomic writes, the evidence contract, never hardcode model strings, always resolve
+  persona paths through `paths.js`).
+- Keep changes test-backed: `npm test` must stay green (offline). Stage specific files (never `git add -A`);
+  runtime drift under `var/` is gitignored — don't commit it.
+- Contributions welcome via PR — see **[CONTRIBUTING.md](./CONTRIBUTING.md)** for the rules that block a PR.
+  Extending ARCHON? Start from **[PLUGIN_SDK.md](./PLUGIN_SDK.md)**,
   **[AGENT_AUTHORING_GUIDE.md](./AGENT_AUTHORING_GUIDE.md)**, or
-  **[PATTERN_AUTHORING_GUIDE.md](./PATTERN_AUTHORING_GUIDE.md)**. The principles every change is gated
-  by are in **[ARCHON_MANIFESTO.md](./ARCHON_MANIFESTO.md)**.
+  **[PATTERN_AUTHORING_GUIDE.md](./PATTERN_AUTHORING_GUIDE.md)**. The principles every change is gated by are
+  in **[ARCHON_MANIFESTO.md](./ARCHON_MANIFESTO.md)**.
 - Release a clean artifact with `npm run pack:release` (see [RELEASE_CHECKLIST.md](./RELEASE_CHECKLIST.md)).
 
 ---
@@ -535,7 +441,7 @@ ARCHON keeps its planning and architecture in-repo so the project tracks like a 
 | **[CLAUDE.md](./CLAUDE.md)** | Architecture, file map, pipeline phases, and the invariants contributors must uphold. |
 | **[docs/ARCHON-SYSTEM-MAP.md](./docs/ARCHON-SYSTEM-MAP.md)** | Top-to-bottom system map: every subsystem, end-to-end lifecycles, data layout, and the prioritized improvement surface. |
 | **[docs/ORCHESTRATION.md](./docs/ORCHESTRATION.md)** | How a dispatch flows, which model each role uses, and the operational-health invariants. |
-| **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)** | Authorize → dispatch → triage → report, field by field, with troubleshooting. |
+| **[OPERATOR-RUNBOOK.md](./OPERATOR-RUNBOOK.md)** | Authorize → dispatch → review → report, field by field, with troubleshooting. |
 | **[SETUP-LOCAL.md](./SETUP-LOCAL.md)** | Portable roots, `.env.local`, and the local-dev data layer. |
 | **[CONTRIBUTING.md](./CONTRIBUTING.md)** | Setup, the rules that block a PR, where things live, and the release flow. |
 | **[ARCHON_MANIFESTO.md](./ARCHON_MANIFESTO.md)** | The principles every change is gated by — evidence, honest coverage, safe-by-default. |
@@ -550,9 +456,9 @@ ARCHON keeps its planning and architecture in-repo so the project tracks like a 
 ## Roadmap & status
 
 Active development. The current backlog and prioritized improvement surface live in
-**[BACKLOG.md](./BACKLOG.md)** and **[§8 of the system map](./docs/ARCHON-SYSTEM-MAP.md)** — work
-proceeds in tiers (show-stoppers → correctness/invariants → dead-code sweep → docs → refactors).
-Open an issue or PR to propose or pick up an item.
+**[BACKLOG.md](./BACKLOG.md)** and **[§8 of the system map](./docs/ARCHON-SYSTEM-MAP.md)** — work proceeds
+in tiers (show-stoppers → correctness/invariants → dead-code sweep → docs → refactors). Open an issue or PR
+to propose or pick up an item.
 
 ---
 
