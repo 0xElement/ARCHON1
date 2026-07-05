@@ -11697,10 +11697,3 @@ if (require.main === module) {
   }
   startWatcher()
 }
-
-// Test/tooling entrypoint. dispatchToAgent is the single dispatch router (Phase 0.0 scope gate →
-// route by dispatchType → terminal 'done' mark for both pentest + code-review). Exported for the
-// offline end-to-end harness (require this module with ADAPTER=fake and drive it in-process).
-// Requiring this module never starts the daemon — the watcher/intervals/handlers are all inside the
-// `if (require.main === module)` block above, so exporting here is additive + production-inert.
-module.exports = { dispatchToAgent }
