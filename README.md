@@ -4,11 +4,14 @@
 
 **Autonomous AI web-application penetration tester — white-box + black-box in one engagement.**
 
-ARCHON points a *squad* of LLM specialist agents at a web target, independently verifies every finding,
-and validates each one **live onto your Findings board** as it goes. When testing finishes the run
-completes — you generate the professional report on demand. Give it a **URL** for a black-box assessment,
-or a **URL + source code** for a combined white-box + black-box engagement whose findings merge into one
-de-duplicated report.
+ARCHON is an autonomous AI penetration tester for web applications. Instead of one prompt told to
+"find every bug," it drives a durable *squad* of LLM agents — a lead that fingerprints the stack and
+plans the attack, per-class specialists (SQLi, XSS, SSRF, access control, API, …) that go deep in
+parallel, and independent verifiers that re-probe every finding and reject whatever they can't
+reproduce. Confirmed, de-duplicated findings — each fully written up with CWE, CVSS, reproduction,
+impact, and remediation — land **live on your Findings board** as the scan runs. Point it at a **URL**
+for a black-box assessment, or a **URL + source code** for a combined white-box + black-box engagement
+whose source and runtime views correlate into one de-duplicated set.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![CI](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml/badge.svg)](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml)
