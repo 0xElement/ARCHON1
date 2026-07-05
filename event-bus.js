@@ -9349,9 +9349,23 @@ async function dispatchToAgent(dispatch) {
       }, 3 * 60 * 1000)
       if (_crHb.unref) _crHb.unref()
       const codeReviewDispatcher = freshRequire('./src/dispatch/code-review-dispatcher')
+      // M0: stream source candidates to the live board as each Phase-2 job returns. Append-only to
+      // live-findings-<taskId>.jsonl (the SAME file the streaming triager tails in M1), deduped in-run
+      // by canonicalKey so a re-run / phasesOnly reuse can't double-append. No `url` is ever set here →
+      // deriveConfirmationStatus keeps these SOURCE_CONFIRMED, never RUNTIME_CONFIRMED.
+      const _crEmitKeys = new Set()
+      const _crCanonicalKey = require('./src/pipeline/suspected-dedup').canonicalKey
       const crResult = await codeReviewDispatcher.runCodeReview(dispatch, {
         spawnAgent, trackCosts: trackCostsLocal, updateProgress: updateProgressLocal,
         log, logActivity, _isTaskCancelled,
+        emitCandidate: (tid, rec) => {
+          try {
+            const k = _crCanonicalKey(rec); if (_crEmitKeys.has(k)) return false
+            _crEmitKeys.add(k)
+            fs.appendFileSync(`${agentPaths.INTEL_ROOT}/live-findings-${tid}.jsonl`, JSON.stringify(rec) + '\n')
+            return true
+          } catch { return false }
+        },
         // Live-board parity: fire the SAME normalize→triage→enrich chain one phase earlier (after
         // AUDITOR verdicts, before SCRIBE) so findings land on the board DURING the run, not at the end.
         onFindingsReady: async (tid, oDir) => {

@@ -303,10 +303,51 @@ Write these files under ${outDir}/phase1-maps/consolidated/ (use bash, follow th
 Then reply with a one-line summary: features consolidated, total ledger rows, top Phase-2 classes, open blockers.`
 }
 
+// Deterministic path for a Phase-2 job's structured candidate JSONL — the records that stream to the
+// live board. phase2Prompt tells the specialist to write here; the dispatcher reads it after the job.
+function candFileFor(outDir, cls, slug) { return `${outDir}/phase2/${cls}/${slug}.candidates.jsonl` }
+
+// Shape a specialist-emitted SOURCE candidate into a live-findings record. It NEVER sets a `url` or any
+// runtime field — that is exactly what keeps deriveConfirmationStatus (finding-schema.js) at
+// SOURCE_CONFIRMED, so a source-only finding can never become RUNTIME_CONFIRMED. type='candidate'
+// passes isCandidate; cwe=cls gives canonicalKey a per-class dedup discriminator.
+function toLiveCandidate(c, cls, feature, agent) {
+  if (!c || typeof c !== 'object') return null
+  const title = (String(c.hypothesis || c.pattern || c.title || '').split(/[\n.:]/)[0].trim().slice(0, 120))
+    || `${cls} candidate in ${feature.name || feature.slug}`
+  const status = (c.status === 'NEEDS_LIVE_VALIDATION' || c.status === 'DISPROVEN') ? c.status : 'SOURCE_CONFIRMED'
+  return {
+    type: 'candidate', agent: String(agent).toUpperCase(), original_agent: String(agent),
+    severity: c.severity || 'Medium', cwe: cls, title,
+    details: String(c.evidence || c.hypothesis || '').slice(0, 2000),
+    feature: c.feature || feature.slug, pattern: c.pattern || '', pattern_id: c.pattern_id || '',
+    file: c.file || '', line: c.line ?? '', source: c.source || '', sink: c.sink || '',
+    endpoint: c.endpoint || '', confidence: c.confidence ?? '', hypothesis: c.hypothesis || '',
+    evidence: c.evidence || '', status, required_blackbox_proof: c.required_blackbox_proof || '',
+    confirmation_status: status === 'NEEDS_LIVE_VALIDATION' ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
+  }
+}
+
+// Read a job's candidate JSONL + push each shaped record to the emit sink. Fail-soft: a missing file
+// (specialist wrote none) or malformed lines yield 0 without throwing.
+function emitCandidatesFromFile(candFile, cls, feature, agent, taskId, emitCandidate, log) {
+  let raw; try { raw = fs.readFileSync(candFile, 'utf8') } catch { return 0 }
+  let n = 0
+  for (const line of raw.split('\n')) {
+    const s = line.trim(); if (!s) continue
+    let c; try { c = JSON.parse(s) } catch { continue }
+    const rec = toLiveCandidate(c, cls, feature, agent)
+    if (rec) { try { emitCandidate(taskId, rec); n++ } catch {} }
+  }
+  if (n && typeof log === 'function') log(`  📡 ${String(agent).toUpperCase()} → ${n} candidate(s) to the live board [${cls}/${feature.slug}]`)
+  return n
+}
+
 function phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir) {
   const c = CLASS[cls]
   const mapFile = `${outDir}/phase1-maps/features/${feature.slug}.md`
   const outFile = `${outDir}/phase2/${cls}/${feature.slug}.md`
+  const candFile = candFileFor(outDir, cls, feature.slug)
   const moduleLine = c.module ? `Vuln module (follow it exactly): ${METH}/prompts/${c.module}` : `(no dedicated module for ${cls} — use your ${cls}-review skill)`
   let catalogLine = c.catalog ? `Pattern catalog (apply EVERY pattern): ${METH}/catalogs/${c.catalog}` : `(no catalog — apply your skill's full pattern set for ${cls})`
   if (!c.catalog) {
@@ -330,6 +371,12 @@ Report template + CVSS: ${METH}/templates/phase2_feature_report_template.md , ${
 2. Build a reverse-check matrix: review EVERY ledger row + EVERY listed file + EVERY unresolved Mapped/Traced/Discovered/GAP/Verify item + same-functionality siblings — ranked leads set ORDER, not scope.
 3. Re-read the source behind each row. Apply the full ${cls} pattern catalog.
 4. Produce a source-backed per-feature report (evidence tables, review matrix, findings with file:line traces + CVSS, gaps). NOT an orchestration log.
+
+## Structured candidates (REQUIRED — this is what streams to the LIVE findings board during the run)
+For EVERY finding, also append ONE JSON object (JSONL, one per line) to: ${candFile}  (mkdir -p first)
+Each object MUST have exactly these fields:
+{"feature":"${feature.slug}","pattern":"<pattern / test-case name>","pattern_id":"<catalog id or ''>","file":"<source path>","line":<number>,"source":"<where untrusted input enters>","sink":"<the dangerous sink>","endpoint":"<affected route/action or ''>","severity":"Critical|High|Medium|Low|Info","confidence":<0-100>,"hypothesis":"<what an attacker does>","evidence":"<the vulnerable code snippet / file:line trace>","status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","required_blackbox_proof":"<what a live test must show, or ''>"}
+Status rule: a source-only finding is SOURCE_CONFIRMED (you read the bug in the code) or NEEDS_LIVE_VALIDATION (needs a live hit to prove) — NEVER RUNTIME_CONFIRMED (you have no live evidence here). Emit candidates AS you confirm them, not only at the end.
 
 Write the report to: ${outFile} (mkdir -p first). Then reply one line: rows reverse-checked, findings (by severity), residual gaps.`
 }
@@ -402,7 +449,7 @@ Reply one line: features covered, findings by confirmation status + severity, to
 
 // ── main ──────────────────────────────────────────────────────────────────────
 async function runCodeReview(dispatch, deps) {
-  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled, onFindingsReady } = deps
+  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled, onFindingsReady, emitCandidate } = deps
   const { taskId, projectId, squad } = dispatch
   const meta = dispatch.meta || {}
   const sourceDir = meta.sourceDir
@@ -536,6 +583,11 @@ async function runCodeReview(dispatch, deps) {
     const results = await runWaves(jobs, WAVE, async ({ cls, feature }) => {
       const agent = CLASS[cls].agent
       const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
+      // Stream this job's source candidates to the live board the moment it returns (M0). Fail-soft +
+      // no-op when the emit sink isn't injected (unit tests), so the batch path is unchanged without it.
+      if (typeof emitCandidate === 'function') {
+        try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log) } catch (e) { log(`  ⚠️ candidate emit failed [${cls}/${feature.slug}]: ${e.message}`) }
+      }
       updateProgress(62 + Math.round(16 * (++assessed) / jobs.length), `Phase 2: assessed ${assessed}/${jobs.length} (feature × class)`)
       return r
     })

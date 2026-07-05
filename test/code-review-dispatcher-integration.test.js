@@ -24,7 +24,7 @@ function makeSourceDir() {
   fs.writeFileSync(path.join(dir, 'service.rb'), 'class FooService\n  def execute; end\nend\n')
   return dir
 }
-function stubDeps(spawnCalls) {
+function stubDeps(spawnCalls, emitted = []) {
   return {
     spawnAgent: async (agentName, taskId, prompt, sessionSuffix) => {
       spawnCalls.push({ agentName, sessionSuffix, promptLen: prompt.length })
@@ -32,9 +32,23 @@ function stubDeps(spawnCalls) {
         return { code: 0, agentName, cost: { totalCost: 0.1, model: 'm', tokens: { total: 1 } },
           output: JSON.stringify([{ slug: 'auth', name: 'Auth', keywords: 'login,token' }, { slug: 'uploads', name: 'Uploads', keywords: 'upload,file' }]) }
       }
+      // A real Phase-2 specialist also writes a structured candidate JSONL; simulate it so the
+      // dispatcher's emitCandidate path is exercised. Pull the exact candidate-file path out of the
+      // prompt (robust vs. parsing class/slug from the session suffix).
+      if (sessionSuffix && sessionSuffix.includes('-p2-')) {
+        const m = prompt.match(/(\S+\.candidates\.jsonl)/)
+        if (m) { try {
+          fs.mkdirSync(path.dirname(m[1]), { recursive: true })
+          fs.writeFileSync(m[1], JSON.stringify({ feature: 'auth', pattern: 'idor', file: 'app.rb', line: 2,
+            source: 'params[:id]', sink: 'User.find', severity: 'High', confidence: 80,
+            hypothesis: 'IDOR on user object', evidence: 'User.find(params[:id])',
+            status: 'SOURCE_CONFIRMED', required_blackbox_proof: '' }) + '\n')
+        } catch {} }
+      }
       return { code: 0, agentName, cost: { totalCost: 0.2, model: 'm', tokens: { total: 1 } }, output: '{}' }
     },
     trackCosts: () => {}, updateProgress: () => {}, log: () => {}, logActivity: () => {},
+    emitCandidate: (tid, rec) => { emitted.push(rec) },
   }
 }
 
@@ -46,11 +60,12 @@ function stubDeps(spawnCalls) {
     const srcDir = makeSourceDir()
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crout-'))
     const calls = []
+    const emitted = []
     const res = await cr.runCodeReview(
       { taskId: 'cr-test-1', squad: 'code-review-squad', projectId: '',
         meta: { sourceDir: srcDir, features: ['auth', 'uploads', 'admin'],
                 vulnClasses: ['access-control', 'xss'], maxPhase2: 2, outputDir: outDir } },
-      stubDeps(calls))
+      stubDeps(calls, emitted))
 
     ok('returns no error', !res.error, JSON.stringify(res).slice(0, 120))
     ok('stack label present (auto-detected)', typeof res.stack === 'string' && res.stack.length > 0, 'got ' + res.stack)
@@ -65,6 +80,14 @@ function stubDeps(spawnCalls) {
 
     const p2 = calls.filter(c => c.sessionSuffix.includes('-p2-'))
     ok('phase2 = maxPhase2(2) × classes(2) = 4 calls', p2.length === 4, 'got ' + p2.length)
+    // M0 — each Phase-2 job streams a structured source candidate to the board via emitCandidate.
+    ok('M0: each p2 job streamed a candidate → emitCandidate called 4×', emitted.length === 4, 'got ' + emitted.length)
+    ok('M0: candidates are source-shaped (type=candidate, file set, NO url)',
+      emitted.length > 0 && emitted.every(c => c.type === 'candidate' && c.file === 'app.rb' && !c.url),
+      JSON.stringify(emitted[0] || {}).slice(0, 160))
+    ok('M0: source candidate stays SOURCE_CONFIRMED (never RUNTIME_CONFIRMED)',
+      emitted.length > 0 && emitted.every(c => c.status === 'SOURCE_CONFIRMED' && c.confirmation_status === 'SOURCE_CONFIRMED'),
+      JSON.stringify(emitted[0] || {}).slice(0, 160))
     ok('access-control routed to MARSHAL', p2.some(c => c.sessionSuffix.includes('p2-access-control') && c.agentName === 'marshal'))
     ok('xss routed to CIPHER', p2.some(c => c.sessionSuffix.includes('p2-xss') && c.agentName === 'cipher'))
     ok('AUDITOR verifies', calls.some(c => c.agentName === 'auditor'))
