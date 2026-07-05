@@ -9,7 +9,8 @@
   "caps": {
     "maxSpecialists": 12,
     "maxChains": 20,
-    "maxCostUsd": 50
+    "maxCostUsd": 50,
+    "hardMaxAgeHours": 12
   },
   "evalPath": "agents/CURATOR/eval/",
   "description": "White-box code security review — 6 per-framework specialists, runtime analysis, chain synthesis"

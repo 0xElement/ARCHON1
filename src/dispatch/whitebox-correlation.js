@@ -193,4 +193,27 @@ function sweepOrphanedDeferrals(deps = {}) {
   return launched
 }
 
-module.exports = { buildSourceGuidance, buildRootCauseRequests, shadowRecommend, maybeLaunchSourceGuidedPentest, sweepOrphanedDeferrals }
+/**
+ * Terminal cleanup when the code-review branch ends WITHOUT launching the deferred pentest — it
+ * failed, returned {error}, or threw before the verdicts existed. Without this the black-box half is
+ * orphaned forever: the sweep gates on crFinished (needs 'done' OR an AUDITOR-VERDICTS.md), which
+ * stays false for a failed CR, so a still-present deferral is skipped every pass and the engagement
+ * never completes. Delete deferredPentestDispatch + mark the black-box iteration terminal so the
+ * sweep early-returns 'no-deferral' and the engagement is consistently terminal. Idempotent, fail-soft.
+ * Returns { neutralized }.
+ */
+function neutralizeDeferral(engagementId, blackboxStatus, deps = {}) {
+  const intelRoot = deps.intelRoot || agentPaths.INTEL_ROOT
+  const engFile = path.join(intelRoot, `engagement-${engagementId}.json`)
+  try {
+    const eng = _readJson(engFile)
+    if (!eng || !eng.deferredPentestDispatch) return { neutralized: false }
+    delete eng.deferredPentestDispatch
+    const it = (eng.iterations || []).find(i => i.kind === 'blackbox')
+    if (it) it.status = String(blackboxStatus || 'failed')
+    _writeAtomic(engFile, eng)
+    return { neutralized: true }
+  } catch { return { neutralized: false } }
+}
+
+module.exports = { buildSourceGuidance, buildRootCauseRequests, shadowRecommend, maybeLaunchSourceGuidedPentest, sweepOrphanedDeferrals, neutralizeDeferral }

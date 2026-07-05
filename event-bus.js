@@ -8589,7 +8589,7 @@ Write STRICT JSON, ONE object per line, to ${outFile} (overwrite). Each line:
 
 EVERY line MUST include "taskId":"${taskId}" and "validation_status":"CONFIRMED". Write ONLY that file, then reply one line: wrote N validated findings.`
     log(`🔁 cr-normalize: AUDITOR → VALIDATED-FINDINGS-${taskId}.jsonl`)
-    await spawnAgent('auditor', taskId, prompt, `task-${taskId}-cr-normalize`, null)
+    await spawnAgent('auditor', taskId, prompt, `task-${taskId}-cr-normalize`, null, { timeoutMs: REPORT_AUDITOR_TIMEOUT_MS })
     const n = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf8').trim().split('\n').filter(Boolean).length : 0
     log(`✅ cr-normalize: ${n} validated finding(s) for ${taskId}`)
     logActivity('AUDITOR', `✅ White-box findings normalized (${n})`, { type: 'cr-normalize', squad: 'code-review', taskId })
@@ -9348,6 +9348,8 @@ async function dispatchToAgent(dispatch) {
         log(`❌ code-review failed: ${crResult.error}`)
         try { withFileLock(TASKS_FILE, () => { const _t = readJSON(TASKS_FILE) || []; const _tk = _t.find(t => String(t.id) === String(taskId)); if (_tk && !['cancelled', 'failed'].includes(String(_tk.status || '').toLowerCase())) { _tk.status = 'failed'; _tk.statusMessage = `Code review failed: ${crResult.error}`.slice(0, 300); _tk.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, _t) } }) } catch {}
         try { const _q = readJSON(DISPATCH_FILE) || []; const _e = _q.find(d => String(d.taskId) === String(taskId) && d.status === 'processing'); if (_e) { _e.status = 'failed'; _e.failureReason = `code-review: ${crResult.error}`.slice(0, 300); _e.processedAt = new Date().toISOString(); writeJSON(DISPATCH_FILE, _q) } } catch {}
+        // White-box: a FAILED review must neutralize the deferred pentest, else the engagement's black-box half is orphaned forever (the sweep never launches it).
+        try { require('./src/dispatch/whitebox-correlation').neutralizeDeferral((dispatch.meta && dispatch.meta.engagementId) || taskId, 'failed', { intelRoot: agentPaths.INTEL_ROOT }) } catch {}
         try { runningTasks.delete(taskId) } catch {}
         setTimeout(() => processQueue(), 2000)
         return
@@ -9437,6 +9439,8 @@ async function dispatchToAgent(dispatch) {
       // clobbering an operator cancel/done), and fail the dispatch-queue entry like the scope-block path.
       try { withFileLock(TASKS_FILE, () => { const _t = readJSON(TASKS_FILE) || []; const _tk = _t.find(t => String(t.id) === String(taskId)); if (_tk && !['cancelled', 'failed', 'done'].includes(String(_tk.status || '').toLowerCase())) { _tk.status = 'failed'; _tk.statusMessage = `Code review error: ${e.message}`.slice(0, 300); _tk.lastUpdate = new Date().toISOString(); writeJSON(TASKS_FILE, _t) } }) } catch {}
       try { const _q = readJSON(DISPATCH_FILE) || []; const _e = _q.find(d => String(d.taskId) === String(taskId) && d.status === 'processing'); if (_e) { _e.status = 'failed'; _e.failureReason = `code-review dispatch error: ${e.message}`.slice(0, 300); _e.processedAt = new Date().toISOString(); writeJSON(DISPATCH_FILE, _q) } } catch {}
+      // White-box: a THROWN review must neutralize the deferred pentest, else the engagement's black-box half is orphaned forever (the sweep never launches it).
+      try { require('./src/dispatch/whitebox-correlation').neutralizeDeferral((dispatch.meta && dispatch.meta.engagementId) || taskId, 'failed', { intelRoot: agentPaths.INTEL_ROOT }) } catch {}
       try { runningTasks.delete(taskId) } catch {}
       setTimeout(() => processQueue(), 2000)
     } finally {
@@ -10873,6 +10877,13 @@ function checkCalendar() {
 }
 
 // ── Stuck Task Watchdog ──
+// Absolute hard-age ceiling for the watchdog backstop (default 12h; override via squad.json
+// caps.hardMaxAgeHours). Well above any legitimate run — combined with the no-progress gate it only
+// ever force-terminates a genuinely-hung task, never a slow-but-advancing one.
+function _hardMaxAgeMs(squad) {
+  const h = _cap(squad, 'hardMaxAgeHours', 12)
+  return h * 60 * 60 * 1000
+}
 function runStuckTaskWatchdog() {
   try {
     const tasks = readJSON(TASKS_FILE)
@@ -10884,6 +10895,39 @@ function runStuckTaskWatchdog() {
 
     for (const task of tasks) {
       if (task.status !== 'in-progress') continue
+
+      // ── Absolute-age backstop (the "never hang non-terminal" guarantee) ──────────────────────
+      // Fires for EVERY in-progress task, INCLUDING one whose leader slot is still held (the
+      // isRunning guard below skips those) — the only path that catches a silently-hung await.
+      // Age is measured from startedAt (NOT lastUpdate — the code-review 3-min heartbeat re-stamps
+      // lastUpdate); real progress is gauged by the activity log (written only at true phase
+      // boundaries, not the heartbeat). Ceiling is well above any legit run (default 12h, tunable),
+      // and the no-progress gate means it only ever fires on a genuinely-hung task.
+      {
+        const _hardMax = _hardMaxAgeMs(task.squad)
+        const _startedTs = task.startedAt ? new Date(task.startedAt).getTime()
+          : task.createdAt ? new Date(task.createdAt).getTime() : now
+        if (now - _startedTs > _hardMax) {
+          const _act = readTaskActivity(String(task.id))
+          const _actTs = _act.length ? Math.max(..._act.map(e => new Date(e.ts || e.timestamp || 0).getTime())) : 0
+          const _noProgressMs = now - (_actTs || _startedTs)
+          if (_noProgressMs > _hardMax) {
+            const _h = Math.round(_hardMax / 3600000)
+            log(`🛑 Hard age-cap: ${task.id} (${task.assignee}) — ${Math.round((now - _startedTs) / 3600000)}h old, no activity for ${Math.round(_noProgressMs / 3600000)}h → force-terminating`)
+            task.status = 'failed'
+            task.statusMessage = `Force-terminated: exceeded the ${_h}h hard age cap with no progress`
+            task.lastUpdate = new Date().toISOString()
+            const _hd = queue.find(d => String(d.taskId) === String(task.id))
+            if (_hd) { _hd.status = 'failed'; _hd.failureReason = `hard age-cap (${_h}h, no progress)`; _hd.processedAt = new Date().toISOString() }
+            // Free the leader slot (covers a pure-Promise-deadlock with no child to kill) AND drop a
+            // cancel-signal so any live child agent is reaped (killTaskChildren → 143 → slot freed).
+            try { const _a = String(task.assignee || '').toUpperCase(); runningAgents.delete(_a); setAgentIdle(_a) } catch {}
+            try { const _cs = `${agentPaths.INTEL_ROOT}/cancel-signals`; fs.mkdirSync(_cs, { recursive: true }); writeAtomic(`${_cs}/hardcap-${task.id}.json`, JSON.stringify({ taskId: String(task.id), reason: 'hard-age-cap' })) } catch {}
+            stuckCount++
+            continue
+          }
+        }
+      }
 
       // Check if this agent is actually running
       const isRunning = runningAgents.has(String(task.assignee || '').toUpperCase())

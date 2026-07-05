@@ -71,3 +71,27 @@ test('a plain pentest (no sourceDir) is NOT deferred — dispatches immediately'
     assert.ok(!eng.deferredPentestDispatch, 'no deferral for a source-less pentest')
   } finally { restore() }
 })
+
+test('neutralizeDeferral: a FAILED code review clears the deferral + marks the black-box iter terminal (orphan fix)', () => {
+  const { d, TMP, restore } = loadDashboardWith({})
+  try {
+    const src = path.join(__dirname, '..')
+    const r = d.createDispatch(combinedBody(src))
+    const engId = r.taskId
+    let eng = JSON.parse(fs.readFileSync(path.join(TMP, `engagement-${engId}.json`), 'utf8'))
+    assert.ok(eng.deferredPentestDispatch, 'precondition: deferral present, black-box half pending')
+
+    const wc = require('../src/dispatch/whitebox-correlation')
+    assert.equal(wc.neutralizeDeferral(engId, 'failed', { intelRoot: TMP }).neutralized, true)
+
+    eng = JSON.parse(fs.readFileSync(path.join(TMP, `engagement-${engId}.json`), 'utf8'))
+    assert.ok(!eng.deferredPentestDispatch, 'deferral cleared → black-box half NOT orphaned')
+    assert.equal((eng.iterations || []).find(i => i.kind === 'blackbox').status, 'failed', 'black-box iter marked terminal (failed)')
+
+    // the recovery sweep now leaves it alone (no dangling deferral) — engagement stays terminal
+    const launched = wc.sweepOrphanedDeferrals({ intelRoot: TMP, writeInbox: () => {} })
+    assert.ok(!launched.includes(engId), 'sweep does not re-launch a neutralized engagement')
+    // idempotent: a second call is a safe no-op
+    assert.equal(wc.neutralizeDeferral(engId, 'failed', { intelRoot: TMP }).neutralized, false)
+  } finally { restore() }
+})
