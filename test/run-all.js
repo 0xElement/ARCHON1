@@ -40,6 +40,7 @@ const HAS_BUN = spawnSync('bun', ['--version'], { stdio: 'ignore' }).status === 
 // in-tree for upstream reference; skipped by the product gate. Run individually
 // with `node test/<file>` against a full framework checkout.
 const SKIP_FILES = new Set([
+  'fake-agent-e2e.test.js',            // slow end-to-end integration (real pipeline). Run: npm run test:e2e
   'browser-verifier.test.js',          // playwright timeout (pre-existing)
   'event-bus-task-actions-dedup.test.js',
   'handoff-cost-caps.test.js',

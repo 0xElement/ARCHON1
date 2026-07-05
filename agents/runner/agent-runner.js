@@ -33,6 +33,7 @@
 const ADAPTER_REGISTRY = {
   sdk: () => require('./adapters/sdk'),            // DEFAULT (PURE-SDK cutover 2026-06-04)
   cli: () => require('./adapters/cli'),            // rollback floor — ADAPTER=cli or spec.adapter
+  fake: () => require('./adapters/fake'),          // offline canned adapter — ADAPTER=fake (tests only)
   // interactive: () => require('./adapters/interactive'), // future
 }
 
