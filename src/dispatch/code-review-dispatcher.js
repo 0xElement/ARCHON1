@@ -100,10 +100,11 @@ function selectVulnClasses(counts) {
   return [...sel].filter(c => CLASS[c])
 }
 const MAPPER_POOL = ['marshal', 'siphon', 'cipher', 'quill', 'beacon', 'breaker']
-// Phase 3 freehand source review (Autonomous OS Block D). flag-off ⇒ 'freehand'
-// absent from PHASES ⇒ byte-identical 8-phase flow. Computed at module load via
-// paths.flagMode (no direct env read — grep-gate). See ULTRAPLAN.md §5.3.
-const FH_MODE = typeof __roots.flagMode === 'function' ? __roots.flagMode('THREE_PHASE_SOURCE_REVIEW') : 'off'
+// Phase 3 freehand source review — the THIRD phase of the three-phase source review, ON by DEFAULT
+// (core coverage, not an experiment). 'active' ⇒ candidates feed the report; 'shadow' ⇒ report-neutral;
+// 'off' (ARCHON_THREE_PHASE_SOURCE_REVIEW_OFF=1) ⇒ the legacy byte-identical 8-phase flow. Computed via
+// paths.sourceReviewMode (no direct env read — grep-gate). See ULTRAPLAN.md §5.3.
+const FH_MODE = typeof __roots.sourceReviewMode === 'function' ? __roots.sourceReviewMode() : 'active'
 const PHASES = ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2',
   ...(FH_MODE !== 'off' ? ['freehand'] : []), 'verify', 'report']
 const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
@@ -318,7 +319,7 @@ function toLiveCandidate(c, cls, feature, agent) {
   const status = (c.status === 'NEEDS_LIVE_VALIDATION' || c.status === 'DISPROVEN') ? c.status : 'SOURCE_CONFIRMED'
   return {
     type: 'candidate', agent: String(agent).toUpperCase(), original_agent: String(agent),
-    severity: c.severity || 'Medium', cwe: cls, title,
+    severity: c.severity || 'Medium', cwe: c.cwe || c.vuln_class || cls, title,
     details: String(c.evidence || c.hypothesis || '').slice(0, 2000),
     feature: c.feature || feature.slug, pattern: c.pattern || '', pattern_id: c.pattern_id || '',
     file: c.file || '', line: c.line ?? '', source: c.source || '', sink: c.sink || '',
@@ -402,6 +403,11 @@ abuse it, not which signature matches.
 
 Each candidate MUST follow the template, including the **Required black-box proof** field — a
 source-only novel candidate is a HYPOTHESIS (NEEDS-LIVE), never CONFIRMED. Cite file:line for every claim.
+
+## Structured candidates (REQUIRED — streams to the LIVE board like Phase 2)
+For EVERY novel candidate, also append ONE JSON object (JSONL) to: ${fhDir}/${feature.slug}.candidates.jsonl  (mkdir -p first)
+{"feature":"${feature.slug}","vuln_class":"<business-logic|access-control|…>","pattern":"freehand","file":"<source path>","line":<number>,"source":"<input>","sink":"<sink/abuse>","endpoint":"<route/action or ''>","severity":"Critical|High|Medium|Low|Info","confidence":<0-100>,"hypothesis":"<the abuse/logic flaw>","evidence":"<code + file:line trace>","status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","required_blackbox_proof":"<what a live test must show, or ''>"}
+A novel/logic candidate you can only reason about (not prove in code) is NEEDS_LIVE_VALIDATION, never RUNTIME_CONFIRMED.
 
 Write your candidates to: ${outFile} (mkdir -p first). Reply one line: novel candidates found, top risk, what needs live proof.`
 }
@@ -619,7 +625,12 @@ async function runCodeReview(dispatch, deps) {
     logActivity('CURATOR', `🔎 Phase 3 freehand review (${FH_MODE}): ${fhFeatures.length} features`, { taskId, squad, projectId: projectId || '' })
     const results = await runWaves(fhFeatures, WAVE, async (feature, idx) => {
       const agent = MAPPER_POOL[idx % MAPPER_POOL.length]
-      return spawnAgent(agent, taskId, freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir), `task-${taskId}-fh-${feature.slug}`, null)
+      const r = await spawnAgent(agent, taskId, freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir), `task-${taskId}-fh-${feature.slug}`, null)
+      // Freehand candidates stream to the live board too (M2), through the same sink as Phase 2.
+      if (typeof emitCandidate === 'function') {
+        try { emitCandidatesFromFile(`${fhDir}/${feature.slug}.candidates.jsonl`, 'freehand', feature, agent, taskId, emitCandidate, log) } catch (e) { log(`  ⚠️ freehand candidate emit [${feature.slug}]: ${e.message}`) }
+      }
+      return r
     })
     trackCosts(results)
   }

@@ -165,6 +165,18 @@ function flagMode(name) {
 }
 function flagEnabled(name) { return flagMode(name) !== 'off' }
 
+// Three-phase source review (Phase 1 map → Phase 2 pattern → Phase 3 freehand) is CORE coverage, so
+// it is ON ('active', feeds the report) by DEFAULT. Opt out with ARCHON_THREE_PHASE_SOURCE_REVIEW_OFF=1
+// (legacy 8-phase flow). Force report-neutral shadow with ARCHON_THREE_PHASE_SOURCE_REVIEW_SHADOW=1 (or
+// the legacy AUTONOMOUS_OS + ENABLE gate without DRIVE). Kept here — not a direct env read in the
+// dispatcher — so the grep-gate stays clean.  → 'off' | 'shadow' | 'active'
+function sourceReviewMode() {
+  if (_flagTruthy('ARCHON_THREE_PHASE_SOURCE_REVIEW_OFF')) return 'off'
+  if (_flagTruthy('ARCHON_THREE_PHASE_SOURCE_REVIEW_SHADOW')) return 'shadow'
+  if (flagMode('THREE_PHASE_SOURCE_REVIEW') === 'shadow') return 'shadow' // legacy explicit shadow
+  return 'active'
+}
+
 // Per-engagement shadow sink root. Never read by the legacy pipeline/dashboard/SCRIBE,
 // so shadow output can never affect a real report.
 function shadowDir(engagementId) {
@@ -184,6 +196,7 @@ module.exports = {
   a2aCapsDir,
   flagMode,
   flagEnabled,
+  sourceReviewMode,
   shadowDir,
   _config: config, // exposed for gates/tests
 }

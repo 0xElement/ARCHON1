@@ -13,7 +13,7 @@ const DISPATCHER = path.join(__dirname, '..', 'src', 'dispatch', 'code-review-di
 // Require the dispatcher fresh under a given flag env (FH_MODE is captured at module load).
 function loadUnder(env) {
   const saved = {}
-  const keys = ['ARCHON_ENABLE_AUTONOMOUS_OS', 'ARCHON_ENABLE_THREE_PHASE_SOURCE_REVIEW', 'ARCHON_DRIVE_THREE_PHASE_SOURCE_REVIEW']
+  const keys = ['ARCHON_ENABLE_AUTONOMOUS_OS', 'ARCHON_ENABLE_THREE_PHASE_SOURCE_REVIEW', 'ARCHON_DRIVE_THREE_PHASE_SOURCE_REVIEW', 'ARCHON_THREE_PHASE_SOURCE_REVIEW_OFF', 'ARCHON_THREE_PHASE_SOURCE_REVIEW_SHADOW']
   for (const k of keys) { saved[k] = process.env[k]; delete process.env[k] }
   Object.assign(process.env, env)
   delete require.cache[require.resolve(DISPATCHER)]
@@ -25,16 +25,30 @@ function loadUnder(env) {
 
 const ORIGINAL_8 = ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2', 'verify', 'report']
 
-test('flag-off: PHASES is the original 8-phase flow, byte-identical (no freehand)', () => {
+test('DEFAULT: three-phase source review is ON — freehand active, between phase2 and verify', () => {
   const mod = loadUnder({})
-  assert.deepEqual(mod.PHASES, ORIGINAL_8)
-  assert.equal(mod.FH_MODE, 'off')
+  assert.equal(mod.FH_MODE, 'active')
+  assert.deepEqual(mod.PHASES, ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2', 'freehand', 'verify', 'report'])
+  const i = mod.PHASES.indexOf('freehand')
+  assert.equal(mod.PHASES[i - 1], 'phase2')
+  assert.equal(mod.PHASES[i + 1], 'verify')
 })
 
-test('flag-on (shadow): freehand is inserted between phase2 and verify', () => {
+test('opt-out: ARCHON_THREE_PHASE_SOURCE_REVIEW_OFF → legacy byte-identical 8-phase flow', () => {
+  const mod = loadUnder({ ARCHON_THREE_PHASE_SOURCE_REVIEW_OFF: '1' })
+  assert.equal(mod.FH_MODE, 'off')
+  assert.deepEqual(mod.PHASES, ORIGINAL_8)
+})
+
+test('explicit shadow: ARCHON_THREE_PHASE_SOURCE_REVIEW_SHADOW → report-neutral, freehand present', () => {
+  const mod = loadUnder({ ARCHON_THREE_PHASE_SOURCE_REVIEW_SHADOW: '1' })
+  assert.equal(mod.FH_MODE, 'shadow')
+  assert.ok(mod.PHASES.includes('freehand'))
+})
+
+test('legacy shadow (AUTONOMOUS_OS + ENABLE, no DRIVE): still shadow', () => {
   const mod = loadUnder({ ARCHON_ENABLE_AUTONOMOUS_OS: '1', ARCHON_ENABLE_THREE_PHASE_SOURCE_REVIEW: '1' })
   assert.equal(mod.FH_MODE, 'shadow')
-  assert.deepEqual(mod.PHASES, ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2', 'freehand', 'verify', 'report'])
   const i = mod.PHASES.indexOf('freehand')
   assert.equal(mod.PHASES[i - 1], 'phase2')
   assert.equal(mod.PHASES[i + 1], 'verify')
