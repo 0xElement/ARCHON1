@@ -88,6 +88,8 @@ function stubDeps(spawnCalls, emitted = []) {
     ok('M0: source candidate stays SOURCE_CONFIRMED (never RUNTIME_CONFIRMED)',
       emitted.length > 0 && emitted.every(c => c.status === 'SOURCE_CONFIRMED' && c.confirmation_status === 'SOURCE_CONFIRMED'),
       JSON.stringify(emitted[0] || {}).slice(0, 160))
+    // M3 — with every (feature × selected-class) pair assessed, re-plan is correctly a no-op (no -p2r- jobs).
+    ok('M3: no spurious re-plan when coverage is complete', !calls.some(c => c.sessionSuffix.includes('-p2r-')), 'unexpected re-plan spawn')
     ok('access-control routed to MARSHAL', p2.some(c => c.sessionSuffix.includes('p2-access-control') && c.agentName === 'marshal'))
     ok('xss routed to CIPHER', p2.some(c => c.sessionSuffix.includes('p2-xss') && c.agentName === 'cipher'))
     ok('AUDITOR verifies', calls.some(c => c.agentName === 'auditor'))

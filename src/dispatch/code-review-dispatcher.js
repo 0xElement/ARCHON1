@@ -43,8 +43,20 @@ const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see p
 const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
+const sourcePlanner = require('./source-planner') // M3: rank the Phase-2 queue + re-plan from findings
 
 const METH = path.join(__roots.AGENTS_ROOT, 'squads/code-review/methodology')
+
+// Read the live-findings JSONL (candidates streamed by emitCandidate) — the re-plan reads it to
+// task itself from its own evidence. Fail-soft: missing/partial file → [].
+function readLiveFindings(taskId) {
+  try {
+    const raw = fs.readFileSync(`${__roots.INTEL_ROOT}/live-findings-${taskId}.jsonl`, 'utf8')
+    const out = []
+    for (const l of raw.split('\n')) { const s = l.trim(); if (!s) continue; try { out.push(JSON.parse(s)) } catch {} }
+    return out
+  } catch { return [] }
+}
 
 // vuln class → { specialist, phase-2 module, pattern catalog }. The slugs match
 // common/patterns/<slug>.json — a null catalog auto-resolves to that pattern
@@ -591,8 +603,14 @@ async function runCodeReview(dispatch, deps) {
   if (cancelled()) return bail('Phase 2 assessment')
   if (runPhase('phase2')) {
     updateProgress(62, `Phase 2: ${p2Features.length} features × ${vulnClasses.length} classes`)
-    const jobs = []
+    let jobs = []
     for (const cls of vulnClasses) for (const feature of p2Features) jobs.push({ cls, feature })
+    // M3 planner: order the queue by CURATOR's ranked review queue so the highest-value leads run (and
+    // stream to the board) FIRST — parity with the black-box attack plan. Pure reorder; never drops a job.
+    try {
+      const rq = fs.readFileSync(`${outDir}/phase1-maps/consolidated/phase2_review_queue.md`, 'utf8')
+      jobs = sourcePlanner.rankJobs(jobs, sourcePlanner.parseRankedFeatures(rq, p2Features.map(f => f.slug)))
+    } catch { /* no ranked queue yet → natural order */ }
     // Bump progress per assessment job (feature × class) — keeps the bar moving and lastUpdate
     // fresh across what is usually the longest phase, however many jobs the codebase warrants.
     let assessed = 0
@@ -608,6 +626,27 @@ async function runCodeReview(dispatch, deps) {
       return r
     })
     trackCosts(results)
+
+    // M3 re-plan: the run tasks itself from its own findings. Any feature×class a LIVE candidate points
+    // at but that wasn't assessed becomes a follow-up job (bounded to known features/classes — an unknown
+    // class has no specialist). Usually empty under full coverage; the self-tasking primitive for bounded
+    // runs + newly-surfaced surfaces. One pass (no loop) → can't runaway.
+    try {
+      // allClasses = the FULL registry (not just the auto-selected set): a freehand/novel finding on a
+      // class we didn't originally select is exactly what should spawn a structured follow-up assessment.
+      const extra = sourcePlanner.replanJobs(jobs, readLiveFindings(taskId), p2Features, Object.keys(CLASS))
+      if (extra.length) {
+        log(`🧠 Re-plan: +${extra.length} follow-up assessment(s) from live findings`)
+        logActivity('CURATOR', `🧠 Re-plan: +${extra.length} follow-up job(s) from findings`, { taskId, squad, projectId: projectId || '' })
+        const more = await runWaves(extra, WAVE, async ({ cls, feature }) => {
+          const agent = CLASS[cls].agent
+          const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2r-${cls}-${feature.slug}`, null)
+          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log) } catch {} }
+          return r
+        })
+        trackCosts(more)
+      }
+    } catch (e) { log(`⚠️ re-plan (non-fatal): ${e.message}`) }
   }
 
   // Phase 3 — freehand senior-pentester review (Autonomous OS Block D, flag-gated).
