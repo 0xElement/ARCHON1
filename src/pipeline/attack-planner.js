@@ -29,7 +29,12 @@ function _sourceGuidanceBlock(sg) {
   return `\n\n## SOURCE GUIDANCE (white-box — AIM the plan at these; each is a HYPOTHESIS to confirm LIVE, never a confirmed finding)\nPriority classes: ${(sg.priority_classes || []).join(', ')}\n${lines}`
 }
 
-function buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData, sourceGuidance } = {}) {
+// Focused engagement: constrain ATLAS's plan to the operator-selected classes only.
+function _focusBlock(focusClasses) {
+  if (!Array.isArray(focusClasses) || !focusClasses.length) return ''
+  return `\n\n⭐ FOCUSED ENGAGEMENT — the operator selected ONLY these vulnerability classes: ${focusClasses.join(', ')}.\nProduce hypotheses ONLY for these classes and SKIP the rest of the WSTG walk below — the other areas are OUT OF SCOPE for this run.`
+}
+function buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData, sourceGuidance, focusClasses } = {}) {
   const fp = fingerprint || {}
   const fpLine = [
     fp.product ? `Product: ${fp.product}${fp.version ? ' ' + fp.version : ''}` : '',
@@ -45,7 +50,7 @@ stack — if the product is Adobe AEM, propose AEM-specific attacks (dispatcher 
 AEM CVEs); if WordPress, WP-specific; etc. Be specific and evidence-driven, not generic.
 
 Target: ${targetUrl || '(unknown)'}
-Environment fingerprint: ${fpLine}
+Environment fingerprint: ${fpLine}${_focusBlock(focusClasses)}
 
 WALK THIS WSTG COVERAGE MAP (the A-Z checklist) against the target — make sure every applicable area has
 at least one hypothesis where the evidence supports it; note any area the surface makes irrelevant:

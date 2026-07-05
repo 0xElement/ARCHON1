@@ -704,6 +704,18 @@ ol.fsteps li { font-size: 13px; line-height: 1.5; }
 .lrun-sev:hover { background: var(--hover); color: var(--fg); }
 .lrun-sev.on { color: var(--fg); border-color: var(--accent); background: var(--accent-soft); }
 .lrun-sev .d { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+/* Run Overview: "working now" strip + focused-scan "test plan" chips */
+.lrun-working { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; font-size: 12.5px; color: var(--fg); }
+.lrun-working b { color: var(--accent-2); font-weight: 650; }
+.lrun-working-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 0 3px rgba(52,211,153,.18); animation: pulse 1.7s infinite; flex-shrink: 0; }
+.tplan { margin-top: 14px; }
+.tplan-h { font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .04em; color: var(--fg-dim); margin-bottom: 8px; }
+.tplan-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.tplan-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg-1); color: var(--fg-mut); }
+.tplan-chip.done { color: var(--emerald); border-color: rgba(52,211,153,.4); background: rgba(52,211,153,.08); }
+.tplan-chip.running { color: var(--accent-2); border-color: var(--accent); background: var(--accent-soft); animation: pulse 1.9s infinite; }
+.tplan-chip.pending { color: var(--fg-mut); opacity: .8; }
+.tplan-chip.full { color: var(--fg-dim); }
 .lrun-find .stream { animation: fLand .5s ease; }
 @keyframes fLand { from { opacity: 0; transform: translateY(6px); } }
 @media (max-width: 980px) { .lrun-stages { grid-template-columns: repeat(2, 1fr); } .lrun-cols { grid-template-columns: 1fr; } }

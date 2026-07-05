@@ -140,12 +140,35 @@ function daemonUp() {
   return up
 }
 
+// Per-run "test plan": for a focused scan, each selected class → its specialist → live status
+// (running = its specialist is working on THIS task now; done = specialist already ran; else
+// pending). Empty for a full scan (the UI then shows "Full scan — all classes"). Reuses the
+// shared focus-map so class→specialist never drifts from the daemon.
+function testPlanFor(task, agentStatus) {
+  const { specialistForClass } = require('../src/pipeline/focus-map')
+  const eng = readEngagement(resolveEngagementId(task.id) || task.id) || {}
+  const focusClasses = Array.isArray(eng.focusClasses) ? eng.focusClasses : []
+  if (!focusClasses.length) return { focusClasses: [], testPlan: [] }
+  const done = new Set(Object.keys(task.costByAgent || {}).map(a => String(a).toLowerCase()))
+  const working = new Set(Object.entries(agentStatus || {})
+    .filter(([, v]) => v && String(v.status).toLowerCase() === 'working' && String(v.taskId) === String(task.id))
+    .map(([a]) => String(a).toLowerCase()))
+  const testPlan = focusClasses.map(cls => {
+    const spec = specialistForClass(cls)
+    const status = spec && working.has(spec) ? 'running' : spec && done.has(spec) ? 'done' : 'pending'
+    return { cls, label: FOCUS_LABEL[cls] || cls, specialist: (spec || '').toUpperCase(), status }
+  })
+  return { focusClasses, testPlan }
+}
+
 function state() {
+  const agentStatus = readJSON('agent-status.json', {})
   return {
     now: new Date().toISOString(),
     intel: INTEL, agents: AGENTS,
     daemon: daemonUp(),
-    tasks: tasks(),
+    tasks: tasks().map(t => ({ ...t, ...testPlanFor(t, agentStatus) })),
+    agentStatus,
     queue: readJSON('dispatch-queue.json', []),
     activity: readLines('ACTIVITY-LOG.jsonl', 60).reverse(),
     reports: listReports(),
@@ -394,6 +417,7 @@ function createDispatch(body) {
     writeEngagement(taskId, {
       engagementId: taskId, targetUrl: meta.targetUrl, inScope: meta.inScope, outOfScope: meta.outOfScope,
       credentials: meta.credentials, severityProfile: meta.severityProfile, triageGate: meta.triageGate,
+      focusClasses: meta.focusClasses || [],
       ...(combined ? { sourceDir: crMeta.sourceDir } : {}),
       createdAt: new Date().toISOString(), iterations,
     })

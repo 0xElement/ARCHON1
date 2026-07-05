@@ -470,7 +470,13 @@ function renderTaskOverview(force) {
   // Only a live scan needs to refresh: skip the re-render when nothing moved. A done run's
   // signature is stable, so after the final render it stops re-rendering (no .stream re-flash).
   // force=true (tab open/switch) always renders.
-  const ovSig = [tdTaskId, t.status, t.progress || 0, active.length, verified, t.statusMessage || ''].join('|')
+  // Live agents on THIS run (from agent-status) + focused test-plan status — drive the indicators below.
+  const _as = (lastState && lastState.agentStatus) || {}
+  const workingAgents = Object.entries(_as)
+    .filter(([, v]) => v && String(v.status).toLowerCase() === 'working' && String(v.taskId) === String(t.id))
+    .map(([a]) => a.toUpperCase())
+  const _tplanSig = (t.testPlan || []).map(p => p.status).join('')
+  const ovSig = [tdTaskId, t.status, t.progress || 0, active.length, verified, t.statusMessage || '', _tplanSig, workingAgents.join(',')].join('|')
   if (!force && ovSig === lastTdOvSig) return
   lastTdOvSig = ovSig
   const SEV_ABBR = { Critical: 'CRIT', High: 'HIGH', Medium: 'MED', Low: 'LOW', Info: 'INFO' }
@@ -525,6 +531,14 @@ function renderTaskOverview(force) {
     `<div class="rrow"><span class="rk">Status</span><div class="rv">${esc(statusTxt)}</div></div>`,
   ].filter(Boolean).join('')
 
+  // Test plan (what's being tested + what's remaining): focused scan → selected classes + live status;
+  // full scan → "all classes". Working-now strip → the agents actively testing THIS run right now.
+  const tplanChips = (t.testPlan && t.testPlan.length)
+    ? t.testPlan.map(p => { const icon = p.status === 'done' ? '✓' : p.status === 'running' ? '▶' : '⏳'; return `<span class="tplan-chip ${esc(p.status)}" title="${esc(p.specialist)} · ${esc(p.status)}">${icon} ${esc(p.label)}</span>` }).join('')
+    : `<span class="tplan-chip full">Full scan — all classes</span>`
+  const workingHtml = (running && workingAgents.length)
+    ? `<div class="lrun-working"><span class="lrun-working-dot"></span>Working now: ${workingAgents.map(a => `<b>${esc(a)}</b>`).join(' · ')}</div>`
+    : ''
   $('#td-overview').innerHTML = `
     <div class="lrun-stages">${stagesHtml}</div>
     <div class="lrun-cols">
@@ -538,6 +552,8 @@ function renderTaskOverview(force) {
         </div>
         <div class="lrun-prog">${barsHtml}</div>
         <div style="margin-top:16px">${viz}</div>
+        ${workingHtml}
+        <div class="tplan"><div class="tplan-h">Test plan</div><div class="tplan-row">${tplanChips}</div></div>
         ${t.statusMessage ? `<div class="hint" style="margin-top:12px">${esc(t.statusMessage)}</div>` : ''}
       </div>
       <div class="card lrun-find">

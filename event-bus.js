@@ -979,6 +979,23 @@ function _agentConcurrency(squad) {
   } catch {}
   return 3
 }
+// ── Streaming-triage "squad" sizing (Phase 2.7) ──────────────────────────────
+// The live triager processes findings one at a time by default; a big backlog makes that
+// serial drain the run's tail. Scale it into a small pool — the SAME TRIAGER agent + logic,
+// just more hands — sized by backlog (see triageWorkers() in src/pipeline/streaming-triage.js).
+// caps.triageConcurrency = 1 reproduces the exact serial behavior (backward-compatible kill-switch).
+const TRIAGE_MAX_WORKERS = 3   // default hard cap; override per-squad via caps.triageConcurrency
+const TRIAGE_MIN_WORKERS = 2   // baseline hands (two triagers work by default); override via caps.triageMinWorkers
+const TRIAGE_SCALE_STEP  = 20  // a 3rd hand walks up per 20 queued findings; override via caps.triageScaleStep
+// Read a positive-int squad.json caps.<key> (fail-open to dflt) — mirrors _agentConcurrency.
+function _cap(squad, key, dflt) {
+  try {
+    const cfg = require('./agents/squad-config-loader').loadSquadConfig(squad)
+    const n = cfg && cfg.caps && cfg.caps[key]
+    if (Number.isInteger(n) && n > 0) return n
+  } catch {}
+  return dflt
+}
 // Run worker(item, i) over items with at most `limit` in flight. Results keep input
 // order. No deps. Throttles the specialist waves so the machine isn't bombarded.
 async function runWithConcurrency(items, limit, worker) {
@@ -1050,26 +1067,12 @@ function buildPentestBatches() {
   return batches
 }
 
-// Vuln-class → specialist agent(s). Powers the dispatch "focus" option: run a
-// targeted scan (e.g. only access-control) instead of the full A→Z roster.
-const PENTEST_FOCUS_MAP = {
-  'access-control': ['warden'], 'idor': ['warden'], 'bola': ['warden'],
-  'sqli': ['drill'], 'injection': ['drill', 'ranger'], 'command-injection': ['ranger'],
-  'xss': ['viper'], 'ssrf': ['relay'], 'ssti': ['forge'], 'xxe': ['spectre'],
-  'csrf': ['decoy'], 'lfi': ['vault'], 'path-traversal': ['vault'],
-  'api': ['gateway'], 'jwt': ['gateway'], 'graphql': ['gateway'],
-  'business-logic': ['ledger'], 'auth': ['keyring'], 'session': ['keyring'],
-}
-// Given focus classes, return the de-duped specialist agents to run (intersected
-// with the live roster). Empty/unknown → null (caller runs the full roster).
-function focusedSpecialists(focusClasses) {
-  if (!Array.isArray(focusClasses) || !focusClasses.length) return null
-  const want = new Set()
-  for (const c of focusClasses) for (const a of (PENTEST_FOCUS_MAP[String(c).toLowerCase()] || [])) want.add(a)
-  if (!want.size) return null
-  const filtered = getPentestSpecialists().filter(a => want.has(String(a).toLowerCase()))
-  return filtered.length ? filtered : null
-}
+// Vuln-class → specialist mapping + focus gating live in ONE shared module so the daemon and
+// the portal agree on "which specialists a focused scan runs" (src/pipeline/focus-map.js).
+const { PENTEST_FOCUS_MAP, focusAllows, focusedSpecialists: _focusedSpecialists } = require('./src/pipeline/focus-map')
+// Thin wrapper: feed the pure module fn the live specialist roster. Empty/unknown focus → null
+// (caller runs the full A→Z roster).
+function focusedSpecialists(focusClasses) { return _focusedSpecialists(focusClasses, getPentestSpecialists()) }
 // Re-batch an explicit specialist list into waves of PENTEST_BATCH_SIZE.
 function batchesFromList(list) {
   const b = []
@@ -2945,7 +2948,7 @@ async function runEnvFingerprint({ taskId, targetUrl, squad, projectId, wafStatu
 // ── Stage 1 — The Strategist (attack planning) ────────────────────────────────
 // ATLAS reads recon + the env fingerprint → a ranked, stack-aware attack plan
 // (attack-plan-<taskId>.json) that the specialists attack first. Fail-soft.
-async function runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerprint, endpointFile }) {
+async function runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerprint, endpointFile, focusClasses }) {
   const planner = require('./src/pipeline/attack-planner')
   const outPath = `${agentPaths.INTEL_ROOT}/attack-plan-${taskId}.json`
   try {
@@ -2966,7 +2969,7 @@ async function runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerpri
         if (fs.existsSync(__sg)) __sourceGuidance = JSON.parse(fs.readFileSync(__sg, 'utf8'))
       }
     } catch { /* fail-soft */ }
-    const prompt = planner.buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData, sourceGuidance: __sourceGuidance })
+    const prompt = planner.buildAttackPlanPrompt({ targetUrl, fingerprint, reconDump, endpointData, sourceGuidance: __sourceGuidance, focusClasses })
     // ATLAS = pentest orchestrator → Opus (was modelRouter.resolve, a non-existent method → errored)
     const _atlasRoute = modelRouter.getModelForAgent('atlas', { squad })
     const { text } = await runAgent({
@@ -4524,6 +4527,11 @@ async function dispatchPentestParallel(dispatch) {
   // (2026-06-18) Focused scan: if the operator chose specific vuln classes, run
   // only those specialists instead of the full A→Z roster.
   const _focus = focusedSpecialists(dispatch.meta && dispatch.meta.focusClasses)
+  // Focus gate: on a focused scan, a specialist may run ONLY if it's in the focused set. On a
+  // full scan (_focus === null) everyone is allowed. Applied to the surface-triggered conditional
+  // dispatches below so "test XSS only" never spawns SPECTRE/DECOY/RANGER-CMDi. Recon + ATLAS +
+  // support agents are NOT gated — you can't test a class without first mapping the app.
+  const _focusAllows = (a) => focusAllows(_focus, a)
   const _dynBatches = _focus ? batchesFromList(_focus) : buildPentestBatches()
   if (_focus) {
     log(`🎯 Focused scan: ${_focus.map(a => a.toUpperCase()).join(', ')} (classes: ${(dispatch.meta.focusClasses || []).join(', ')})`)
@@ -5263,11 +5271,17 @@ async function dispatchPentestParallel(dispatch) {
         }
       } catch (e) { log(`⚠️ Failed to flag unreachable: ${e.message}`) }
 
-      // Only run SENTRY (headers) on the base URL, then SCRIBE writes "no surface" report
-      log(`🔄 Early exit: Running SENTRY (headers only) + SCRIBE report`)
-      const sentryPrompt = buildPentestSpecialistPrompt('sentry', taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, undefined, _taskMissedSignals[taskId])
-      const sentryResult = await spawnAgent('sentry', taskId, sentryPrompt, `task-${taskId}-sentry-earlyexit`, modelOverride)
-      trackCosts([sentryResult])
+      // Only run SENTRY (headers) on the base URL, then SCRIBE writes "no surface" report.
+      // On a focused scan that didn't ask for config/transport, skip SENTRY (out of focus) — the
+      // no-surface report is still written below.
+      if (_focusAllows('sentry')) {
+        log(`🔄 Early exit: Running SENTRY (headers only) + SCRIBE report`)
+        const sentryPrompt = buildPentestSpecialistPrompt('sentry', taskTitle, taskId, projectId || '', squad, taskGoal || '', targetUrl, wafStatus, undefined, _taskMissedSignals[taskId])
+        const sentryResult = await spawnAgent('sentry', taskId, sentryPrompt, `task-${taskId}-sentry-earlyexit`, modelOverride)
+        trackCosts([sentryResult])
+      } else {
+        log(`🔄 Early exit: focused scan — skipping SENTRY (out of focus); writing the no-surface report`)
+      }
 
       const scribePrompt = buildscribeReportPrompt(taskTitle, taskId, projectId || '', squad, targetUrl, taskGoal || '', [])
       const scribeResult = await spawnAgent(PENTEST_REPORTER, taskId, scribePrompt, `task-${taskId}-scribe-earlyexit`, modelOverride, { timeoutMs: SCRIBE_TIMEOUT_MS })
@@ -5420,7 +5434,7 @@ async function dispatchPentestParallel(dispatch) {
 
     // ── PHASE 1.9 — The Strategist: ATLAS ranks what to attack first ──
     try {
-      await runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerprint: envFingerprint, endpointFile })
+      await runAttackPlanner({ taskId, targetUrl, squad, projectId, fingerprint: envFingerprint, endpointFile, focusClasses: dispatch.meta && dispatch.meta.focusClasses })
     } catch (planErr) { log(`⚠️ Phase 1.9 wrapper error (non-fatal): ${planErr.message}`) }
 
     // ── PHASE 2: Vulnerability specialists — 2-wave adaptive parallel ──────
@@ -5632,7 +5646,7 @@ async function dispatchPentestParallel(dispatch) {
 
       // SPECTRE (XXE) — dispatch if XML/SOAP/RSS/file-upload endpoints detected
       const hasXmlSurface = /xml|soap|wsdl|rss|atom|svg|docx|xlsx|content-type.*xml|queryxpath/i.test(endpointData + reconActivity)
-      if (hasXmlSurface) {
+      if (hasXmlSurface && _focusAllows('spectre')) {
         log(`🎯 Conditional: XML/SOAP surface detected — dispatching SPECTRE (XXE)`)
         logActivity('NEXUS', `🎯 Conditional dispatch: SPECTRE (XXE surface detected)`, {
           type: 'conditional-dispatch', squad, taskId, projectId: projectId || ''
@@ -5643,7 +5657,7 @@ async function dispatchPentestParallel(dispatch) {
 
       // DECOY (CSRF) — dispatch if forms/state-changing endpoints or any POST endpoints detected
       const hasFormSurface = /form|action=|doTransfer|doLogin|submit|POST|csrf|token|login|register|signup|password|profile|settings|update|delete|create/i.test(endpointData + reconActivity)
-      if (hasFormSurface) {
+      if (hasFormSurface && _focusAllows('decoy')) {
         log(`🎯 Conditional: Form/state-change surface detected — dispatching DECOY (CSRF)`)
         logActivity('NEXUS', `🎯 Conditional dispatch: DECOY (CSRF surface detected)`, {
           type: 'conditional-dispatch', squad, taskId, projectId: projectId || ''
@@ -5654,7 +5668,7 @@ async function dispatchPentestParallel(dispatch) {
 
       // RANGER-CMDi (OS Command Injection) — dispatch if parameters that accept user input detected
       const hasCmdSurface = /cmd|exec|ping|host|ip=|url=|file=|path=|dir=|domain|lookup|resolve|download|fetch|convert|process|run/i.test(endpointData + reconActivity)
-      if (hasCmdSurface) {
+      if (hasCmdSurface && _focusAllows('ranger')) {
         log(`🎯 Conditional: Command-injectable surface detected — dispatching RANGER (CMDi)`)
         logActivity('NEXUS', `🎯 Conditional dispatch: RANGER CMDi (command-injectable surface detected)`, {
           type: 'conditional-dispatch', squad, taskId, projectId: projectId || ''
@@ -8888,7 +8902,7 @@ STEP 2 — if REAL, write the complete finding. Match the gold format: cat the c
 // "AGENT → TRIAGE → verdict" conversation. Fail-soft; returns { stop } (stop drains + returns
 // the confirmed count). Only started when Phase 2.7 is enabled (else the old batch flow runs).
 function startStreamingTriage(taskId, squad, projectId, targetUrl) {
-  const { nextBatch } = require('./src/pipeline/streaming-triage')
+  const { nextBatch, triageWorkers } = require('./src/pipeline/streaming-triage')
   const { parseFindingsJsonl } = require('./src/pipeline/loose-jsonl')
   const liveFile = `${agentPaths.INTEL_ROOT}/live-findings-${taskId}.jsonl`
   const detailFile = `${agentPaths.INTEL_ROOT}/findings-detail-${taskId}.json`
@@ -8913,7 +8927,9 @@ function startStreamingTriage(taskId, squad, projectId, targetUrl) {
       return
     }
     const d = one[id]
-    // merge the writeup into findings-detail (single writer: streamer concurrency = 1)
+    // Merge the writeup into findings-detail. KEEP THIS BLOCK SYNCHRONOUS (no await between the
+    // readFileSync and writeAtomic) — that is what makes the triager squad race-free: single-threaded
+    // Node runs each merge to completion before another worker's merge can start, so no lost update.
     const detail = {}; try { Object.assign(detail, JSON.parse(fs.readFileSync(detailFile, 'utf8'))) } catch {}
     detail[id] = d
     try { writeAtomic(detailFile, JSON.stringify(detail, null, 2)) } catch (e) { log(`⚠️ streaming-triage detail write: ${e.message}`); return }
@@ -8928,7 +8944,12 @@ function startStreamingTriage(taskId, squad, projectId, targetUrl) {
     if (!fs.existsSync(liveFile)) return
     let recs = []; try { recs = parseFindingsJsonl(fs.readFileSync(liveFile, 'utf8')) } catch { return }
     const fresh = nextBatch(recs, seen)
-    for (const f of fresh) await triageOne(f) // one-by-one, in emit order (a stop() drains the current tick)
+    // Triager squad: each finding is already claimed+unique (nextBatch → `seen`), and
+    // runWithConcurrency hands each out via a synchronous idx++ — so N workers never grab the
+    // same finding, and none over-loops. Pool size scales with the backlog; caps.triageConcurrency=1
+    // reproduces the old strictly-serial drain (one-by-one, emit order).
+    const workers = triageWorkers(_cap(squad, 'triageConcurrency', TRIAGE_MAX_WORKERS), _cap(squad, 'triageScaleStep', TRIAGE_SCALE_STEP), fresh.length, _cap(squad, 'triageMinWorkers', TRIAGE_MIN_WORKERS))
+    await runWithConcurrency(fresh, workers, triageOne)
   }
 
   const loop = (async () => {
