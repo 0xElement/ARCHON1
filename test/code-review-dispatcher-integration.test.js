@@ -72,22 +72,23 @@ function stubDeps(spawnCalls) {
     ok('SCRIBE reports last', calls[calls.length - 1].agentName === 'scribe')
   }
 
-  // ── Test 1b: DEFAULT (no maxPhase2) deep-assesses EVERY mapped feature ──
-  // Regression guard for the old `maxPhase2 || 6` cap that silently dropped features past the top 6.
-  // Uses 8 features so the two defaults are distinguishable: all-8 → 8×2=16 p2 calls; old top-6 → 6×2=12.
+  // ── Test 1b: DEFAULTS map + deep-assess EVERY feature (no caps) ──
+  // Guards BOTH silent caps at once with 12 features and NO maxFeatures / maxPhase2:
+  //   • old `maxFeatures || 10` floor  → would map only 10   (now: all 12)
+  //   • old `maxPhase2  || 6`  cap     → would assess top-6  (now: all 12 → 12×2=24 p2 calls, not 12)
   {
     const srcDir = makeSourceDir()
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crout-'))
     const calls = []
-    const eight = ['auth', 'uploads', 'admin', 'search', 'billing', 'profile', 'api', 'webhooks']
+    const twelve = ['auth', 'uploads', 'admin', 'search', 'billing', 'profile', 'api', 'webhooks', 'reports', 'settings', 'notifications', 'exports']
     const res = await cr.runCodeReview(
       { taskId: 'cr-test-1b', squad: 'code-review-squad', projectId: '',
-        meta: { sourceDir: srcDir, features: eight, vulnClasses: ['access-control', 'xss'], outputDir: outDir } }, // NO maxPhase2
+        meta: { sourceDir: srcDir, features: twelve, vulnClasses: ['access-control', 'xss'], outputDir: outDir } }, // NO caps
       stubDeps(calls))
     ok('1b: no error', !res.error, JSON.stringify(res).slice(0, 120))
-    ok('1b: all 8 features mapped', res.featuresMapped === 8, 'got ' + res.featuresMapped)
+    ok('1b: DEFAULT maps ALL 12 features (not the old floor-10)', res.featuresMapped === 12, 'got ' + res.featuresMapped)
     const p2b = calls.filter(c => c.sessionSuffix.includes('-p2-'))
-    ok('1b: DEFAULT covers ALL 8 features × 2 classes = 16 (not the old top-6 → 12)', p2b.length === 16, 'got ' + p2b.length)
+    ok('1b: DEFAULT deep-assesses ALL 12 features × 2 classes = 24 (not the old top-6 → 12)', p2b.length === 24, 'got ' + p2b.length)
   }
 
   // ── Test 2: generic discovery path ──

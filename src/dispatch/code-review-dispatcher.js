@@ -36,7 +36,7 @@ const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see p
 //   deployUrl   (optional)            — enables PROBER runtime validation
 //   testAccounts(optional)            — { attacker, victim } creds for runtime probing
 //   outputDir   (optional)            — default <INTEL>/code-review/<taskId>
-//   maxFeatures (optional)            — cap mapped features (default: scales with codebase size, 10–30)
+//   maxFeatures (optional)            — cap mapped features (default: NO cap — every feature the source has)
 //   maxPhase2   (optional)            — cap features deep-assessed in Phase 2 (default: ALL mapped features)
 //   phasesOnly  (optional)            — subset of PHASES to run (reuse prior artifacts)
 
@@ -111,6 +111,15 @@ const PAT_MODE = typeof __roots.flagMode === 'function' ? __roots.flagMode('PATT
 const PHASES = ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2',
   ...(FH_MODE !== 'off' ? ['freehand'] : []), 'verify', 'report']
 const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
+// ONE comprehensive source-file extension set — the SAME list gates BOTH preflight file-detection AND
+// the scripted inventory grep, so any language a real codebase ships in gets enumerated (not just JS/TS).
+// Real source can be anything; keep this broad. The mapping agents also read the live tree directly, so
+// a truly exotic extension is still reviewed — this just keeps the scripted surface honest across stacks.
+const SOURCE_EXTS = ['js', 'mjs', 'cjs', 'ts', 'jsx', 'tsx', 'vue', 'svelte', 'py', 'pyw', 'rb', 'pl', 'pm',
+  'go', 'rs', 'zig', 'c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'hxx', 'm', 'mm', 'java', 'kt', 'kts', 'scala',
+  'groovy', 'cs', 'fs', 'vb', 'swift', 'dart', 'ex', 'exs', 'erl', 'hrl', 'clj', 'cljs', 'hs', 'ml', 'mli',
+  'php', 'phtml', 'html', 'htm', 'ejs', 'hbs', 'lua', 'r', 'tf', 'hcl', 'sh', 'bash', 'zsh', 'ps1', 'proto',
+  'thrift', 'gql', 'graphql', 'sql']
 
 // The fixed Phase-1 feature-map contract (enforced in the prompt; full template on disk).
 const FEATURE_SECTIONS = [
@@ -157,7 +166,7 @@ function detectStack(sourceDir) {
 // spec writes one inventory file; counts feed the coverage denominator. Fail-soft per spec.
 function buildInventories(sourceDir, invDir, stack, log) {
   fs.mkdirSync(invDir, { recursive: true })
-  const CODE = ['--include=*.rb', '--include=*.py', '--include=*.js', '--include=*.ts', '--include=*.jsx', '--include=*.tsx', '--include=*.go', '--include=*.java', '--include=*.kt', '--include=*.php', '--include=*.cs', '--include=*.rs']
+  const CODE = SOURCE_EXTS.map(e => `--include=*.${e}`) // any-language surface (shared with preflight)
   const specs = [
     ['01_routes_endpoints', '(@(app|router)\\.(get|post|put|delete|patch)|app\\.(get|post|put|delete|route)|router\\.(get|post|put|delete|use)|@(Get|Post|Put|Delete|Patch|RequestMapping|RestController|Path)\\b|http\\.HandleFunc|Route::(get|post|put|delete)|\\bresources?\\b|\\bnamespace\\b|\\bdraw\\b|def [a-z_]+\\(.*request|\\b(field|mutation|resolver)\\b)', CODE],
     ['02_auth_checks', '(authorize|authenticate|permission|access_control|can\\?|allowed\\?|isAuthenticated|@PreAuthorize|@RolesAllowed|require_role|ensure_|before_action|@login_required|IsAuthenticated|hasRole|checkAccess|current_user)', CODE],
@@ -273,7 +282,7 @@ ${commonHeader(taskId, sourceDir, outDir, invDir)}
 Read the App Blueprint at ${outDir}/phase1-maps/app-blueprint.md (architecture/auth/shared-infra/data-flow) and the
 inventories + source tree layout (top-level dirs, route/controller/module groupings), then propose the
 distinct security-relevant FEATURE AREAS to map (e.g. authentication, file-upload, admin, api-keys, search, webhooks…).
-Group by business capability, not by file. Cap at ${cap} features (most security-relevant first).
+Group by business capability, not by file. ${Number.isFinite(cap) ? `Cap at ${cap} features (most security-relevant first).` : `List EVERY distinct security-relevant feature area the source has — do NOT cap or omit any (order most security-relevant first).`}
 
 Write the queue to ${outDir}/phase1-maps/feature-queue.json as:
 {"features":[{"slug":"kebab-slug","name":"Display Name","keywords":"comma,separated,grep,hints"}, ...]}
@@ -425,9 +434,10 @@ async function runCodeReview(dispatch, deps) {
   let vulnClasses = (explicitClasses
     ? (meta.vulnClasses.length === 1 && meta.vulnClasses[0] === 'all' ? Object.keys(CLASS) : meta.vulnClasses)
     : DEFAULT_CLASSES).filter(c => CLASS[c])
-  // Scale discovery breadth to the codebase size (no per-app preset) — small apps get ~10 features,
-  // large monorepos more, capped so cost stays bounded. Operator can pin it via meta.maxFeatures.
-  const maxFeatures = meta.maxFeatures || Math.max(10, Math.min(30, Math.round((p0.fileCount || 0) / 500)))
+  // NO cap by default — a code review maps EVERY security-relevant feature the source has (real source
+  // can be any size / any number of files). An operator may still bound it explicitly via meta.maxFeatures.
+  // (Was floor-10/ceil-30, which silently truncated real features — e.g. a 101-file app mapped exactly 10.)
+  const maxFeatures = meta.maxFeatures || Infinity
   // A code review must deep-assess EVERY mapped feature — never silently skip one. Default is "all
   // mapped features" (no cap); an operator can still bound it explicitly via meta.maxPhase2. (Was `|| 6`,
   // which quietly dropped features past the top 6 — wrong for static/white-box, where coverage is the point.)
@@ -606,15 +616,7 @@ function validateSourceDir(sourceDir) {
     return { ok: false, reason: `sourceDir not accessible: ${String(e.message || e).slice(0, 120)}` }
   }
   if (!stat.isDirectory()) return { ok: false, reason: `sourceDir is not a directory: ${sourceDir}` }
-  const CODE_EXTS = [
-    '.js', '.mjs', '.cjs', '.ts', '.jsx', '.tsx', '.vue', '.svelte',
-    '.py', '.pyw', '.rb', '.pl', '.pm', '.go', '.rs', '.zig',
-    '.c', '.h', '.cpp', '.cc', '.cxx', '.hpp', '.hxx', '.m', '.mm',
-    '.java', '.kt', '.kts', '.scala', '.groovy', '.cs', '.fs', '.vb',
-    '.swift', '.dart', '.ex', '.exs', '.erl', '.hrl', '.clj', '.cljs', '.hs', '.ml', '.mli',
-    '.php', '.phtml', '.html', '.htm', '.ejs', '.hbs', '.lua', '.r', '.tf', '.hcl',
-    '.sh', '.bash', '.zsh', '.ps1', '.proto', '.thrift', '.gql', '.graphql', '.sql',
-  ]
+  const CODE_EXTS = SOURCE_EXTS.map(e => '.' + e) // same any-language set the inventory grep uses
   let fileCount = 0
   function walk(dir, depth) {
     if (depth > 3) return
