@@ -191,7 +191,7 @@ Dispatched as `squad:'code-review'` (or via the pentest form's Static/White-box 
 4. **0c** feature queue: explicit `meta.features` > CURATOR auto-discovery from the surface (stack-agnostic; breadth scales with codebase size).
 5. **1** per-feature mapping — one specialist per feature in **waves of 3**, round-robin over the 6-agent MAPPER_POOL; each writes a 13-section feature map with an Endpoint/Action Ledger.
 6. **1c** CURATOR consolidation → matrices + **ranked** `phase2_review_queue.md` + completion gate.
-7. **2** per-class assessment — `vulnClasses × features.slice(0, maxPhase2=6)` routed to the class specialist (access-control→MARSHAL, xss→CIPHER, etc.).
+7. **2** per-class assessment — `vulnClasses × ALL mapped features` (every feature by default; `meta.maxPhase2` can bound it) routed to the class specialist (access-control→MARSHAL, xss→CIPHER, etc.).
 8. **2v** AUDITOR reverse-check (+ PROBER live validation if `deployUrl`) → `AUDITOR-VERDICTS.md`.
 9. **3** SCRIBE → `FINAL-REPORT-<taskId>.md`.
 10. **bridge** `normalizeCodeReviewFindings` — a *second* AUDITOR LLM pass converts the markdown verdict table → `VALIDATED-FINDINGS-<taskId>.jsonl`.

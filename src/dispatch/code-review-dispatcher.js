@@ -37,7 +37,7 @@ const __roots = require('../../paths') // portable roots (KURU_*_ROOT) — see p
 //   testAccounts(optional)            — { attacker, victim } creds for runtime probing
 //   outputDir   (optional)            — default <INTEL>/code-review/<taskId>
 //   maxFeatures (optional)            — cap mapped features (default: scales with codebase size, 10–30)
-//   maxPhase2   (optional)            — cap features taken to Phase 2 (default 6, by queue rank)
+//   maxPhase2   (optional)            — cap features deep-assessed in Phase 2 (default: ALL mapped features)
 //   phasesOnly  (optional)            — subset of PHASES to run (reuse prior artifacts)
 
 const fs = require('fs')
@@ -428,7 +428,10 @@ async function runCodeReview(dispatch, deps) {
   // Scale discovery breadth to the codebase size (no per-app preset) — small apps get ~10 features,
   // large monorepos more, capped so cost stays bounded. Operator can pin it via meta.maxFeatures.
   const maxFeatures = meta.maxFeatures || Math.max(10, Math.min(30, Math.round((p0.fileCount || 0) / 500)))
-  const maxPhase2 = meta.maxPhase2 || 6
+  // A code review must deep-assess EVERY mapped feature — never silently skip one. Default is "all
+  // mapped features" (no cap); an operator can still bound it explicitly via meta.maxPhase2. (Was `|| 6`,
+  // which quietly dropped features past the top 6 — wrong for static/white-box, where coverage is the point.)
+  const maxPhase2 = meta.maxPhase2 || Infinity
   fs.mkdirSync(`${outDir}/phase1-maps/features`, { recursive: true })
   fs.mkdirSync(`${outDir}/phase1-maps/consolidated`, { recursive: true })
   for (const c of vulnClasses) fs.mkdirSync(`${outDir}/phase2/${c}`, { recursive: true })
