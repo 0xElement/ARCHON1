@@ -8605,7 +8605,26 @@ Write STRICT JSON, ONE object per line, to ${outFile} (overwrite). Each line:
 
 EVERY line MUST include "taskId":"${taskId}". Use validation_status="CONFIRMED" only for RUNTIME_CONFIRMED or SOURCE_CONFIRMED records; use validation_status="NEEDS-LIVE" for NEEDS_LIVE_VALIDATION records. Write ONLY that file, then reply one line: wrote N validated findings.`
     log(`🔁 cr-normalize: AUDITOR → VALIDATED-FINDINGS-${taskId}.jsonl`)
+    // P3: snapshot the streamed T-* records BEFORE the AUDITOR overwrites this file, so we can restore
+    // their IDs on the authoritative records (matched by source location) — no board ID churn / orphaned
+    // operator triage verdicts.
+    const _idp = require('./src/pipeline/id-preserve')
+    let _streamIdMap = null
+    try {
+      if (fs.existsSync(outFile)) {
+        const _pre = fs.readFileSync(outFile, 'utf8').split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+        _streamIdMap = _idp.buildStreamIdMap(_pre)
+      }
+    } catch {}
     await spawnAgent('auditor', taskId, prompt, `task-${taskId}-cr-normalize`, null, { timeoutMs: REPORT_AUDITOR_TIMEOUT_MS })
+    // P3: restore streamed IDs on the authoritative records that match a streamed finding by location.
+    try {
+      if (_streamIdMap && _streamIdMap.size && fs.existsSync(outFile)) {
+        const _recs = fs.readFileSync(outFile, 'utf8').split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+        const { records, changed } = _idp.remapIds(_recs, _streamIdMap)
+        if (changed) { fs.writeFileSync(outFile, records.map(r => JSON.stringify(r)).join('\n') + '\n'); log(`🔁 cr-normalize: preserved ${changed} streamed finding ID(s) — no board churn`) }
+      }
+    } catch {}
     const n = fs.existsSync(outFile) ? fs.readFileSync(outFile, 'utf8').trim().split('\n').filter(Boolean).length : 0
     log(`✅ cr-normalize: ${n} validated finding(s) for ${taskId}`)
     logActivity('AUDITOR', `✅ White-box findings normalized (${n})`, { type: 'cr-normalize', squad: 'code-review', taskId })
