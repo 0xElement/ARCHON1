@@ -43,6 +43,22 @@ test('M4: source record carries required_blackbox_proof + affected_endpoint (sou
   assert.equal(r.url, undefined) // still no url — stays SOURCE_CONFIRMED
 })
 
+test('the vulnerable code block reaches the record (file:line + code) — the board/report proof', () => {
+  // triager quoted the exact lines in its detail; the specialist evidence is the fallback
+  const r = shapeStreamValidated(
+    { file: 'ProfileController.java', line: 43, evidence: 'user.setRole(req.role)' },
+    { title: 'Mass assignment', vulnerable_code: 'user.setRole(req.getRole()); // <- attacker-controlled' },
+    meta
+  )
+  assert.equal(r.file, 'ProfileController.java')
+  assert.equal(r.line, 43)
+  assert.equal(r.code_block, 'user.setRole(req.getRole()); // <- attacker-controlled')
+  assert.equal(r.vulnerable_code, r.code_block) // both fields carried (UI reads code_block, schema reads vulnerable_code)
+  // fallback: no triager quote → the specialist's evidence snippet fills the block (never empty when located)
+  const r2 = shapeStreamValidated({ file: 'a.rb', line: 1, evidence: 'eval(params[:x])' }, { title: 'x' }, meta)
+  assert.equal(r2.code_block, 'eval(params[:x])')
+})
+
 test('M5: every validated record carries an evidence_tier (L0–L4)', () => {
   const r = shapeStreamValidated(src, { source: 'p', sink: 's', required_blackbox_proof: 'x' }, meta)
   assert.equal(r.evidence_tier, 'L3') // file+line + source→sink + required-proof

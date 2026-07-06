@@ -127,7 +127,8 @@ const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
 // Scalable mapping defaults (spec §4). Fast-map features in domain batches of ≤8, ≤6 mappers in parallel.
 const MAX_FEATURES_PER_BATCH = 8
 const MAX_PARALLEL_MAPPERS = 6
-const BATCH_CONCURRENCY = 3 // per-batch pipeline: how many batches map+review at once (modest overlap)
+const BATCH_CONCURRENCY = 3 // Phase 1 mapping: how many domain batches map at once
+const PHASE2_CONCURRENCY = 6 // Phase 2 review: wave width once every feature is mapped (review fans out wider than mapping)
 const MAX_FOLLOWUP_ROUNDS = 3 // reconciliation rounds — bounds the map→followup→map loop (§4)
 // ONE comprehensive source-file extension set — the SAME list gates BOTH preflight file-detection AND
 // the scripted inventory grep, so any language a real codebase ships in gets enumerated (not just JS/TS).
@@ -398,7 +399,8 @@ function toLiveCandidate(c, cls, feature, agent, sourceDir) {
     // the specialist's original relative path for display.
     file: _absFile(c.file, sourceDir), file_rel: c.file || '', line: c.line ?? '', source: c.source || '', sink: c.sink || '',
     endpoint: c.endpoint || '', confidence: c.confidence ?? '', hypothesis: c.hypothesis || '',
-    evidence: c.evidence || '', status, required_blackbox_proof: c.required_blackbox_proof || '',
+    evidence: c.evidence || '', code_block: c.code_block || c.vulnerable_code || c.evidence || '',
+    status, required_blackbox_proof: c.required_blackbox_proof || '',
     confirmation_status: status === 'NEEDS_LIVE_VALIDATION' ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
   }
 }
@@ -450,7 +452,7 @@ Report template + CVSS: ${METH}/templates/phase2_feature_report_template.md , ${
 ## Structured candidates (REQUIRED — this is what streams to the LIVE findings board during the run)
 For EVERY finding, also append ONE JSON object (JSONL, one per line) to: ${candFile}  (mkdir -p first)
 Each object MUST have exactly these fields:
-{"feature":"${feature.slug}","pattern":"<pattern / test-case name>","pattern_id":"<catalog id or ''>","file":"<source path>","line":<number>,"source":"<where untrusted input enters>","sink":"<the dangerous sink>","endpoint":"<affected route/action or ''>","severity":"Critical|High|Medium|Low|Info","confidence":<0-100>,"hypothesis":"<what an attacker does>","evidence":"<the vulnerable code snippet / file:line trace>","status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","required_blackbox_proof":"<what a live test must show, or ''>"}
+{"feature":"${feature.slug}","pattern":"<pattern / test-case name>","pattern_id":"<catalog id or ''>","file":"<source path>","line":<number>,"code_block":"<the EXACT vulnerable source lines, verbatim from file:line — this is the proof shown on the board>","source":"<where untrusted input enters>","sink":"<the dangerous sink>","endpoint":"<affected route/action or ''>","severity":"Critical|High|Medium|Low|Info","confidence":<0-100>,"hypothesis":"<what an attacker does>","evidence":"<the file:line source→sink trace>","status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","required_blackbox_proof":"<what a live test must show, or ''>"}
 Status rule: a source-only finding is SOURCE_CONFIRMED (you read the bug in the code) or NEEDS_LIVE_VALIDATION (needs a live hit to prove) — NEVER RUNTIME_CONFIRMED (you have no live evidence here).
 APPEND each candidate line the MOMENT you confirm it (one JSON object per line) — do NOT batch them to the end. A background watcher surfaces each new line on the live board within ~10s, so streaming as you go is what makes findings appear mid-review.
 
@@ -681,11 +683,11 @@ async function runCodeReview(dispatch, deps) {
   // a review coverage gap → blocked (never silently counted as reviewed). Failed jobs are recorded to
   // phase2-failures.jsonl (audit trail). Shared by the main pipeline + follow-up reconciliation.
   const _phase2FailLog = `${outDir}/phase1-maps/phase2-failures.jsonl`
-  async function assessBatch(considered, onProgress) {
+  async function assessBatch(considered, onProgress, concurrency) {
     const jobs = []
     for (const f of considered) for (const cls of vulnClasses) { jobs.push({ cls, feature: f }); _doneJobs.push({ cls, feature: f }) }
     const ok = {}
-    const res = await runWaves(jobs, WAVE, async ({ cls, feature }) => {
+    const res = await runWaves(jobs, concurrency || WAVE, async ({ cls, feature }) => {
       if (cancelled()) return null
       const agent = CLASS[cls].agent
       const r = await safeSpawn(() => spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null),
@@ -705,71 +707,45 @@ async function runCodeReview(dispatch, deps) {
   if (runPhase('mapping') || runPhase('phase2')) {
     const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
     ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
-    updateProgress(25, `Phase 1+2: ${features.length} features → ${batches.length} batch(es); map → review per batch`)
-    logActivity('CURATOR', `🗺️ Phase 1+2 (per-batch): ${features.length} features → ${batches.length} domain batch(es) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
+    updateProgress(25, `Phase 1: mapping ${features.length} features → ${batches.length} batch(es)`)
+    logActivity('CURATOR', `🗺️ Phase 1 mapping: ${features.length} features → ${batches.length} domain batch(es) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
     const mapExists = (slug) => fs.existsSync(`${outDir}/phase1-maps/features/${slug}.md`)
-    let assessed = 0
-    await runWaves(batches, BATCH_CONCURRENCY, async (batch) => {
+    const ownerOf = {}; for (const b of batches) for (const f of b.features) ownerOf[f.slug] = b.owner
+    // 1a. FAST-MAP every batch first (map only). Nothing else holds a batch's slot, so all features get a
+    // fast map quickly — no batch waits on another batch's deep-map or review. This is the "map all first" barrier.
+    if (runPhase('mapping')) await runWaves(batches, BATCH_CONCURRENCY, async (batch) => {
       if (cancelled()) return null
-      // 1) fast-map the batch (one agent maps ≤8 features)
-      if (runPhase('mapping')) {
-        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
+      for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
+      mappingLedger.save(outDir, ledger)
+      const mr = await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null), `batch-map ${batch.id}`)
+      // If the mapper failed, its features simply have no map file → marked 'blocked' (fail-forward).
+      for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, mapExists(f.slug) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
+      mappingLedger.save(outDir, ledger)
+      trackCosts([mr].filter(Boolean))
+      updateProgress(25 + Math.round(15 * ledger.features_done / Math.max(1, features.length)), `Phase 1: mapping features ${ledger.features_done}/${features.length}`)
+      return null
+    })
+    log(`🗺️ Phase 1 fast-map complete: ${ledger.features_done}/${ledger.features_total} feature(s) mapped`)
+    // 1b. SELECTIVE deep mapping — high-risk features get the full UI→route→authz→service→model→sink chain
+    // map, in a SEPARATE wave so deep-map never blocks fast-mapping (it used to hold a batch slot and stall
+    // the normal-risk batches). Normal features stay fast (selective by design). Opt out with meta.deepMap:false.
+    if (meta.deepMap !== false && runPhase('mapping') && !cancelled()) {
+      const highRisk = batches.filter(b => b.risk === 'high').flatMap(b => b.features).filter(f => mapExists(f.slug))
+      if (highRisk.length) {
+        for (const f of highRisk) ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep' })
         mappingLedger.save(outDir, ledger)
-        const mr = await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null), `batch-map ${batch.id}`)
-        // If the mapper failed, its features simply have no map file → marked 'blocked' below (fail-forward).
-        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, mapExists(f.slug) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
-        mappingLedger.save(outDir, ledger)
-        trackCosts([mr].filter(Boolean))
-        updateProgress(25 + Math.round(20 * ledger.features_done / Math.max(1, features.length)), `Phase 1: fast-mapped ${ledger.features_done}/${features.length} (reviewing as we go)`)
-      }
-      // S5: SELECTIVE deep mapping — a HIGH-RISK batch gets a deeper per-feature map (the full UI→route→
-      // authz→service→model→serializer→job→integration chain) BEFORE assessment, so risky areas are reviewed
-      // with real depth. Normal batches stay fast (selective by design, §10). Deep map overwrites the fast
-      // map, so the assessment below reads the deeper one. Opt out with meta.deepMap:false.
-      if (batch.risk === 'high' && meta.deepMap !== false && runPhase('mapping') && !cancelled()) {
-        for (const f of batch.features) {
-          if (!mapExists(f.slug)) continue
-          ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep' }); mappingLedger.save(outDir, ledger)
-          const dr = await safeSpawn(() => spawnAgent(batch.owner, taskId, featureMapPrompt(batch.owner, f, taskId, sourceDir, outDir, invDir), `task-${taskId}-deep-${f.slug}`, null), `deep-map ${f.slug}`)
+        updateProgress(40, `Phase 1: deep-mapping ${highRisk.length} high-risk feature(s)`)
+        await runWaves(highRisk, MAX_PARALLEL_MAPPERS, async (f) => {
+          if (cancelled()) return null
+          const dr = await safeSpawn(() => spawnAgent(ownerOf[f.slug], taskId, featureMapPrompt(ownerOf[f.slug], f, taskId, sourceDir, outDir, invDir), `task-${taskId}-deep-${f.slug}`, null), `deep-map ${f.slug}`)
           trackCosts([dr].filter(Boolean))
           // Deep succeeded → deep_complete; failed → stays 'deep' (attempted); the fast map still stands.
           if (dr) { ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep_complete' }); mappingLedger.save(outDir, ledger) }
-        }
-        log(`🔬 Deep-mapped ${batch.features.length} high-risk feature(s) in ${batch.id}`)
-      }
-
-      if (cancelled() || !runPhase('phase2')) return null
-      // 2) assess THIS batch's produced features NOW (feature × class), streaming candidates live.
-      // Selection is synchronous so the maxPhase2 cap holds across concurrent batches (default Infinity;
-      // high-risk kept first); blocked (no map) → skipped as a coverage gap, not a silent skip.
-      const considered = []
-      for (const f of batch.features) {
-        if (!mapExists(f.slug)) continue
-        if (!_selectedFeatures.has(f.slug) && _selectedFeatures.size >= maxPhase2) continue
-        _selectedFeatures.add(f.slug); considered.push(f)
-      }
-      await assessBatch(considered, () => { assessed++; updateProgress(45 + Math.round(33 * assessed / Math.max(1, _doneJobs.length)), `Phase 2: assessed ${assessed}/${_doneJobs.length} (feature × class), streaming live`) })
-      return null
-    })
-    log(`🗂️ Pipeline complete: mapped ${ledger.features_done}/${ledger.features_total}, assessed ${assessed} job(s) over ${_assessedFeatures.size} feature(s)`)
-
-    // M3 re-plan (self-tasking) — from the LIVE findings, after the pipeline drains.
-    try {
-      const p2Feats = [..._assessedFeatures].map(slug => (_featureBySlug.get(slug) || { slug }))
-      const extra = sourcePlanner.replanJobs(_doneJobs, readLiveFindings(taskId), p2Feats, Object.keys(CLASS))
-      if (extra.length) {
-        log(`🧠 Re-plan: +${extra.length} follow-up assessment(s) from live findings`)
-        logActivity('CURATOR', `🧠 Re-plan: +${extra.length} follow-up job(s) from findings`, { taskId, squad, projectId: projectId || '' })
-        try { decisionLog.append(taskId, { agent: 'CURATOR', decision: `re-plan: +${extra.length} follow-up assessment(s)`, reason: 'live findings surfaced feature×class pairs not yet assessed', evidence: extra.map(e => `${e.cls}/${e.feature.slug}`).join(', ').slice(0, 300), task_created: extra.map(e => `p2r-${e.cls}-${e.feature.slug}`).join(', ').slice(0, 300), confidence: 75, result: 'queued', next_recommendation: 'assess the follow-up jobs, then re-triage' }, { intelRoot: __roots.INTEL_ROOT }) } catch {}
-        const more = await runWaves(extra, WAVE, async ({ cls, feature }) => {
-          const agent = CLASS[cls].agent
-          const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2r-${cls}-${feature.slug}`, null)
-          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch {} }
-          return r
+          return null
         })
-        trackCosts(more)
+        log(`🔬 Deep-mapped ${highRisk.length} high-risk feature(s)`)
       }
-    } catch (e) { log(`⚠️ re-plan (non-fatal): ${e.message}`) }
+    }
   }
 
   // S6: FOLLOW-UP RECONCILIATION + completion gate — nothing may remain only in followup-features.jsonl
@@ -795,8 +771,7 @@ async function runCodeReview(dispatch, deps) {
         await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batchR${round}-${batch.id}`, null), `reconcile-map ${batch.id}`)
         for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
         mappingLedger.save(outDir, ledger)
-        if (!runPhase('phase2') || cancelled()) return null
-        await assessBatch(batch.features.filter(f => fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`)))
+        // reconcile maps only — the follow-up features join the single Phase 2 review pool below the gate.
         return null
       })
     }
@@ -818,6 +793,44 @@ async function runCodeReview(dispatch, deps) {
     // S7: deterministic completion-gate artifact from the ledger (authoritative — the CURATOR consolidation
     // also produces coverage matrices, but this one can never drift from the ledger's truth).
     try { fs.mkdirSync(`${outDir}/phase1-maps`, { recursive: true }); fs.writeFileSync(`${outDir}/phase1-maps/completion-gate.md`, mappingLedger.renderGateMd(ledger)) } catch {}
+  }
+
+  // ── PHASE 2 — REVIEW (the hard barrier) ──────────────────────────────────────────────────────────────
+  // Mapping is fully complete: every feature is mapped or blocked and the completion gate is written. ONLY
+  // NOW do we review — all mapped features × vulnClasses, in controlled waves — STREAMING each confirmed
+  // candidate to TRIAGER so the board fills live during review. No feature is reviewed while another is still
+  // unmapped; all mapping capacity went to mapping first, then review agents fan out over the completed maps.
+  if (ledger && runPhase('phase2') && !cancelled()) {
+    const mapped = Object.values(ledger.features)
+      .filter(f => f.status === 'done' && fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`))
+      .map(f => _featureBySlug.get(f.slug) || { slug: f.slug, name: f.name || f.slug })
+    const toReview = mapped.slice(0, maxPhase2) // maxPhase2 default Infinity → full coverage
+    for (const f of toReview) _selectedFeatures.add(f.slug)
+    const totalJobs = toReview.length * vulnClasses.length
+    let done = 0
+    log(`🔬 Phase 2: reviewing ${toReview.length} mapped feature(s) × ${vulnClasses.length} class(es) = ${totalJobs} job(s)`)
+    logActivity('CURATOR', `🔬 Phase 2: reviewing ${toReview.length} mapped features (${totalJobs} jobs) — streaming candidates to the board`, { taskId, squad, projectId: projectId || '' })
+    updateProgress(46, `Phase 2: reviewing mapped features 0/${totalJobs}`)
+    await assessBatch(toReview, () => { done++; updateProgress(46 + Math.round(30 * done / Math.max(1, totalJobs)), `Phase 2: reviewing mapped features ${done}/${totalJobs}`) }, PHASE2_CONCURRENCY)
+
+    // M3 re-plan (self-tasking) — from the LIVE findings, after the first full review pass.
+    try {
+      const p2Feats = [..._assessedFeatures].map(slug => (_featureBySlug.get(slug) || { slug }))
+      const extra = sourcePlanner.replanJobs(_doneJobs, readLiveFindings(taskId), p2Feats, Object.keys(CLASS))
+      if (extra.length) {
+        log(`🧠 Re-plan: +${extra.length} follow-up assessment(s) from live findings`)
+        logActivity('CURATOR', `🧠 Re-plan: +${extra.length} follow-up job(s) from findings`, { taskId, squad, projectId: projectId || '' })
+        try { decisionLog.append(taskId, { agent: 'CURATOR', decision: `re-plan: +${extra.length} follow-up assessment(s)`, reason: 'live findings surfaced feature×class pairs not yet assessed', evidence: extra.map(e => `${e.cls}/${e.feature.slug}`).join(', ').slice(0, 300), task_created: extra.map(e => `p2r-${e.cls}-${e.feature.slug}`).join(', ').slice(0, 300), confidence: 75, result: 'queued', next_recommendation: 'assess the follow-up jobs, then re-triage' }, { intelRoot: __roots.INTEL_ROOT }) } catch {}
+        const more = await runWaves(extra, PHASE2_CONCURRENCY, async ({ cls, feature }) => {
+          const agent = CLASS[cls].agent
+          const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2r-${cls}-${feature.slug}`, null)
+          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch {} }
+          return r
+        })
+        trackCosts(more)
+      }
+    } catch (e) { log(`⚠️ re-plan (non-fatal): ${e.message}`) }
+    log(`🔬 Phase 2 complete: reviewed ${_assessedFeatures.size} feature(s) over ${_doneJobs.length} job(s)`)
   }
 
   // The features that were deep-reviewed (feature × class) — what freehand, the report + the return describe.
@@ -964,7 +977,7 @@ function validateSourceDir(sourceDir) {
   const CODE_EXTS = SOURCE_EXTS.map(e => '.' + e) // same any-language set the inventory grep uses
   let fileCount = 0
   function walk(dir, depth) {
-    if (depth > 3) return
+    if (depth > 12) return // deep enough for Maven/Gradle (src/main/java/com/org/…) + monorepo layouts; fileCount>100 bounds the walk
     let entries
     try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
     for (const e of entries) {

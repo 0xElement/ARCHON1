@@ -31,9 +31,15 @@ function shapeStreamValidated(f, d, meta = {}) {
   let rec
   if (isSourceFinding(f)) {
     const needsLive = d.confirmation_status === 'NEEDS_LIVE_VALIDATION'
+    // The proof of a source finding IS the vulnerable code at file:line — carry it (+ the source→sink trace)
+    // so the board and report render a "Vulnerable code" block. Prefer the triager's verbatim quote; fall
+    // back to the specialist's evidence snippet so the block is never empty when the location is known.
+    const codeBlk = d.code_block || d.vulnerable_code || f.code_block || f.vulnerable_code || f.evidence || ''
     rec = {
       ...base,
       file: d.file || f.file || '', line: d.line ?? f.line ?? '',
+      code_block: codeBlk, vulnerable_code: codeBlk,   // code_block → UI/report · vulnerable_code → schema/evidence-tier
+      source: d.source || f.source || '', sink: d.sink || f.sink || '',
       confirmation_status: needsLive ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
       validation_status: needsLive ? 'NEEDS-LIVE' : 'CONFIRMED',
       // M4: carry the live-validation task so white-box source→runtime (buildSourceGuidance) can aim the
