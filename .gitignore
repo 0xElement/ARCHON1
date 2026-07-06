@@ -27,3 +27,6 @@ benchmark/results-*.json
 
 # release artifact (produced by npm run pack:release, uploaded to GitHub Releases)
 archon-release.zip
+
+# operator-local, never commit (per maintainer)
+archon-open-source-message.txt
