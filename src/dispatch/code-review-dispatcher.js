@@ -403,7 +403,8 @@ Report template + CVSS: ${METH}/templates/phase2_feature_report_template.md , ${
 For EVERY finding, also append ONE JSON object (JSONL, one per line) to: ${candFile}  (mkdir -p first)
 Each object MUST have exactly these fields:
 {"feature":"${feature.slug}","pattern":"<pattern / test-case name>","pattern_id":"<catalog id or ''>","file":"<source path>","line":<number>,"source":"<where untrusted input enters>","sink":"<the dangerous sink>","endpoint":"<affected route/action or ''>","severity":"Critical|High|Medium|Low|Info","confidence":<0-100>,"hypothesis":"<what an attacker does>","evidence":"<the vulnerable code snippet / file:line trace>","status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","required_blackbox_proof":"<what a live test must show, or ''>"}
-Status rule: a source-only finding is SOURCE_CONFIRMED (you read the bug in the code) or NEEDS_LIVE_VALIDATION (needs a live hit to prove) — NEVER RUNTIME_CONFIRMED (you have no live evidence here). Emit candidates AS you confirm them, not only at the end.
+Status rule: a source-only finding is SOURCE_CONFIRMED (you read the bug in the code) or NEEDS_LIVE_VALIDATION (needs a live hit to prove) — NEVER RUNTIME_CONFIRMED (you have no live evidence here).
+APPEND each candidate line the MOMENT you confirm it (one JSON object per line) — do NOT batch them to the end. A background watcher surfaces each new line on the live board within ~10s, so streaming as you go is what makes findings appear mid-review.
 
 ## Audit trail (REQUIRED — proves the FULL ${cls} catalog was considered, not just the hits)
 - Pattern coverage: write ${outDir}/phase2/${cls}/${feature.slug}_pattern_review.md — for EACH pattern in the ${cls} catalog, one line: pattern name + result state (matched_candidate / reviewed_no_issue / not_applicable / needs_more_context).
@@ -615,6 +616,33 @@ async function runCodeReview(dispatch, deps) {
     catch (e) { log(`⚠️ streaming-triage start failed (non-fatal): ${e.message}`) }
   }
 
+  // P2: intra-run streaming — a background watcher tails the per-job candidate files WHILE agents are
+  // still writing them (the prompts tell specialists to append candidates as they confirm them), so
+  // findings reach the board MID-job, not only when the job returns (true black-box cadence). The
+  // agent-independent emitCandidate dedup means re-scans + the post-job emit collapse to one record.
+  let _candWatch = null
+  if (typeof emitCandidate === 'function' && (runPhase('phase2') || (FH_MODE !== 'off' && runPhase('freehand')))) {
+    const scan = () => {
+      try {
+        const base = `${outDir}/phase2` // phase2/<cls>/*.candidates.jsonl  (+ phase2/freehand/*)
+        let dirs; try { dirs = fs.readdirSync(base, { withFileTypes: true }) } catch { return }
+        for (const d of dirs) {
+          if (!d.isDirectory()) continue
+          const cls = d.name
+          const agent = (CLASS[cls] && CLASS[cls].agent) || MAPPER_POOL[0] // label only — dedup is agent-independent
+          let files; try { files = fs.readdirSync(`${base}/${cls}`) } catch { continue }
+          for (const fn of files) {
+            if (!fn.endsWith('.candidates.jsonl')) continue
+            const slug = fn.replace(/\.candidates\.jsonl$/, '')
+            try { emitCandidatesFromFile(`${base}/${cls}/${fn}`, cls, { slug, name: slug }, agent, taskId, emitCandidate, () => {}, sourceDir) } catch {}
+          }
+        }
+      } catch {}
+    }
+    _candWatch = setInterval(scan, 10000)
+    if (_candWatch.unref) _candWatch.unref()
+  }
+
   // Phase 2 — vuln assessment (top-N features × each class, routed to specialists)
   const p2Features = features.slice(0, maxPhase2)
   if (maxPhase2 < features.length) log(`ℹ️ Phase 2 capped to top ${maxPhase2}/${features.length} features (raise meta.maxPhase2 for full coverage)`)
@@ -698,6 +726,10 @@ async function runCodeReview(dispatch, deps) {
     })
     trackCosts(results)
   }
+
+  // Stop the mid-run candidate watcher (P2). The post-job emits already captured every file's final
+  // state, so no final scan is needed here.
+  if (_candWatch) { clearInterval(_candWatch); _candWatch = null }
 
   // Drain + stop the live streamer before the authoritative AUDITOR pass overwrites the board.
   if (_streamer) {

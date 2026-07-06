@@ -9386,13 +9386,15 @@ async function dispatchToAgent(dispatch) {
       // by canonicalKey so a re-run / phasesOnly reuse can't double-append. No `url` is ever set here →
       // deriveConfirmationStatus keeps these SOURCE_CONFIRMED, never RUNTIME_CONFIRMED.
       const _crEmitKeys = new Set()
-      const _crCanonicalKey = require('./src/pipeline/suspected-dedup').canonicalKey
       const crResult = await codeReviewDispatcher.runCodeReview(dispatch, {
         spawnAgent, trackCosts: trackCostsLocal, updateProgress: updateProgressLocal,
         log, logActivity, _isTaskCancelled,
         emitCandidate: (tid, rec) => {
           try {
-            const k = _crCanonicalKey(rec); if (_crEmitKeys.has(k)) return false
+            // AGENT-INDEPENDENT dedup key (class|file|line|title) so the mid-run candidate-file watcher
+            // (P2) and the post-job emit collapse to ONE record even though they pass different agent labels.
+            const k = `${rec.cwe || ''}|${rec.file || ''}|${rec.line || ''}|${String(rec.title || '').slice(0, 60)}`
+            if (_crEmitKeys.has(k)) return false
             _crEmitKeys.add(k)
             fs.appendFileSync(`${agentPaths.INTEL_ROOT}/live-findings-${tid}.jsonl`, JSON.stringify(rec) + '\n')
             return true
