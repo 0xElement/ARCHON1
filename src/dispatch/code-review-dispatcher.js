@@ -684,6 +684,21 @@ async function runCodeReview(dispatch, deps) {
         trackCosts([mr])
         updateProgress(25 + Math.round(20 * ledger.features_done / Math.max(1, features.length)), `Phase 1: fast-mapped ${ledger.features_done}/${features.length} (reviewing as we go)`)
       }
+      // S5: SELECTIVE deep mapping — a HIGH-RISK batch gets a deeper per-feature map (the full UI→route→
+      // authz→service→model→serializer→job→integration chain) BEFORE assessment, so risky areas are reviewed
+      // with real depth. Normal batches stay fast (selective by design, §10). Deep map overwrites the fast
+      // map, so the assessment below reads the deeper one. Opt out with meta.deepMap:false.
+      if (batch.risk === 'high' && meta.deepMap !== false && runPhase('mapping') && !cancelled()) {
+        for (const f of batch.features) {
+          if (!mapExists(f.slug)) continue
+          ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep' }); mappingLedger.save(outDir, ledger)
+          const dr = await spawnAgent(batch.owner, taskId, featureMapPrompt(batch.owner, f, taskId, sourceDir, outDir, invDir), `task-${taskId}-deep-${f.slug}`, null)
+          trackCosts([dr])
+          ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep_complete' }); mappingLedger.save(outDir, ledger)
+        }
+        log(`🔬 Deep-mapped ${batch.features.length} high-risk feature(s) in ${batch.id}`)
+      }
+
       if (cancelled() || !runPhase('phase2')) return null
       // 2) assess THIS batch's produced features NOW (feature × class), streaming candidates live
       const jobs = []

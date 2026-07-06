@@ -130,6 +130,31 @@ function stubDeps(spawnCalls, emitted = []) {
       /Map ONLY these 2 features/.test(p) && p.includes('followup-features.jsonl'))
   }
 
+  // ── S5: selective deep mapping — high-risk batch features are deep-mapped; low-risk stay fast ──
+  {
+    const srcDir = makeSourceDir()
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crout-'))
+    const calls = []
+    await cr.runCodeReview(
+      { taskId: 'cr-s5', squad: 'code-review-squad', projectId: '',
+        meta: { sourceDir: srcDir, vulnClasses: ['xss'], outputDir: outDir,
+          features: [
+            { slug: 'login', name: 'Login', domain: 'auth_identity', risk_hint: 'high', keywords: 'auth,session' },
+            { slug: 'blog', name: 'Blog', domain: 'misc', risk_hint: 'low', keywords: 'content,article' },
+          ] } },
+      stubDeps(calls))
+    const deep = calls.filter(c => c.sessionSuffix.includes('-deep-'))
+    ok('S5: high-risk feature IS deep-mapped', deep.some(c => c.sessionSuffix.includes('-deep-login')), deep.map(c => c.sessionSuffix).join(','))
+    ok('S5: low-risk feature is NOT deep-mapped (selective §10)', !deep.some(c => c.sessionSuffix.includes('-deep-blog')))
+    try {
+      const led = JSON.parse(fs.readFileSync(path.join(outDir, 'phase1-maps', 'mapping-ledger.json'), 'utf8'))
+      ok('S5: ledger depth = deep_complete (high-risk) vs fast (low-risk)',
+        led.features.login.depth === 'deep_complete' && led.features.blog.depth === 'fast',
+        `login=${led.features.login && led.features.login.depth} blog=${led.features.blog && led.features.blog.depth}`)
+    } catch (e) { ok('S5: ledger readable', false, e.message) }
+    fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
+  }
+
   // ── Test 1b: DEFAULTS map + deep-assess EVERY feature (no caps) ──
   // Guards BOTH silent caps at once with 12 features and NO maxFeatures / maxPhase2:
   //   • old `maxFeatures || 10` floor  → would map only 10   (now: all 12)
