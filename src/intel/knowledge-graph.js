@@ -39,12 +39,12 @@ function _withLock(file, fn) {
   } finally { if (held) { try { fs.unlinkSync(lock) } catch {} } }
 }
 
-function _kgDir(engagementId) {
-  const d = path.join(agentPaths.INTEL_ROOT, 'kg', String(engagementId))
+function _kgDir(engagementId, intelRoot) {
+  const d = path.join(intelRoot || agentPaths.INTEL_ROOT, 'kg', String(engagementId))
   fs.mkdirSync(d, { recursive: true })
   return d
 }
-function _graphFile(engagementId) { return path.join(_kgDir(engagementId), 'graph.json') }
+function _graphFile(engagementId, intelRoot) { return path.join(_kgDir(engagementId, intelRoot), 'graph.json') }
 
 function _emptyGraph(engagementId) { return { engagementId: String(engagementId), generatedAt: null, nodes: {}, edges: [] } }
 
@@ -165,7 +165,7 @@ function syncEngagement(engagementId, deps = {}) {
     }
 
     graph.generatedAt = deps.now || new Date().toISOString()
-    const file = _graphFile(engagementId)
+    const file = _graphFile(engagementId, intelRoot)
     _withLock(file, () => _writeAtomic(file, graph))
     return graph
   } catch { return _emptyGraph(engagementId) }
