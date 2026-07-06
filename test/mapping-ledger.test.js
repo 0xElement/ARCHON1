@@ -39,15 +39,17 @@ test('addFeatures (reconciliation): adds new, never overwrites, reopens the gate
   assert.ok(!L.isComplete(l), 'a new queued feature reopens completion')
 })
 
-test('S6 reconcileFollowups: new vs duplicate, deduped', () => {
+test('S6 reconcileFollowups: new vs duplicate vs invalid (A3 — no-slug is surfaced, never dropped)', () => {
   const led = L.build('t', [{ id: 'b1', domain: 'auth_identity', owner: 'marshal', features: [{ slug: 'login', name: 'Login' }] }])
-  const { newFeatures, duplicates } = L.reconcileFollowups([
+  const { newFeatures, duplicates, invalid } = L.reconcileFollowups([
     { slug: 'login', name: 'dup of existing' },
     { slug: 'oauth', name: 'OAuth' },
     { slug: 'oauth', name: 'OAuth again' }, // dedup within the list
+    { name: 'no slug here' },               // invalid → surfaced (becomes a blocker downstream)
   ], led)
   assert.equal(newFeatures.length, 1); assert.equal(newFeatures[0].slug, 'oauth')
   assert.equal(duplicates.length, 1); assert.equal(duplicates[0].slug, 'login')
+  assert.equal(invalid.length, 1)
 })
 
 test('S6 pending: non-terminal features feed the completion gate', () => {

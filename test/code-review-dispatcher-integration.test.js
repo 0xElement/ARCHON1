@@ -180,8 +180,10 @@ function stubDeps(spawnCalls, emitted = []) {
       },
       trackCosts: () => {}, updateProgress: () => {}, log: () => {}, logActivity: () => {},
     }
-    await cr.runCodeReview({ taskId: 'cr-s6', squad: 'code-review-squad', projectId: '',
+    const res = await cr.runCodeReview({ taskId: 'cr-s6', squad: 'code-review-squad', projectId: '',
       meta: { sourceDir: srcDir, vulnClasses: ['xss'], outputDir: outDir, features: [{ slug: 'login', name: 'Login', domain: 'auth_identity', risk_hint: 'high', keywords: 'auth' }] } }, deps)
+    ok('A1: featuresMapped is ledger-derived — counts the follow-up feature (2, not the original 1)', res.featuresMapped === 2, 'got ' + res.featuresMapped)
+    ok('A2: deterministic gate written to consolidated/ (the path SCRIBE reads)', fs.existsSync(path.join(outDir, 'phase1-maps', 'consolidated', 'phase1_completion_gate.md')))
     ok('S6: the followup was mapped + assessed in a reconcile round',
       calls.some(c => c.sessionSuffix.includes('batchR1')) && calls.some(c => c.sessionSuffix.includes('p2-xss-oauth-callback')),
       calls.map(c => c.sessionSuffix).filter(s => /batchR|oauth/.test(s)).join(','))
@@ -193,6 +195,40 @@ function stubDeps(spawnCalls, emitted = []) {
       ok('S7: deterministic completion-gate.md written from the ledger',
         fs.existsSync(path.join(outDir, 'phase1-maps', 'completion-gate.md')))
     } catch (e) { ok('S6: ledger readable', false, e.message) }
+    fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
+  }
+
+  // ── A4: fail-forward — one mapper crashes; the run continues, only its feature is blocked ──
+  {
+    const srcDir = makeSourceDir()
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crout-'))
+    const deps = {
+      spawnAgent: async (agentName, taskId, prompt, sessionSuffix) => {
+        if (sessionSuffix && sessionSuffix.includes('-batch')) {
+          const dirM = prompt.match(/(\S+)\/phase1-maps\/features\//)
+          const slugs = [...prompt.matchAll(/slug:\s*([a-z0-9_-]+)/gi)].map(m => m[1])
+          if (slugs.includes('admin')) throw new Error('mapper crashed on the admin batch') // one batch fails hard
+          if (dirM) for (const slug of slugs) { try { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${slug}.md`, `# ${slug}`) } catch {} }
+        }
+        return { code: 0, agentName, cost: { totalCost: 0, tokens: { total: 0 } }, output: '{}' }
+      },
+      trackCosts: () => {}, updateProgress: () => {}, log: () => {}, logActivity: () => {},
+    }
+    let threw = false, res = null
+    try {
+      res = await cr.runCodeReview({ taskId: 'cr-a4', squad: 'code-review-squad', projectId: '',
+        meta: { sourceDir: srcDir, vulnClasses: ['xss'], outputDir: outDir, features: [
+          { slug: 'login', name: 'Login', domain: 'auth_identity', risk_hint: 'high', keywords: 'auth' },
+          { slug: 'admin', name: 'Admin', domain: 'admin', risk_hint: 'high', keywords: 'admin' },
+        ] } }, deps)
+    } catch { threw = true }
+    ok('A4: a mapper failure does NOT abort the run', !threw && !!res && !res.error)
+    try {
+      const led = JSON.parse(fs.readFileSync(path.join(outDir, 'phase1-maps', 'mapping-ledger.json'), 'utf8'))
+      ok('A4: failed feature → blocked, healthy feature → done (isolated fallout)',
+        led.features.admin.status === 'blocked' && led.features.login.status === 'done',
+        `admin=${led.features.admin && led.features.admin.status} login=${led.features.login && led.features.login.status}`)
+    } catch (e) { ok('A4: ledger readable', false, e.message) }
     fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
   }
 

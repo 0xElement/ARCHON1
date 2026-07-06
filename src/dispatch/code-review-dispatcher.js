@@ -158,7 +158,8 @@ async function runWaves(items, size, fn) {
   const out = []
   for (let i = 0; i < items.length; i += size) {
     const batch = items.slice(i, i + size)
-    out.push(...await Promise.all(batch.map((it, j) => fn(it, i + j))))
+    // A4 fail-forward: one item's failure resolves to null — it can never reject the wave / abort the run.
+    out.push(...await Promise.all(batch.map(async (it, j) => { try { return await fn(it, i + j) } catch { return null } })))
   }
   return out
 }
@@ -543,6 +544,12 @@ async function runCodeReview(dispatch, deps) {
   // (running agents are already killed by spawnAgent's shared watchdog). Fail-soft.
   const cancelled = () => { try { return typeof _isTaskCancelled === 'function' && _isTaskCancelled(taskId) } catch { return false } }
   const bail = (where) => { log(`🛑 code-review cancelled — halting before ${where}`); return { cancelled: true } }
+  // A4 fail-forward: run one agent, never let its failure reject the wave / abort the whole run. Returns
+  // the result or null; onFail(err) records the fallout (e.g. mark only THIS feature/job 'blocked').
+  const safeSpawn = async (fn, label, onFail) => {
+    try { return await fn() }
+    catch (e) { log(`⚠️ ${label} failed (fail-forward, run continues): ${(e && e.message) || e}`); try { if (onFail) onFail(e) } catch {} return null }
+  }
 
   const runPhase = (p) => !Array.isArray(meta.phasesOnly) || meta.phasesOnly.length === 0 || meta.phasesOnly.includes(p)
   const outDir = meta.outputDir || `${__roots.INTEL_ROOT}/code-review/${taskId}`
@@ -679,10 +686,11 @@ async function runCodeReview(dispatch, deps) {
       if (runPhase('mapping')) {
         for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
         mappingLedger.save(outDir, ledger)
-        const mr = await spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null)
+        const mr = await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null), `batch-map ${batch.id}`)
+        // If the mapper failed, its features simply have no map file → marked 'blocked' below (fail-forward).
         for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, mapExists(f.slug) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
         mappingLedger.save(outDir, ledger)
-        trackCosts([mr])
+        trackCosts([mr].filter(Boolean))
         updateProgress(25 + Math.round(20 * ledger.features_done / Math.max(1, features.length)), `Phase 1: fast-mapped ${ledger.features_done}/${features.length} (reviewing as we go)`)
       }
       // S5: SELECTIVE deep mapping — a HIGH-RISK batch gets a deeper per-feature map (the full UI→route→
@@ -693,9 +701,10 @@ async function runCodeReview(dispatch, deps) {
         for (const f of batch.features) {
           if (!mapExists(f.slug)) continue
           ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep' }); mappingLedger.save(outDir, ledger)
-          const dr = await spawnAgent(batch.owner, taskId, featureMapPrompt(batch.owner, f, taskId, sourceDir, outDir, invDir), `task-${taskId}-deep-${f.slug}`, null)
-          trackCosts([dr])
-          ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep_complete' }); mappingLedger.save(outDir, ledger)
+          const dr = await safeSpawn(() => spawnAgent(batch.owner, taskId, featureMapPrompt(batch.owner, f, taskId, sourceDir, outDir, invDir), `task-${taskId}-deep-${f.slug}`, null), `deep-map ${f.slug}`)
+          trackCosts([dr].filter(Boolean))
+          // Deep succeeded → deep_complete; failed → stays 'deep' (attempted); the fast map still stands.
+          if (dr) { ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep_complete' }); mappingLedger.save(outDir, ledger) }
         }
         log(`🔬 Deep-mapped ${batch.features.length} high-risk feature(s) in ${batch.id}`)
       }
@@ -761,7 +770,7 @@ async function runCodeReview(dispatch, deps) {
         if (cancelled()) return null
         for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
         mappingLedger.save(outDir, ledger)
-        await spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batchR${round}-${batch.id}`, null)
+        await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batchR${round}-${batch.id}`, null), `reconcile-map ${batch.id}`)
         for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
         mappingLedger.save(outDir, ledger)
         if (!runPhase('phase2') || cancelled()) return null
@@ -775,6 +784,15 @@ async function runCodeReview(dispatch, deps) {
         })
         return null
       })
+    }
+    // A3: nothing may remain ONLY in followup-features.jsonl (§9). After the rounds, any followup slug not
+    // in the ledger (more followups than the round budget) → a 'blocked' feature; invalid (no-slug) records
+    // → a synthetic 'blocked' entry with a reason. Reported as coverage gaps, never silently dropped.
+    {
+      const { newFeatures: unresolved, invalid } = mappingLedger.reconcileFollowups(readJsonl(`${outDir}/phase1-maps/followup-features.jsonl`), ledger)
+      for (const f of unresolved) { ledger = mappingLedger.addFeatures(ledger, featureBatching.annotate([f])); ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked', note: `unresolved after ${MAX_FOLLOWUP_ROUNDS} follow-up round(s)` }) }
+      invalid.forEach((raw, i) => { const slug = `unresolved-followup-${i + 1}`; if (!ledger.features[slug]) { ledger = mappingLedger.addFeatures(ledger, [{ slug, name: (raw && raw.name) || slug, domain: 'misc', risk_hint: 'medium' }]); ledger = mappingLedger.setFeature(ledger, slug, { status: 'blocked', note: 'invalid follow-up record (missing slug)' }) } })
+      if (unresolved.length || invalid.length) { mappingLedger.save(outDir, ledger); log(`🔁 Reconcile close-out: ${unresolved.length} unresolved + ${invalid.length} invalid follow-up(s) → blocked (reported, not dropped)`) }
     }
     // Completion gate (§13): any non-terminal feature is a coverage gap → 'blocked' (never a silent skip).
     const stuck = mappingLedger.pending(ledger)
@@ -795,8 +813,13 @@ async function runCodeReview(dispatch, deps) {
   if (cancelled()) return bail('Phase 1c consolidation')
   if (runPhase('consolidate')) {
     updateProgress(78, 'Phase 1c: CURATOR consolidation')
-    const cRes = await spawnAgent('curator', taskId, consolidationPrompt(taskId, outDir, features), `task-${taskId}-consolidate`, null)
-    trackCosts([cRes])
+    const cRes = await safeSpawn(() => spawnAgent('curator', taskId, consolidationPrompt(taskId, outDir, features), `task-${taskId}-consolidate`, null), 'consolidation')
+    trackCosts([cRes].filter(Boolean))
+  }
+  // A2: write the DETERMINISTIC completion gate to the path SCRIBE reads (consolidated/), AFTER consolidation,
+  // so the final report can never drift from the ledger's truth (overwrites the CURATOR narrative version).
+  if (ledger) {
+    try { fs.mkdirSync(`${outDir}/phase1-maps/consolidated`, { recursive: true }); fs.writeFileSync(`${outDir}/phase1-maps/consolidated/phase1_completion_gate.md`, mappingLedger.renderGateMd(ledger)) } catch {}
   }
 
   // Phase 3 — freehand senior-pentester review (Autonomous OS Block D, flag-gated).
@@ -854,14 +877,14 @@ async function runCodeReview(dispatch, deps) {
   if (runPhase('verify')) {
     if (deployUrl) {
       updateProgress(82, 'Phase 2v: PROBER runtime validation')
-      const uRes = await spawnAgent('prober', taskId,
+      const uRes = await safeSpawn(() => spawnAgent('prober', taskId,
         `You are PROBER, runtime validator. Probe the deployed instance at ${deployUrl} (testAccounts: ${JSON.stringify(meta.testAccounts || null)}) to confirm/refute the Phase-2 candidates under ${outDir}/phase2/. Write runtime verdicts to ${outDir}/phase2/PROBER-RUNTIME.md.`,
-        `task-${taskId}-prober`, null)
-      trackCosts([uRes])
+        `task-${taskId}-prober`, null), 'PROBER runtime validation')
+      trackCosts([uRes].filter(Boolean))
     }
     updateProgress(86, 'Phase 2v: AUDITOR reverse-check')
-    const kRes = await spawnAgent('auditor', taskId, auditorPrompt(taskId, outDir, p2Features, vulnClasses, deployUrl), `task-${taskId}-auditor`, null)
-    trackCosts([kRes])
+    const kRes = await safeSpawn(() => spawnAgent('auditor', taskId, auditorPrompt(taskId, outDir, p2Features, vulnClasses, deployUrl), `task-${taskId}-auditor`, null), 'AUDITOR reverse-check')
+    trackCosts([kRes].filter(Boolean))
   }
 
   // Live-board parity with black-box: AUDITOR verdicts now exist, so surface findings on the board
@@ -872,19 +895,25 @@ async function runCodeReview(dispatch, deps) {
     try { await onFindingsReady(taskId, outDir) } catch (e) { log(`⚠️ onFindingsReady (non-fatal): ${e.message}`) }
   }
 
-  // Phase 3 — SCRIBE report
+  // Phase 3 — SCRIBE report. A1: coverage is derived from the LEDGER (the single source of truth), so
+  // follow-up-created + blocked features are counted correctly — not from the original `features` array.
+  const coverage = ledger
+    ? { mapped: ledger.features_total, deeplyReviewed: p2Features.length, blocked: mappingLedger.blockers(ledger).length, capped: Math.max(0, ledger.features_total - p2Features.length) }
+    : { mapped: features.length, deeplyReviewed: p2Features.length, capped: Math.max(0, features.length - p2Features.length) }
   if (cancelled()) return bail('Phase 3 report')
   if (runPhase('report')) {
     updateProgress(94, 'Phase 3: SCRIBE final report')
-    const vRes = await spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl, { mapped: features.length, deeplyReviewed: p2Features.length, capped: Math.max(0, features.length - p2Features.length) }), `task-${taskId}-scribe`, null, { timeoutMs: 30 * 60 * 1000 })
-    trackCosts([vRes])
+    const vRes = await safeSpawn(() => spawnAgent('scribe', taskId, scribePrompt(taskId, projectId, squad, sourceDir, outDir, p2Features, vulnClasses, deployUrl, coverage), `task-${taskId}-scribe`, null, { timeoutMs: 30 * 60 * 1000 }), 'SCRIBE report')
+    trackCosts([vRes].filter(Boolean))
   }
 
   updateProgress(100, 'Complete')
   return {
     stack, sourceDir, fileCount: p0.fileCount,
     features: features.map(f => f.slug),
-    featuresMapped: features.length,
+    featuresMapped: ledger ? ledger.features_total : features.length,
+    featuresAccountedFor: ledger ? ledger.features_done : features.length,
+    blockers: ledger ? mappingLedger.blockers(ledger).length : 0,
     phase2Features: p2Features.map(f => f.slug),
     vulnClasses,
     outputDir: outDir,

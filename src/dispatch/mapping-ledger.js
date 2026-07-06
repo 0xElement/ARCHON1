@@ -70,13 +70,14 @@ function pending(ledger) { return Object.values((ledger && ledger.features) || {
 function reconcileFollowups(followups, ledger) {
   const existing = new Set(Object.keys((ledger && ledger.features) || {}))
   const seen = new Set()
-  const newFeatures = [], duplicates = []
+  const newFeatures = [], duplicates = [], invalid = []
   for (const f of followups || []) {
-    if (!f || !f.slug || seen.has(f.slug)) continue
+    if (!f || !f.slug) { invalid.push(f || {}); continue } // no slug → NOT silently dropped (§9)
+    if (seen.has(f.slug)) continue
     seen.add(f.slug)
     ;(existing.has(f.slug) ? duplicates : newFeatures).push(f)
   }
-  return { newFeatures, duplicates }
+  return { newFeatures, duplicates, invalid }
 }
 
 // S7: deterministic completion-gate artifact from the ledger (the source of truth) — counts, coverage
