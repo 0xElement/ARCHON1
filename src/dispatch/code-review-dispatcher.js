@@ -295,8 +295,14 @@ inventories + source tree layout (top-level dirs, route/controller/module groupi
 distinct security-relevant FEATURE AREAS to map (e.g. authentication, file-upload, admin, api-keys, search, webhooks…).
 Group by business capability, not by file. ${Number.isFinite(cap) ? `Cap at ${cap} features (most security-relevant first).` : `List EVERY distinct security-relevant feature area the source has — do NOT cap or omit any (order most security-relevant first).`}
 
+Tag each feature with a DOMAIN (one of: auth_identity, admin, user_profile, payments_billing, orders_checkout,
+search_browse, files_uploads, notifications_webhooks, background_jobs, integrations_api, reporting_analytics,
+config_infra, misc) and a risk_hint (high | medium | low) — high for auth/admin/payments/checkout/uploads/
+external-integration/raw-query/tenant-boundary/sensitive-data surfaces. These drive domain-batched mapping and
+risk-first Phase 2 (the orchestrator infers them if you omit them, but your judgment is better).
+
 Write the queue to ${outDir}/phase1-maps/feature-queue.json as:
-{"features":[{"slug":"kebab-slug","name":"Display Name","keywords":"comma,separated,grep,hints"}, ...]}
+{"features":[{"slug":"kebab-slug","name":"Display Name","domain":"auth_identity","risk_hint":"high","keywords":"comma,separated,grep,hints"}, ...]}
 
 Then reply with the JSON array only (no prose) so the orchestrator can parse it.`
 }
