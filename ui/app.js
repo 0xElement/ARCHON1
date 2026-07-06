@@ -974,7 +974,7 @@ function applyPtMode(mode) {
   const stat = mode === 'static', wb = mode === 'whitebox', bb = mode === 'blackbox'
   $('#ptSourceGroup').style.display = (stat || wb) ? 'block' : 'none'   // source needed for static + white-box
   $('#ptBlackGroup').style.display = (bb || wb) ? 'block' : 'none'      // live scope for black-box + white-box
-  $('#ptStrategyField').style.display = (bb || wb) ? 'block' : 'none'
+  // Vulnerability-focus picker is disabled — never re-show #ptStrategyField (stays hidden; every scan is full A→Z).
   $('#ptUrlReq').style.display = stat ? 'none' : 'inline'              // URL optional only in Static Analysis
   $('#ptUrlLabel').firstChild.nodeValue = stat ? 'Deployed URL ' : 'Web application URL '
   $('#ptUrlHint').textContent = stat
