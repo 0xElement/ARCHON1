@@ -907,6 +907,16 @@ async function runCodeReview(dispatch, deps) {
     trackCosts([vRes].filter(Boolean))
   }
 
+  // C2: run-completion invariant — no loose ends: every validated finding carries a valid confirmation
+  // status + real evidence, and every ledger feature is terminal. Log violations (a clean run has none).
+  try {
+    const _vf = `${__roots.INTEL_ROOT}/VALIDATED-FINDINGS-${taskId}.jsonl`
+    const _validated = (() => { try { return fs.readFileSync(_vf, 'utf8').split('\n').map(l => { try { return JSON.parse(l.trim()) } catch { return null } }).filter(Boolean) } catch { return [] } })()
+    const _inv = require('../pipeline/completion-invariant').runCompletionInvariant({ findings: _validated, ledger, TERMINAL: mappingLedger.TERMINAL })
+    if (_inv.ok) log(`✅ Completion invariant: clean — all findings validated + tiered, all features terminal`)
+    else log(`⚠️ Completion invariant: ${_inv.violations.length} issue(s) — ${_inv.violations.slice(0, 5).map(v => `${v.id}:${v.kind}`).join(', ')}`)
+  } catch (e) { log(`⚠️ completion invariant (non-fatal): ${e.message}`) }
+
   updateProgress(100, 'Complete')
   return {
     stack, sourceDir, fileCount: p0.fileCount,
