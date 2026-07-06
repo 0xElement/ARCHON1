@@ -6270,8 +6270,16 @@ Be brief and specific. This is an adversarial check.`
           __crTaskId = __crIt && __crIt.taskId
         } catch {}
         if (__crTaskId) {
-          const __rc = require('./src/dispatch/whitebox-correlation').buildRootCauseRequests(taskId, __crTaskId, { intelRoot: agentPaths.INTEL_ROOT })
+          const __wbc = require('./src/dispatch/whitebox-correlation')
+          const __rc = __wbc.buildRootCauseRequests(taskId, __crTaskId, { intelRoot: agentPaths.INTEL_ROOT })
           log(`🔗 Phase 3.088: live→source — ${__rc.matched.length} matched to source, ${__rc.unmatched.length} root-cause request(s)`)
+          // B2: the final source↔runtime correlation artifact (matched + unmatched, each source finding's
+          // final status). B1: enforces source-only never → RUNTIME_CONFIRMED without live proof; a
+          // NEEDS_LIVE finding with no live match ends BLOCKED_WITH_REASON — never dangling.
+          try {
+            const __cr = __wbc.buildCorrelationReport(taskId, __crTaskId, { intelRoot: agentPaths.INTEL_ROOT })
+            log(`🔗 Phase 3.088: correlation report — ${__cr.matched} matched, ${__cr.unmatched} unmatched (correlation-report-${taskId}.json)`)
+          } catch (cErr) { log(`⚠️ correlation report (non-fatal): ${cErr.message}`) }
         }
       }
     } catch (rcErr) { log(`⚠️ Phase 3.088 (non-fatal): ${rcErr.message}`) }

@@ -103,6 +103,50 @@ function buildRootCauseRequests(pentestTaskId, crTaskId, deps = {}) {
   return { matched, unmatched }
 }
 
+// B1: the terminal status for a source finding after live validation. A source-only finding NEVER
+// becomes RUNTIME_CONFIRMED without a matched live finding that actually has runtime proof; a
+// NEEDS_LIVE finding with no live match ends BLOCKED_WITH_REASON — never left dangling (spec §W).
+function finalizeSourceStatus(sourceFinding, matchedLive) {
+  const src = String((sourceFinding && (sourceFinding.confirmation_status || sourceFinding.validation_status)) || '').toUpperCase()
+  const needsLive = src === 'NEEDS_LIVE_VALIDATION' || src === 'NEEDS-LIVE'
+  if (matchedLive) {
+    const lv = String(matchedLive.confirmation_status || matchedLive.validation_status || '').toUpperCase()
+    const hasRuntime = lv === 'RUNTIME_CONFIRMED' || (lv === 'CONFIRMED' && !!(matchedLive.url || matchedLive.reproduction_response))
+    if (hasRuntime) return { status: 'RUNTIME_CONFIRMED', reason: '' }
+    if (lv === 'DISPROVEN' || lv === 'KILLED') return { status: 'DISPROVEN', reason: 'live validation refuted the source hypothesis' }
+  }
+  if (needsLive) return { status: 'BLOCKED_WITH_REASON', reason: 'no live validation result — could not confirm or refute against the running target' }
+  return { status: 'SOURCE_CONFIRMED', reason: '' } // substantiated in code, no live proof → stays SOURCE_CONFIRMED
+}
+
+// B2: the final correlation artifact — one row per source finding: source id ↔ runtime task ↔ endpoint ↔
+// evidence ↔ final status (matched + unmatched), so the report shows exactly what was + wasn't validated
+// live. Writes correlation-report-<pentestTaskId>.json. Pure/deterministic given the on-disk findings.
+function buildCorrelationReport(pentestTaskId, crTaskId, deps = {}) {
+  const intelRoot = deps.intelRoot || agentPaths.INTEL_ROOT
+  const live = _readJsonl(path.join(intelRoot, `VALIDATED-FINDINGS-${pentestTaskId}.jsonl`))
+  const source = _readJsonl(path.join(intelRoot, `VALIDATED-FINDINGS-${crTaskId}.jsonl`))
+  const liveIdx = live.map(f => ({ f, cls: xview.deriveVulnClass(f.title), locus: xview.findingLocus(f) }))
+  const rows = source.map(s => {
+    const cls = xview.deriveVulnClass(s.title)
+    const locus = xview.findingLocus(s)
+    const m = (liveIdx.find(l => l.cls === cls && l.locus && l.locus === locus) || liveIdx.find(l => l.cls === cls) || {}).f
+    const fin = finalizeSourceStatus(s, m)
+    return {
+      source_id: s.id || '', vuln_class: cls, file: s.file || '',
+      runtime_task_id: m ? String(pentestTaskId) : '', endpoint_tested: (m && m.url) || s.affected_endpoint || '',
+      evidence_file: m ? `VALIDATED-FINDINGS-${pentestTaskId}.jsonl` : '',
+      final_status: fin.status, reason: fin.reason,
+    }
+  })
+  const report = {
+    pentestTaskId: String(pentestTaskId), crTaskId: String(crTaskId), generatedAt: deps.now || new Date().toISOString(),
+    matched: rows.filter(r => r.runtime_task_id).length, unmatched: rows.filter(r => !r.runtime_task_id).length, rows,
+  }
+  try { _writeAtomic(path.join(intelRoot, `correlation-report-${pentestTaskId}.json`), report) } catch { /* fail-soft */ }
+  return report
+}
+
 // Shadow-mode: write the source-guided plan for offline review; drives nothing.
 function shadowRecommend(engagementId, bundle) {
   try { shadowSink.snapshot(engagementId, `whitebox-plan-${engagementId}.json`, bundle) } catch {}
@@ -216,4 +260,4 @@ function neutralizeDeferral(engagementId, blackboxStatus, deps = {}) {
   } catch { return { neutralized: false } }
 }
 
-module.exports = { buildSourceGuidance, buildRootCauseRequests, shadowRecommend, maybeLaunchSourceGuidedPentest, sweepOrphanedDeferrals, neutralizeDeferral }
+module.exports = { buildSourceGuidance, buildRootCauseRequests, finalizeSourceStatus, buildCorrelationReport, shadowRecommend, maybeLaunchSourceGuidedPentest, sweepOrphanedDeferrals, neutralizeDeferral }

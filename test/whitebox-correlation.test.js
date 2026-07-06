@@ -63,6 +63,33 @@ test('LIVE→SOURCE: buildRootCauseRequests matches by (vuln_class, locus) and n
   assert.equal(fs.readFileSync(path.join(TMP, 'VALIDATED-FINDINGS-pt2.jsonl'), 'utf8'), beforeLive, 'must NEVER write pentest findings')
 })
 
+test('B1 finalizeSourceStatus: enforces terminal states, no false RUNTIME_CONFIRMED', () => {
+  const nl = { confirmation_status: 'NEEDS_LIVE_VALIDATION' }
+  assert.equal(wb.finalizeSourceStatus(nl, { confirmation_status: 'RUNTIME_CONFIRMED', url: 'https://x' }).status, 'RUNTIME_CONFIRMED')
+  assert.equal(wb.finalizeSourceStatus(nl, { validation_status: 'DISPROVEN' }).status, 'DISPROVEN')
+  assert.equal(wb.finalizeSourceStatus(nl, null).status, 'BLOCKED_WITH_REASON') // needs-live, no live result
+  // a matched live CONFIRMED with NO runtime proof (no url/response) must NOT promote to RUNTIME_CONFIRMED
+  assert.notEqual(wb.finalizeSourceStatus(nl, { validation_status: 'CONFIRMED' }).status, 'RUNTIME_CONFIRMED')
+  // a source-confirmed finding with no live match stays SOURCE_CONFIRMED (not blocked)
+  assert.equal(wb.finalizeSourceStatus({ confirmation_status: 'SOURCE_CONFIRMED' }, null).status, 'SOURCE_CONFIRMED')
+})
+
+test('B2 buildCorrelationReport: matched → RUNTIME_CONFIRMED; unmatched NEEDS_LIVE → BLOCKED_WITH_REASON', () => {
+  seedFindings('pt-b2', [{ id: 'BB-1', title: 'IDOR in /orders', validation_status: 'CONFIRMED', confirmation_status: 'RUNTIME_CONFIRMED', url: 'https://x.test/orders/1' }])
+  seedFindings('cr-b2', [
+    { id: 'CR-1', title: 'IDOR in /orders', confirmation_status: 'NEEDS_LIVE_VALIDATION', file: 'app/orders.rb' },
+    { id: 'CR-2', title: 'XSS in /profile', confirmation_status: 'NEEDS_LIVE_VALIDATION', file: 'app/profile.erb' },
+  ])
+  const rep = wb.buildCorrelationReport('pt-b2', 'cr-b2', { intelRoot: TMP, now: 'fixed' })
+  assert.equal(rep.rows.length, 2)
+  const r1 = rep.rows.find(r => r.source_id === 'CR-1')
+  assert.equal(r1.final_status, 'RUNTIME_CONFIRMED'); assert.equal(r1.runtime_task_id, 'pt-b2')
+  const r2 = rep.rows.find(r => r.source_id === 'CR-2')
+  assert.equal(r2.final_status, 'BLOCKED_WITH_REASON'); assert.equal(r2.runtime_task_id, '')
+  assert.equal(rep.matched, 1); assert.equal(rep.unmatched, 1)
+  assert.ok(fs.existsSync(path.join(TMP, 'correlation-report-pt-b2.json')), 'artifact written')
+})
+
 test('launch is driven by the persisted signal (fires even if no flag is read)', () => {
   const engId = 'eng-1'
   const deferred = { action: 'dispatch', taskId: 'pt3', squad: 'pentest-squad', meta: { engagementId: engId } }
