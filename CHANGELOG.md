@@ -8,6 +8,14 @@ All notable changes to ARCHON are documented here. The format follows
 
 _Post-1.0 work in progress — see [BACKLOG.md](./BACKLOG.md) and [ROADMAP.md](./ROADMAP.md)._
 
+## [1.0.1] — 2026-07-07
+
+### Changed
+- **Disabled the black-box "Scan strategy → Vulnerability focus" class picker.** Selecting a class
+  (e.g. XSS) silently narrowed the strategist to that class only, which read as "the strategy scan
+  isn't accurate." Every scan now runs the full A→Z deep dive by default; dispatch is one step shorter.
+  Backend focus handling is untouched (reversible). (#10)
+
 ## [1.0.0] — 2026-07-06
 
 First stable release. ARCHON is a durable multi-agent AI penetration tester for web applications:
@@ -56,5 +64,6 @@ live on the operator's board. Runs entirely on a Claude subscription over OAuth 
 - ARCHON's white-box review found a real broken-access-control flaw disclosed to GitLab via HackerOne,
   fixed in GitLab's May 2026 security release as **CVE-2026-4524** (CVSS 6.5, CWE-288).
 
-[Unreleased]: https://github.com/ghostshift-content/ARCHON/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ghostshift-content/ARCHON/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/ghostshift-content/ARCHON/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ghostshift-content/ARCHON/releases/tag/v1.0.0
