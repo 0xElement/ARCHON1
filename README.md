@@ -17,7 +17,7 @@ whose source and runtime views correlate into one de-duplicated set.
 [![CI](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml/badge.svg)](https://github.com/ghostshift-content/ARCHON/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Runs on Claude](https://img.shields.io/badge/runs%20on-Claude%20(OAuth)-d97757.svg)](https://claude.ai/code)
-[![Status](https://img.shields.io/badge/status-active-success.svg)](./BACKLOG.md)
+[![Release](https://img.shields.io/badge/release-v1.0.0-success.svg)](https://github.com/ghostshift-content/ARCHON/releases)
 [![Field-tested: CVE-2026-4524](https://img.shields.io/badge/field--tested-CVE--2026--4524-critical.svg)](https://www.cve.org/CVERecord?id=CVE-2026-4524)
 
 </div>
@@ -458,10 +458,12 @@ ARCHON keeps its planning and architecture in-repo so the project tracks like a 
 
 ## Roadmap & status
 
-Active development. The current backlog and prioritized improvement surface live in
-**[BACKLOG.md](./BACKLOG.md)** and **[§8 of the system map](./docs/ARCHON-SYSTEM-MAP.md)** — work proceeds
-in tiers (show-stoppers → correctness/invariants → dead-code sweep → docs → refactors). Open an issue or PR
-to propose or pick up an item.
+**v1.0 — first stable release.** The core engagement pipeline (black-box, white-box, and the merged
+mode), the safety perimeter, and the evidence contract are stable, and the test gate is green — ARCHON is
+ready for authorized engagements. Post-1.0 work (further improvements and the flag-gated,
+off-by-default Autonomous Agent OS layer) is tracked in **[BACKLOG.md](./BACKLOG.md)**,
+**[ROADMAP.md](./ROADMAP.md)**, and **[§8 of the system map](./docs/ARCHON-SYSTEM-MAP.md)**. Open an issue
+or PR to propose or pick up an item.
 
 ---
 
