@@ -255,9 +255,9 @@ function buildPentestMeta(body) {
   const th = hostOf(targetUrl)
   if (th && !inScope.includes(th)) inScope.unshift(th) // target host MUST be in-scope or Phase 0.0 blocks the dispatch
   const outOfScope = norm(m.outOfScope)
-  const ROLES = ['admin', 'normal', 'other']
+  const ROLES = ['high', 'low']
   const credentials = Array.isArray(m.credentials)
-    ? m.credentials.map(c => ({ username: String(c.username || '').trim(), password: String(c.password || ''), role: ROLES.includes(c.role) ? c.role : 'normal' })).filter(c => c.username)
+    ? m.credentials.map(c => ({ username: String(c.username || '').trim(), password: String(c.password || ''), role: ROLES.includes(c.role) ? c.role : 'low' })).filter(c => c.username)
     : []
   // triage gate ON by default for pentest — findings are produced, then the
   // operator triages and clicks Generate report (set meta.triageGate:false to opt out).
@@ -280,8 +280,9 @@ function buildPentestMeta(body) {
 function writePentestArtifacts(taskId, meta) {
   const scope = { in_scope: meta.inScope, out_of_scope: meta.outOfScope, infra_dependencies: {} }
   fs.writeFileSync(path.join(INTEL, `scope-${taskId}.json`), JSON.stringify(scope, null, 2))
+  const privLabel = (r) => r === 'high' ? 'high-priv' : r === 'low' ? 'low-priv' : String(r || 'low-priv')
   const credTable = meta.credentials.length
-    ? meta.credentials.map(c => `| ${c.username} | ${c.password || '(none)'} | ${c.role} |`).join('\n')
+    ? meta.credentials.map(c => `| ${c.username} | ${c.password || '(none)'} | ${privLabel(c.role)} |`).join('\n')
     : '| _(none — unauthenticated black-box discovery)_ | | |'
   const brief = `# Pentest Engagement Brief — ${taskId}
 
@@ -300,11 +301,11 @@ ${meta.inScope.map(h => `- ${h}`).join('\n') || '- (none)'}
 ${meta.outOfScope.map(h => `- ${h}`).join('\n') || '- (none specified)'}
 
 ## Test accounts (black-box credentials)
-| Username | Password | Role |
+| Username | Password | Privilege |
 |---|---|---|
 ${credTable}
 
-> Authenticate as EACH role and test cross-role authorization (IDOR, privilege escalation, role confusion). Respect scope strictly — never touch out-of-scope hosts.
+> Authenticate as EACH privilege level and test cross-privilege authorization (IDOR, privilege escalation, role confusion) — e.g. can the low-privilege account reach high-privilege resources. Respect scope strictly — never touch out-of-scope hosts.
 `
   const briefPath = path.join(INTEL, `pentest-brief-${taskId}.md`)
   fs.writeFileSync(briefPath, brief, { mode: 0o600 }) // brief embeds the test-credential table
@@ -802,6 +803,40 @@ function readBody(req) {
     req.on('end', () => { try { resolve(JSON.parse(d || '{}')) } catch { resolve({}) } })
   })
 }
+// Raw binary body reader for source-archive uploads (readBody is JSON-only). Hard-
+// capped so a huge upload can't exhaust memory; rejects past the cap.
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 // 100 MB
+function readBinaryBody(req, maxBytes = MAX_UPLOAD_BYTES) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let len = 0
+    req.on('data', c => {
+      len += c.length
+      if (len > maxBytes) { req.destroy(); reject(new Error(`upload exceeds ${Math.round(maxBytes / 1048576)} MB limit`)); return }
+      chunks.push(c)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+// Accept an uploaded .zip of a source tree, extract it (zip-slip guarded) under
+// var/intel/uploads/<id>/, and return the extracted absolute path — which the UI
+// drops into the source-directory field so the rest of the pipeline is unchanged.
+async function handleSourceUpload(req) {
+  const fname = String(req.headers['x-filename'] || 'upload.zip')
+  if (!/\.zip$/i.test(fname)) throw new Error('only .zip archives are supported')
+  const buf = await readBinaryBody(req)
+  if (!buf.length) throw new Error('empty upload')
+  const { extractZipSafe, collapseSingleRoot } = require('../src/dispatch/source-upload')
+  const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`
+  const dest = path.join(INTEL, 'uploads', id)
+  let extracted
+  try { extracted = extractZipSafe(buf, dest) }
+  catch (e) { try { fs.rmSync(dest, { recursive: true, force: true }) } catch {} throw new Error(`extract failed: ${(e && e.message) || e}`) }
+  const sourceDir = collapseSingleRoot(extracted.root)
+  const chk = checkSourceDir(sourceDir)
+  if (!chk.ok) { try { fs.rmSync(dest, { recursive: true, force: true }) } catch {} throw new Error(`extracted tree invalid: ${chk.error}`) }
+  return { ok: true, sourceDir, entries: chk.entries, files: extracted.files, filename: fname }
+}
 function json(res, code, obj) { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)) }
 
 const server = http.createServer(async (req, res) => {
@@ -823,6 +858,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/state') return json(res, 200, state())
     if (req.method === 'GET' && p === '/api/check-source') return json(res, 200, checkSourceDir(url.searchParams.get('dir')))
     if (req.method === 'GET' && p === '/api/squads') return json(res, 200, { squads: squads() })
+    if (req.method === 'GET' && p === '/api/models') {
+      // Populate the model-override dropdown from the models the SDK/CLI advertises
+      // for this subscription, falling back to model-config.json. Never throws.
+      try { return json(res, 200, await require('../src/routing/model-catalog').fetchAvailableModels()) }
+      catch (e) { return json(res, 200, { models: [], source: 'error', error: String((e && e.message) || e) }) }
+    }
     if (req.method === 'GET' && p === '/api/report') {
       // Canonicalize then enforce the INTEL_ROOT boundary — path.resolve collapses
       // any ../ and the path.sep suffix prevents a sibling-dir prefix bypass
@@ -836,6 +877,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && p === '/api/dispatch') {
       try { return json(res, 200, createDispatch(await readBody(req))) }
+      catch (e) { return json(res, 400, { error: e.message }) }
+    }
+    if (req.method === 'POST' && p === '/api/upload-source') {
+      try { return json(res, 200, await handleSourceUpload(req)) }
       catch (e) { return json(res, 400, { error: e.message }) }
     }
     if (req.method === 'POST' && p === '/api/cancel') {
