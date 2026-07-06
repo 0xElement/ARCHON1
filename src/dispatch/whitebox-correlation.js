@@ -21,6 +21,7 @@ const path = require('path')
 const agentPaths = require('../../paths')
 const shadowSink = require('../shadow/shadow-sink')
 const xview = require('../pipeline/cross-view-dedup')
+const { hasRuntimeProof } = require('../../agents/finding-schema')
 
 function _readJson(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null } }
 function _readJsonl(file) {
@@ -111,8 +112,10 @@ function finalizeSourceStatus(sourceFinding, matchedLive) {
   const needsLive = src === 'NEEDS_LIVE_VALIDATION' || src === 'NEEDS-LIVE'
   if (matchedLive) {
     const lv = String(matchedLive.confirmation_status || matchedLive.validation_status || '').toUpperCase()
-    const hasRuntime = lv === 'RUNTIME_CONFIRMED' || (lv === 'CONFIRMED' && !!(matchedLive.url || matchedLive.reproduction_response))
-    if (hasRuntime) return { status: 'RUNTIME_CONFIRMED', reason: '' }
+    // Finding 4: never trust the status STRING — even a RUNTIME_CONFIRMED match must carry actual runtime
+    // evidence (captured response / proof-of-execution), checked via the same helper the evidence contract
+    // uses. A mislabeled match with no proof falls through to BLOCKED_WITH_REASON, not a preserved over-claim.
+    if ((lv === 'RUNTIME_CONFIRMED' || lv === 'CONFIRMED') && hasRuntimeProof(matchedLive)) return { status: 'RUNTIME_CONFIRMED', reason: '' }
     if (lv === 'DISPROVEN' || lv === 'KILLED') return { status: 'DISPROVEN', reason: 'live validation refuted the source hypothesis' }
   }
   if (needsLive) return { status: 'BLOCKED_WITH_REASON', reason: 'no live validation result — could not confirm or refute against the running target' }

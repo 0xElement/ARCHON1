@@ -65,17 +65,20 @@ test('LIVE→SOURCE: buildRootCauseRequests matches by (vuln_class, locus) and n
 
 test('B1 finalizeSourceStatus: enforces terminal states, no false RUNTIME_CONFIRMED', () => {
   const nl = { confirmation_status: 'NEEDS_LIVE_VALIDATION' }
-  assert.equal(wb.finalizeSourceStatus(nl, { confirmation_status: 'RUNTIME_CONFIRMED', url: 'https://x' }).status, 'RUNTIME_CONFIRMED')
+  // a RUNTIME_CONFIRMED match WITH real runtime proof (captured response) promotes
+  assert.equal(wb.finalizeSourceStatus(nl, { confirmation_status: 'RUNTIME_CONFIRMED', reproduction_response: 'HTTP/1.1 200 OK\n\n{"owner":"userB"}' }).status, 'RUNTIME_CONFIRMED')
   assert.equal(wb.finalizeSourceStatus(nl, { validation_status: 'DISPROVEN' }).status, 'DISPROVEN')
   assert.equal(wb.finalizeSourceStatus(nl, null).status, 'BLOCKED_WITH_REASON') // needs-live, no live result
-  // a matched live CONFIRMED with NO runtime proof (no url/response) must NOT promote to RUNTIME_CONFIRMED
+  // Finding 4: a match LABELED RUNTIME_CONFIRMED but with only a url and NO captured proof must NOT promote
+  assert.notEqual(wb.finalizeSourceStatus(nl, { confirmation_status: 'RUNTIME_CONFIRMED', url: 'https://x' }).status, 'RUNTIME_CONFIRMED')
+  // a matched live CONFIRMED with NO runtime proof must NOT promote to RUNTIME_CONFIRMED
   assert.notEqual(wb.finalizeSourceStatus(nl, { validation_status: 'CONFIRMED' }).status, 'RUNTIME_CONFIRMED')
   // a source-confirmed finding with no live match stays SOURCE_CONFIRMED (not blocked)
   assert.equal(wb.finalizeSourceStatus({ confirmation_status: 'SOURCE_CONFIRMED' }, null).status, 'SOURCE_CONFIRMED')
 })
 
 test('B2 buildCorrelationReport: matched → RUNTIME_CONFIRMED; unmatched NEEDS_LIVE → BLOCKED_WITH_REASON', () => {
-  seedFindings('pt-b2', [{ id: 'BB-1', title: 'IDOR in /orders', validation_status: 'CONFIRMED', confirmation_status: 'RUNTIME_CONFIRMED', url: 'https://x.test/orders/1' }])
+  seedFindings('pt-b2', [{ id: 'BB-1', title: 'IDOR in /orders', validation_status: 'CONFIRMED', confirmation_status: 'RUNTIME_CONFIRMED', url: 'https://x.test/orders/1', reproduction_response: 'HTTP/1.1 200 OK\n\n{"order":{"owner":"userB"}}' }])
   seedFindings('cr-b2', [
     { id: 'CR-1', title: 'IDOR in /orders', confirmation_status: 'NEEDS_LIVE_VALIDATION', file: 'app/orders.rb' },
     { id: 'CR-2', title: 'XSS in /profile', confirmation_status: 'NEEDS_LIVE_VALIDATION', file: 'app/profile.erb' },

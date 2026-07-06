@@ -3899,6 +3899,26 @@ Execute now — read your skill file first, then validate every finding.`
 }
 
 // ── Build SCRIBE report prompt ──
+// Finding 5: white-box source↔runtime correlation. If Phase 3.088 wrote a correlation report, surface the
+// matched/unmatched source candidates + their terminal status so the final report states exactly what was
+// and wasn't validated live. Empty string when absent (black-box / static) — SCRIBE never fabricates it.
+function buildCorrelationSection(taskId) {
+  try {
+    const rep = JSON.parse(fs.readFileSync(path.join(agentPaths.INTEL_ROOT, `correlation-report-${taskId}.json`), 'utf8'))
+    if (!rep || !Array.isArray(rep.rows) || !rep.rows.length) return ''
+    return `
+## 🔗 SOURCE↔RUNTIME CORRELATION (white-box — include as a dedicated report section)
+
+${rep.matched} source candidate(s) validated live, ${rep.unmatched} could not be validated. Per-candidate terminal status:
+${rep.rows.map(r => `- ${r.source_id} [${r.vuln_class}] ${r.file || ''} → ${r.final_status}${r.runtime_task_id ? ` (runtime ${r.runtime_task_id}${r.endpoint_tested ? ` @ ${r.endpoint_tested}` : ''})` : ''}${r.reason ? ` — ${r.reason}` : ''}`).join('\n')}
+
+Report EACH source candidate with its terminal status: RUNTIME_CONFIRMED (proven live), SOURCE_CONFIRMED
+(code-substantiated, not fired), DISPROVEN (live-refuted), or BLOCKED_WITH_REASON (no live result). Do NOT
+claim a source candidate as runtime-confirmed unless it appears here as RUNTIME_CONFIRMED.
+`
+  } catch { return '' } // fail-soft: no correlation report (black-box / static run)
+}
+
 function buildscribeReportPrompt(taskTitle, taskId, projectId, squad, targetUrl, goalContext, chainResults, defensiveActions) {
   // Report writer MUST NOT see baseline numbers — otherwise the executive
   // summary gets sycophantically anchored to them (confirmed Apr-21 Run 1).
@@ -4006,6 +4026,9 @@ A verified chain of 2 mediums = 1 Critical in the report.
 `
   }
 
+  // Finding 5: white-box source↔runtime correlation section (helper keeps this body compact).
+  const correlationSection = buildCorrelationSection(taskId)
+
   return `You are SCRIBE, the Final Report Writer for the ${squad} squad.
 
 ## REPORT FORMAT — follow the canonical template exactly
@@ -4073,7 +4096,7 @@ Browser-verification provides deterministic Playwright execution evidence for br
   * If verdict === 'INDETERMINATE' → fall back to AUDITOR's verdict and chain-verifier evidence as before.
 
 - For findings NOT present in BROWSER-VERIFICATION jsonl (non-browser-relevant types): use AUDITOR validation + chain-verifier evidence as before.
-${crossSquadSection}${handoffStatsSection}${trajectorySection}
+${correlationSection}${crossSquadSection}${handoffStatsSection}${trajectorySection}
 ## CROSS-SQUAD HANDOFF VERDICTS (A2A corroboration — Sprint C.2)
 
 If a CROSS-SQUAD CORROBORATION section appears above, each entry is an INDEPENDENT verdict from another squad's specialist (e.g. KUBERA confirming a supply-chain finding's S3 bucket exposure). Apply these rules:

@@ -672,7 +672,36 @@ async function runCodeReview(dispatch, deps) {
 
   let ledger = mappingLedger.load(outDir)
   const _doneJobs = []                 // assess jobs dispatched (for re-plan)
-  const _assessedFeatures = new Set()  // distinct features assessed (maxPhase2 cap; high-risk kept first)
+  const _selectedFeatures = new Set()  // features SELECTED for assessment (the maxPhase2 cap counter; high-risk first)
+  const _assessedFeatures = new Set()  // features actually reviewed (≥1 Phase-2 job completed) — drives p2Features
+  const _featureBySlug = new Map(features.map(f => [f.slug, f])) // slug → full feature obj (+ followups) — drives allFeatures
+
+  // Assess a set of (feature × class) jobs, streaming candidates live. Finding 3: track per-feature success
+  // so a feature is "assessed" only if ≥1 of its jobs completed — a feature whose specialists ALL failed is
+  // a review coverage gap → blocked (never silently counted as reviewed). Failed jobs are recorded to
+  // phase2-failures.jsonl (audit trail). Shared by the main pipeline + follow-up reconciliation.
+  const _phase2FailLog = `${outDir}/phase1-maps/phase2-failures.jsonl`
+  async function assessBatch(considered, onProgress) {
+    const jobs = []
+    for (const f of considered) for (const cls of vulnClasses) { jobs.push({ cls, feature: f }); _doneJobs.push({ cls, feature: f }) }
+    const ok = {}
+    const res = await runWaves(jobs, WAVE, async ({ cls, feature }) => {
+      if (cancelled()) return null
+      const agent = CLASS[cls].agent
+      const r = await safeSpawn(() => spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null),
+        `phase2 ${cls}/${feature.slug}`, (e) => { try { fs.appendFileSync(_phase2FailLog, JSON.stringify({ feature: feature.slug, cls, reason: (e && e.message) || String(e) }) + '\n') } catch {} })
+      if (r) { ok[feature.slug] = (ok[feature.slug] || 0) + 1; if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit [${cls}/${feature.slug}]: ${e.message}`) } } }
+      if (onProgress) onProgress()
+      return r
+    })
+    trackCosts(res)
+    for (const f of considered) {
+      if (ok[f.slug]) _assessedFeatures.add(f.slug)
+      else { ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked', note: 'all Phase 2 specialists failed' }); log(`⚠️ ${f.slug}: all Phase 2 jobs failed → blocked (review coverage gap)`) }
+    }
+    mappingLedger.save(outDir, ledger)
+    return res
+  }
   if (runPhase('mapping') || runPhase('phase2')) {
     const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
     ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
@@ -710,31 +739,23 @@ async function runCodeReview(dispatch, deps) {
       }
 
       if (cancelled() || !runPhase('phase2')) return null
-      // 2) assess THIS batch's produced features NOW (feature × class), streaming candidates live
-      const jobs = []
+      // 2) assess THIS batch's produced features NOW (feature × class), streaming candidates live.
+      // Selection is synchronous so the maxPhase2 cap holds across concurrent batches (default Infinity;
+      // high-risk kept first); blocked (no map) → skipped as a coverage gap, not a silent skip.
+      const considered = []
       for (const f of batch.features) {
-        if (!mapExists(f.slug)) continue // blocked → no assess (coverage gap, not a silent skip)
-        if (!_assessedFeatures.has(f.slug) && _assessedFeatures.size >= maxPhase2) continue // maxPhase2 cap (high-risk kept)
-        _assessedFeatures.add(f.slug)
-        for (const cls of vulnClasses) { jobs.push({ cls, feature: f }); _doneJobs.push({ cls, feature: f }) }
+        if (!mapExists(f.slug)) continue
+        if (!_selectedFeatures.has(f.slug) && _selectedFeatures.size >= maxPhase2) continue
+        _selectedFeatures.add(f.slug); considered.push(f)
       }
-      const aRes = await runWaves(jobs, WAVE, async ({ cls, feature }) => {
-        if (cancelled()) return null
-        const agent = CLASS[cls].agent
-        const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
-        if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit [${cls}/${feature.slug}]: ${e.message}`) } }
-        assessed++
-        updateProgress(45 + Math.round(33 * assessed / Math.max(1, _doneJobs.length)), `Phase 2: assessed ${assessed}/${_doneJobs.length} (feature × class), streaming live`)
-        return r
-      })
-      trackCosts(aRes)
+      await assessBatch(considered, () => { assessed++; updateProgress(45 + Math.round(33 * assessed / Math.max(1, _doneJobs.length)), `Phase 2: assessed ${assessed}/${_doneJobs.length} (feature × class), streaming live`) })
       return null
     })
     log(`🗂️ Pipeline complete: mapped ${ledger.features_done}/${ledger.features_total}, assessed ${assessed} job(s) over ${_assessedFeatures.size} feature(s)`)
 
     // M3 re-plan (self-tasking) — from the LIVE findings, after the pipeline drains.
     try {
-      const p2Feats = [..._assessedFeatures].map(slug => (features.find(f => f.slug === slug) || { slug }))
+      const p2Feats = [..._assessedFeatures].map(slug => (_featureBySlug.get(slug) || { slug }))
       const extra = sourcePlanner.replanJobs(_doneJobs, readLiveFindings(taskId), p2Feats, Object.keys(CLASS))
       if (extra.length) {
         log(`🧠 Re-plan: +${extra.length} follow-up assessment(s) from live findings`)
@@ -761,6 +782,7 @@ async function runCodeReview(dispatch, deps) {
       const { newFeatures } = mappingLedger.reconcileFollowups(readJsonl(`${outDir}/phase1-maps/followup-features.jsonl`), ledger)
       if (!newFeatures.length) break
       const fresh = featureBatching.annotate(newFeatures)
+      for (const f of fresh) _featureBySlug.set(f.slug, f) // Finding 1: follow-ups join the downstream feature set
       log(`🔁 Reconcile round ${round}: +${fresh.length} new feature(s) from followups`)
       logActivity('CURATOR', `🔁 Reconcile round ${round}: +${fresh.length} follow-up feature(s) mapped`, { taskId, squad, projectId: projectId || '' })
       ledger = mappingLedger.addFeatures(ledger, fresh); mappingLedger.save(outDir, ledger)
@@ -774,14 +796,7 @@ async function runCodeReview(dispatch, deps) {
         for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
         mappingLedger.save(outDir, ledger)
         if (!runPhase('phase2') || cancelled()) return null
-        const jobs = []
-        for (const f of batch.features) { if (fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`)) { _assessedFeatures.add(f.slug); for (const cls of vulnClasses) { jobs.push({ cls, feature: f }); _doneJobs.push({ cls, feature: f }) } } }
-        await runWaves(jobs, WAVE, async ({ cls, feature }) => {
-          const agent = CLASS[cls].agent
-          const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
-          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch {} }
-          return r
-        })
+        await assessBatch(batch.features.filter(f => fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`)))
         return null
       })
     }
@@ -807,13 +822,19 @@ async function runCodeReview(dispatch, deps) {
 
   // The features that were deep-reviewed (feature × class) — what freehand, the report + the return describe.
   // Actual assessed set when Phase 2 ran; else the intended set (freehand-only / phasesOnly runs).
-  const p2Features = _assessedFeatures.size ? features.filter(f => _assessedFeatures.has(f.slug)) : features.slice(0, maxPhase2)
+  // Finding 1: the authoritative feature set is the LEDGER's (includes follow-up-created features), not the
+  // original discovery array — so consolidation, freehand, Auditor, SCRIBE + the return payload all see the
+  // same truth as the ledger-derived counts. p2Features = the assessed subset of that.
+  const allFeatures = ledger
+    ? Object.keys(ledger.features).map(s => _featureBySlug.get(s) || { slug: s, name: ledger.features[s].name || s })
+    : features
+  const p2Features = _assessedFeatures.size ? allFeatures.filter(f => _assessedFeatures.has(f.slug)) : allFeatures.slice(0, maxPhase2)
 
   // Phase 1c — consolidation (AFTER the per-batch pipeline; produces the coverage matrices for the report).
   if (cancelled()) return bail('Phase 1c consolidation')
   if (runPhase('consolidate')) {
     updateProgress(78, 'Phase 1c: CURATOR consolidation')
-    const cRes = await safeSpawn(() => spawnAgent('curator', taskId, consolidationPrompt(taskId, outDir, features), `task-${taskId}-consolidate`, null), 'consolidation')
+    const cRes = await safeSpawn(() => spawnAgent('curator', taskId, consolidationPrompt(taskId, outDir, allFeatures), `task-${taskId}-consolidate`, null), 'consolidation')
     trackCosts([cRes].filter(Boolean))
   }
   // A2: write the DETERMINISTIC completion gate to the path SCRIBE reads (consolidated/), AFTER consolidation,
@@ -920,7 +941,7 @@ async function runCodeReview(dispatch, deps) {
   updateProgress(100, 'Complete')
   return {
     stack, sourceDir, fileCount: p0.fileCount,
-    features: features.map(f => f.slug),
+    features: allFeatures.map(f => f.slug),
     featuresMapped: ledger ? ledger.features_total : features.length,
     featuresAccountedFor: ledger ? ledger.features_done : features.length,
     blockers: ledger ? mappingLedger.blockers(ledger).length : 0,
