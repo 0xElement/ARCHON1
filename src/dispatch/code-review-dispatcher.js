@@ -127,6 +127,7 @@ const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
 // Scalable mapping defaults (spec §4). Fast-map features in domain batches of ≤8, ≤6 mappers in parallel.
 const MAX_FEATURES_PER_BATCH = 8
 const MAX_PARALLEL_MAPPERS = 6
+const BATCH_CONCURRENCY = 3 // per-batch pipeline: how many batches map+review at once (modest overlap)
 // ONE comprehensive source-file extension set — the SAME list gates BOTH preflight file-detection AND
 // the scripted inventory grep, so any language a real codebase ships in gets enumerated (not just JS/TS).
 // Real source can be anything; keep this broad. The mapping agents also read the live tree directly, so
@@ -626,67 +627,28 @@ async function runCodeReview(dispatch, deps) {
     return { error: 'empty feature queue', phase: 'discovery' }
   }
 
-  // Phase 1 — SCALABLE fast-mapping: domain-grouped BATCHES (≤8 features each, high-risk domains first),
-  // one agent per batch, ≤6 mappers in parallel — instead of one agent per feature. The mapping ledger is
-  // the source of truth: every feature is queued→in_progress→done (or blocked if its map wasn't produced),
-  // so batches never overlap and no feature is lost. Scales to any N (36/150/300+).
-  if (cancelled()) return bail('Phase 1 mapping')
-  let ledger = mappingLedger.load(outDir) // may already exist (phasesOnly reuse)
-  if (runPhase('mapping')) {
-    const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
-    ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
-    updateProgress(25, `Phase 1: fast-mapping ${features.length} features → ${batches.length} batch(es)`)
-    logActivity('CURATOR', `🗺️ Phase 1: ${features.length} features → ${batches.length} domain batch(es) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
-    const results = await runWaves(batches, MAX_PARALLEL_MAPPERS, async (batch) => {
-      for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
-      mappingLedger.save(outDir, ledger)
-      const r = await spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null)
-      // A feature is 'done' (fast) only if its map was actually produced; else 'blocked' (a coverage gap the
-      // completion gate + reconciliation must resolve — never a silent skip).
-      for (const f of batch.features) {
-        const produced = fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`)
-        ledger = mappingLedger.setFeature(ledger, f.slug, produced ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
-      }
-      mappingLedger.save(outDir, ledger)
-      updateProgress(25 + Math.round(28 * ledger.features_done / Math.max(1, features.length)), `Phase 1: fast-mapped ${ledger.features_done}/${features.length}`)
-      return r
-    })
-    trackCosts(results)
-    log(`🗂️ Fast-map complete: ${ledger.features_done}/${ledger.features_total} feature(s) across ${ledger.batches_done}/${ledger.batches_total} batch(es)`)
-  }
+  // ── Phase 1+2 PER-BATCH PIPELINE (S4): fast-map a domain batch, then IMMEDIATELY assess its features
+  // (feature × class) before its slot frees — so Phase 2 starts producing findings as soon as the FIRST
+  // batch is mapped, not after all N features. Batches process with modest concurrency (BATCH_CONCURRENCY),
+  // high-risk domains first. The live streamer + candidate watcher run THROUGHOUT (stopped after freehand).
+  if (cancelled()) return bail('Phase 1+2 pipeline')
 
-  // Phase 1c — consolidation
-  if (cancelled()) return bail('Phase 1c consolidation')
-  if (runPhase('consolidate')) {
-    updateProgress(55, 'Phase 1c: CURATOR consolidation')
-    const cRes = await spawnAgent('curator', taskId, consolidationPrompt(taskId, outDir, features), `task-${taskId}-consolidate`, null)
-    trackCosts([cRes])
-  }
-
-  // M1: stream candidates to the LIVE board WHILE Phase 2/3 run (parity with black-box Phase 2.7).
-  // The streamer tails live-findings-<taskId>.jsonl (filled by emitCandidate) and triages each source
-  // candidate → VALIDATED-FINDINGS live. We STOP it after freehand, BEFORE the AUDITOR reverse-check
-  // (Phase 2v) + onFindingsReady reconcile — so there is never a concurrent VALIDATED writer.
+  // Streamer + candidate watcher — started BEFORE the pipeline so findings stream from the first batch on.
   let _streamer = null
   if (typeof startStreamingTriage === 'function' && (runPhase('phase2') || (FH_MODE !== 'off' && runPhase('freehand')))) {
     try { _streamer = startStreamingTriage(taskId); log(`📥 streaming triage ONLINE — source candidates triaged live as specialists report them`) }
     catch (e) { log(`⚠️ streaming-triage start failed (non-fatal): ${e.message}`) }
   }
-
-  // P2: intra-run streaming — a background watcher tails the per-job candidate files WHILE agents are
-  // still writing them (the prompts tell specialists to append candidates as they confirm them), so
-  // findings reach the board MID-job, not only when the job returns (true black-box cadence). The
-  // agent-independent emitCandidate dedup means re-scans + the post-job emit collapse to one record.
   let _candWatch = null
   if (typeof emitCandidate === 'function' && (runPhase('phase2') || (FH_MODE !== 'off' && runPhase('freehand')))) {
     const scan = () => {
       try {
-        const base = `${outDir}/phase2` // phase2/<cls>/*.candidates.jsonl  (+ phase2/freehand/*)
+        const base = `${outDir}/phase2`
         let dirs; try { dirs = fs.readdirSync(base, { withFileTypes: true }) } catch { return }
         for (const d of dirs) {
           if (!d.isDirectory()) continue
           const cls = d.name
-          const agent = (CLASS[cls] && CLASS[cls].agent) || MAPPER_POOL[0] // label only — dedup is agent-independent
+          const agent = (CLASS[cls] && CLASS[cls].agent) || MAPPER_POOL[0]
           let files; try { files = fs.readdirSync(`${base}/${cls}`) } catch { continue }
           for (const fn of files) {
             if (!fn.endsWith('.candidates.jsonl')) continue
@@ -700,54 +662,59 @@ async function runCodeReview(dispatch, deps) {
     if (_candWatch.unref) _candWatch.unref()
   }
 
-  // Phase 2 — vuln assessment (top-N features × each class, routed to specialists)
-  const p2Features = features.slice(0, maxPhase2)
-  if (maxPhase2 < features.length) log(`ℹ️ Phase 2 capped to top ${maxPhase2}/${features.length} features (raise meta.maxPhase2 for full coverage)`)
-  if (cancelled()) return bail('Phase 2 assessment')
-  if (runPhase('phase2')) {
-    updateProgress(62, `Phase 2: ${p2Features.length} features × ${vulnClasses.length} classes`)
-    let jobs = []
-    for (const cls of vulnClasses) for (const feature of p2Features) jobs.push({ cls, feature })
-    // M3 planner: order the queue by CURATOR's ranked review queue so the highest-value leads run (and
-    // stream to the board) FIRST — parity with the black-box attack plan. Pure reorder; never drops a job.
-    try {
-      const rq = fs.readFileSync(`${outDir}/phase1-maps/consolidated/phase2_review_queue.md`, 'utf8')
-      jobs = sourcePlanner.rankJobs(jobs, sourcePlanner.parseRankedFeatures(rq, p2Features.map(f => f.slug)))
-    } catch { /* no ranked queue yet → natural order */ }
-    // Bump progress per assessment job (feature × class) — keeps the bar moving and lastUpdate
-    // fresh across what is usually the longest phase, however many jobs the codebase warrants.
+  let ledger = mappingLedger.load(outDir)
+  const _doneJobs = []                 // assess jobs dispatched (for re-plan)
+  const _assessedFeatures = new Set()  // distinct features assessed (maxPhase2 cap; high-risk kept first)
+  if (runPhase('mapping') || runPhase('phase2')) {
+    const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
+    ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
+    updateProgress(25, `Phase 1+2: ${features.length} features → ${batches.length} batch(es); map → review per batch`)
+    logActivity('CURATOR', `🗺️ Phase 1+2 (per-batch): ${features.length} features → ${batches.length} domain batch(es) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
+    const mapExists = (slug) => fs.existsSync(`${outDir}/phase1-maps/features/${slug}.md`)
     let assessed = 0
-    const results = await runWaves(jobs, WAVE, async ({ cls, feature }) => {
-      const agent = CLASS[cls].agent
-      const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
-      // Stream this job's source candidates to the live board the moment it returns (M0). Fail-soft +
-      // no-op when the emit sink isn't injected (unit tests), so the batch path is unchanged without it.
-      if (typeof emitCandidate === 'function') {
-        try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit failed [${cls}/${feature.slug}]: ${e.message}`) }
+    await runWaves(batches, BATCH_CONCURRENCY, async (batch) => {
+      if (cancelled()) return null
+      // 1) fast-map the batch (one agent maps ≤8 features)
+      if (runPhase('mapping')) {
+        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
+        mappingLedger.save(outDir, ledger)
+        const mr = await spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null)
+        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, mapExists(f.slug) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
+        mappingLedger.save(outDir, ledger)
+        trackCosts([mr])
+        updateProgress(25 + Math.round(20 * ledger.features_done / Math.max(1, features.length)), `Phase 1: fast-mapped ${ledger.features_done}/${features.length} (reviewing as we go)`)
       }
-      updateProgress(62 + Math.round(16 * (++assessed) / jobs.length), `Phase 2: assessed ${assessed}/${jobs.length} (feature × class)`)
-      return r
+      if (cancelled() || !runPhase('phase2')) return null
+      // 2) assess THIS batch's produced features NOW (feature × class), streaming candidates live
+      const jobs = []
+      for (const f of batch.features) {
+        if (!mapExists(f.slug)) continue // blocked → no assess (coverage gap, not a silent skip)
+        if (!_assessedFeatures.has(f.slug) && _assessedFeatures.size >= maxPhase2) continue // maxPhase2 cap (high-risk kept)
+        _assessedFeatures.add(f.slug)
+        for (const cls of vulnClasses) { jobs.push({ cls, feature: f }); _doneJobs.push({ cls, feature: f }) }
+      }
+      const aRes = await runWaves(jobs, WAVE, async ({ cls, feature }) => {
+        if (cancelled()) return null
+        const agent = CLASS[cls].agent
+        const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
+        if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit [${cls}/${feature.slug}]: ${e.message}`) } }
+        assessed++
+        updateProgress(45 + Math.round(33 * assessed / Math.max(1, _doneJobs.length)), `Phase 2: assessed ${assessed}/${_doneJobs.length} (feature × class), streaming live`)
+        return r
+      })
+      trackCosts(aRes)
+      return null
     })
-    trackCosts(results)
+    log(`🗂️ Pipeline complete: mapped ${ledger.features_done}/${ledger.features_total}, assessed ${assessed} job(s) over ${_assessedFeatures.size} feature(s)`)
 
-    // M3 re-plan: the run tasks itself from its own findings. Any feature×class a LIVE candidate points
-    // at but that wasn't assessed becomes a follow-up job (bounded to known features/classes — an unknown
-    // class has no specialist). Usually empty under full coverage; the self-tasking primitive for bounded
-    // runs + newly-surfaced surfaces. One pass (no loop) → can't runaway.
+    // M3 re-plan (self-tasking) — from the LIVE findings, after the pipeline drains.
     try {
-      // allClasses = the FULL registry (not just the auto-selected set): a freehand/novel finding on a
-      // class we didn't originally select is exactly what should spawn a structured follow-up assessment.
-      const extra = sourcePlanner.replanJobs(jobs, readLiveFindings(taskId), p2Features, Object.keys(CLASS))
+      const p2Feats = [..._assessedFeatures].map(slug => (features.find(f => f.slug === slug) || { slug }))
+      const extra = sourcePlanner.replanJobs(_doneJobs, readLiveFindings(taskId), p2Feats, Object.keys(CLASS))
       if (extra.length) {
         log(`🧠 Re-plan: +${extra.length} follow-up assessment(s) from live findings`)
         logActivity('CURATOR', `🧠 Re-plan: +${extra.length} follow-up job(s) from findings`, { taskId, squad, projectId: projectId || '' })
-        // M6: record the self-tasking decision to the agentic decision log (auditable reasoning trail).
-        try {
-          decisionLog.append(taskId, { agent: 'CURATOR', decision: `re-plan: +${extra.length} follow-up assessment(s)`,
-            reason: 'live findings surfaced feature×class pairs not yet assessed', evidence: extra.map(e => `${e.cls}/${e.feature.slug}`).join(', ').slice(0, 300),
-            task_created: extra.map(e => `p2r-${e.cls}-${e.feature.slug}`).join(', ').slice(0, 300), confidence: 75, result: 'queued',
-            next_recommendation: 'assess the follow-up jobs, then re-triage' }, { intelRoot: __roots.INTEL_ROOT })
-        } catch { /* fail-soft */ }
+        try { decisionLog.append(taskId, { agent: 'CURATOR', decision: `re-plan: +${extra.length} follow-up assessment(s)`, reason: 'live findings surfaced feature×class pairs not yet assessed', evidence: extra.map(e => `${e.cls}/${e.feature.slug}`).join(', ').slice(0, 300), task_created: extra.map(e => `p2r-${e.cls}-${e.feature.slug}`).join(', ').slice(0, 300), confidence: 75, result: 'queued', next_recommendation: 'assess the follow-up jobs, then re-triage' }, { intelRoot: __roots.INTEL_ROOT }) } catch {}
         const more = await runWaves(extra, WAVE, async ({ cls, feature }) => {
           const agent = CLASS[cls].agent
           const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2r-${cls}-${feature.slug}`, null)
@@ -757,6 +724,18 @@ async function runCodeReview(dispatch, deps) {
         trackCosts(more)
       }
     } catch (e) { log(`⚠️ re-plan (non-fatal): ${e.message}`) }
+  }
+
+  // The features that were deep-reviewed (feature × class) — what freehand, the report + the return describe.
+  // Actual assessed set when Phase 2 ran; else the intended set (freehand-only / phasesOnly runs).
+  const p2Features = _assessedFeatures.size ? features.filter(f => _assessedFeatures.has(f.slug)) : features.slice(0, maxPhase2)
+
+  // Phase 1c — consolidation (AFTER the per-batch pipeline; produces the coverage matrices for the report).
+  if (cancelled()) return bail('Phase 1c consolidation')
+  if (runPhase('consolidate')) {
+    updateProgress(78, 'Phase 1c: CURATOR consolidation')
+    const cRes = await spawnAgent('curator', taskId, consolidationPrompt(taskId, outDir, features), `task-${taskId}-consolidate`, null)
+    trackCosts([cRes])
   }
 
   // Phase 3 — freehand senior-pentester review (Autonomous OS Block D, flag-gated).

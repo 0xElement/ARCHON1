@@ -32,6 +32,16 @@ function stubDeps(spawnCalls, emitted = []) {
         return { code: 0, agentName, cost: { totalCost: 0.1, model: 'm', tokens: { total: 1 } },
           output: JSON.stringify([{ slug: 'auth', name: 'Auth', keywords: 'login,token' }, { slug: 'uploads', name: 'Uploads', keywords: 'upload,file' }]) }
       }
+      // A real batch mapper writes one feature map per assigned feature; simulate it so the pipeline's
+      // "map produced → assess" gate opens (else features stay 'blocked' and nothing is assessed). Pull
+      // outDir + the batch's slugs out of the prompt.
+      if (sessionSuffix && sessionSuffix.includes('-batch-')) {
+        const dirM = prompt.match(/(\S+)\/phase1-maps\/features\//)
+        const slugs = [...prompt.matchAll(/slug:\s*([a-z0-9_-]+)/gi)].map(m => m[1])
+        if (dirM) for (const slug of slugs) {
+          try { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${slug}.md`, `# ${slug}\nfast map`) } catch {}
+        }
+      }
       // A real Phase-2 specialist also writes a structured candidate JSONL; simulate it so the
       // dispatcher's emitCandidate path is exercised. Pull the exact candidate-file path out of the
       // prompt (robust vs. parsing class/slug from the session suffix).
@@ -80,6 +90,13 @@ function stubDeps(spawnCalls, emitted = []) {
 
     const p2 = calls.filter(c => c.sessionSuffix.includes('-p2-'))
     ok('phase2 = maxPhase2(2) × classes(2) = 4 calls', p2.length === 4, 'got ' + p2.length)
+    // S4 — per-batch pipeline: Phase 2 for a feature runs only AFTER a batch has fast-mapped it (map→review
+    // per batch), so review starts as soon as the first batch is mapped, not after all mapping.
+    {
+      const firstBatch = calls.findIndex(c => c.sessionSuffix.includes('-batch-'))
+      const firstP2 = calls.findIndex(c => c.sessionSuffix.includes('-p2-'))
+      ok('S4: Phase 2 starts only after a batch has fast-mapped', firstBatch >= 0 && firstP2 > firstBatch, `batch@${firstBatch} p2@${firstP2}`)
+    }
     // M0 — each Phase-2 job streams a structured source candidate to the board via emitCandidate.
     ok('M0: each p2 job streamed a candidate → emitCandidate called 4×', emitted.length === 4, 'got ' + emitted.length)
     ok('M0: candidates are source-shaped (type=candidate, NO url)',
