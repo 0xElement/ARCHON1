@@ -79,13 +79,30 @@ function reconcileFollowups(followups, ledger) {
   return { newFeatures, duplicates }
 }
 
+// S7: deterministic completion-gate artifact from the ledger (the source of truth) — counts, coverage
+// gaps (blocked), and the per-feature roll-up. Pure (returns markdown); the dispatcher writes it.
+function renderGateMd(ledger) {
+  const feats = Object.values((ledger && ledger.features) || {})
+  const byStatus = {}; for (const f of feats) byStatus[f.status] = (byStatus[f.status] || 0) + 1
+  const blocked = feats.filter(f => f.status === 'blocked')
+  const rows = feats.slice().sort((a, b) => String(a.slug).localeCompare(String(b.slug)))
+    .map(f => `| ${f.slug} | ${f.domain} | ${f.risk} | ${f.status} | ${f.depth || '-'} | ${f.owner || '-'} |`)
+  return `# Phase 1 Completion Gate\n\n` +
+    `${ledger.features_done || 0}/${ledger.features_total || 0} feature(s) accounted for · ${ledger.batches_done || 0}/${ledger.batches_total || 0} batch(es).\n\n` +
+    `Status counts: ${Object.entries(byStatus).map(([k, v]) => `${k}=${v}`).join(', ') || '(none)'}\n\n` +
+    (blocked.length
+      ? `## ⚠️ Coverage gaps (blocked: ${blocked.length}) — reviewed + reported, never silently skipped\n${blocked.map(f => `- ${f.slug} (${f.domain})`).join('\n')}\n`
+      : `No coverage gaps — every feature is fast/deep-mapped or terminally reconciled.\n`) +
+    `\n## Ledger\n| Feature | Domain | Risk | Status | Depth | Owner |\n|---|---|---|---|---|---|\n${rows.join('\n')}\n`
+}
+
 function _writeAtomic(file, data) {
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); const t = `${file}.tmp.${process.pid}.${Math.abs((Date.now() % 1e6))}`; fs.writeFileSync(t, JSON.stringify(data, null, 2)); fs.renameSync(t, file); return true } catch { return false }
 }
 function save(outDir, ledger) { return _writeAtomic(ledgerPath(outDir), recount(ledger)) }
 function load(outDir) { try { return JSON.parse(fs.readFileSync(ledgerPath(outDir), 'utf8')) } catch { return null } }
 
-module.exports = { STATUSES, DEPTHS, TERMINAL, ledgerPath, build, recount, setFeature, addFeatures, isComplete, blockers, pending, reconcileFollowups, save, load }
+module.exports = { STATUSES, DEPTHS, TERMINAL, ledgerPath, build, recount, setFeature, addFeatures, isComplete, blockers, pending, reconcileFollowups, renderGateMd, save, load }
 
 // self-check
 if (require.main === module) {

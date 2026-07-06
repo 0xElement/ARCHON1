@@ -782,6 +782,9 @@ async function runCodeReview(dispatch, deps) {
     if (stuck.length) mappingLedger.save(outDir, ledger)
     const nBlocked = mappingLedger.blockers(ledger).length
     log(`✅ Phase 1 completion gate: ${ledger.features_done}/${ledger.features_total} accounted for${nBlocked ? `, ${nBlocked} blocked (coverage gap — reported, not skipped)` : ''}`)
+    // S7: deterministic completion-gate artifact from the ledger (authoritative — the CURATOR consolidation
+    // also produces coverage matrices, but this one can never drift from the ledger's truth).
+    try { fs.mkdirSync(`${outDir}/phase1-maps`, { recursive: true }); fs.writeFileSync(`${outDir}/phase1-maps/completion-gate.md`, mappingLedger.renderGateMd(ledger)) } catch {}
   }
 
   // The features that were deep-reviewed (feature × class) — what freehand, the report + the return describe.

@@ -59,6 +59,18 @@ test('S6 pending: non-terminal features feed the completion gate', () => {
   assert.equal(L.pending(led).length, 0); assert.ok(L.isComplete(led))
 })
 
+test('S7 renderGateMd: counts, coverage gaps, ledger table', () => {
+  let led = L.build('t', [{ id: 'b1', domain: 'auth_identity', risk: 'high', owner: 'marshal', features: [{ slug: 'login' }, { slug: 'reset' }] }])
+  led = L.setFeature(led, 'login', { status: 'done', depth: 'deep_complete' })
+  led = L.setFeature(led, 'reset', { status: 'blocked' })
+  const md = L.renderGateMd(led)
+  assert.match(md, /Phase 1 Completion Gate/)
+  assert.match(md, /Coverage gaps \(blocked: 1\)/)
+  assert.match(md, /login/); assert.match(md, /reset/)
+  led = L.setFeature(led, 'reset', { status: 'done' })
+  assert.match(L.renderGateMd(led), /No coverage gaps/)
+})
+
 test('blockers surfaced; save/load round-trip', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-'))
   let l = L.build('t1', batches)

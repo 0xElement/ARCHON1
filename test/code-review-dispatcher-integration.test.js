@@ -190,6 +190,8 @@ function stubDeps(spawnCalls, emitted = []) {
       ok('S6: ledger accounts for the reconciled feature', led.features['oauth-callback'] && led.features['oauth-callback'].status === 'done')
       ok('S6: completion gate — every feature terminal',
         Object.values(led.features).every(f => ['done', 'deep_complete', 'merged', 'duplicate', 'non_security', 'dead_code', 'blocked'].includes(f.status)))
+      ok('S7: deterministic completion-gate.md written from the ledger',
+        fs.existsSync(path.join(outDir, 'phase1-maps', 'completion-gate.md')))
     } catch (e) { ok('S6: ledger readable', false, e.message) }
     fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
   }
