@@ -85,8 +85,7 @@
             <div id="crFields" style="display:none">
               <div class="field"><label>Source directory <span class="req">*</span></label>
                 <input class="input" id="crSourceDir" placeholder="/Users/you/Documents/project  (absolute, local)">
-                <div class="hint">Absolute path to the source tree to review (white-box), or
-                  <label style="cursor:pointer;color:var(--accent-2);text-decoration:underline">upload a .zip<input type="file" accept=".zip,application/zip" id="crSourceZip" hidden></label>.</div>
+                <div class="hint">Absolute path to the source tree to review (white-box).</div>
                 <div class="hint scheck" id="crSourceCheck"></div></div>
               <div class="row2">
                 <div class="field"><label>Deploy URL <span style="color:var(--fg-dim)">(optional)</span></label>
@@ -120,8 +119,7 @@
               <div id="ptSourceGroup" style="display:none">
                 <div class="field"><label>Source code directory <span class="req">*</span></label>
                   <input class="input" id="ptSourceDir" placeholder="/Users/you/Documents/project">
-                  <div class="hint">Absolute path to the source tree, or
-                    <label style="cursor:pointer;color:var(--accent-2);text-decoration:underline">upload a .zip<input type="file" accept=".zip,application/zip" id="ptSourceZip" hidden></label>. ARCHON maps the codebase automatically.</div>
+                  <div class="hint">Absolute path to the source tree to review. ARCHON maps the codebase automatically.</div>
                   <div class="hint scheck" id="ptSourceCheck"></div></div>
               </div>
               <div id="ptBlackGroup">
@@ -137,9 +135,10 @@
                     <textarea class="textarea" id="ptOutScope" placeholder="blog.example.com&#10;status.example.com" style="min-height:84px"></textarea></div>
                 </div>
               </div>
-              <div class="field"><label>Test accounts <span style="color:var(--fg-dim)">(the users to test with)</span></label>
+              <div class="field"><label>Test accounts <span style="color:var(--fg-dim)">(add the users to test with)</span></label>
                 <div id="ptCreds"></div>
-                <div class="hint">A high-privilege and a low-privilege account. Agents authenticate as each and test cross-privilege authorization (IDOR / privilege escalation). Leave blank for unauthenticated black-box testing.</div></div>
+                <button type="button" class="btn sm ghost" id="ptAddCred" style="margin-top:8px">＋ Add user</button>
+                <div class="hint">Each row: username · password · role. Agents authenticate as each role and test cross-role authorization (IDOR / privilege escalation).</div></div>
               <div class="field" id="ptStrategyField"><label>Scan strategy</label>
                 <div class="hint" style="margin:2px 0 7px">Vulnerability focus — pick classes to run a <b>focused</b> scan (none selected = full A→Z deep dive)</div>
                 <div class="focus-pick" id="ptFocusClasses">
@@ -165,9 +164,11 @@
             </div>
 
             <div class="field" id="fGoalField"><label id="fGoalLabel">Goal / target <span class="req">*</span></label><textarea class="textarea" id="fGoal" placeholder="What should the squad attack? Red-team: objective. Network: CIDR/host. Cloud: account/region."></textarea></div>
-            <div class="field"><label>Model override <span style="color:var(--fg-dim)">(optional)</span></label>
-              <select class="select" id="fModel"><option value="">auto (router decides)</option></select>
-              <div class="hint" id="fModelHint">Loading available models…</div></div>
+            <div class="row2">
+              <div class="field"><label>Priority</label><div class="seg" id="fPriority"><button data-v="low">Low</button><button data-v="normal" class="on">Normal</button><button data-v="high">High</button></div></div>
+              <div class="field"><label>Model override <span style="color:var(--fg-dim)">(optional)</span></label>
+                <select class="select" id="fModel"><option value="">auto (router decides)</option><option value="claude-haiku-4-5">claude-haiku-4-5 · fast</option><option value="claude-sonnet-4-6">claude-sonnet-4-6 · balanced</option><option value="claude-opus-4-8">claude-opus-4-8 · powerful</option></select></div>
+            </div>
             <button class="btn primary" id="fSubmit"><svg viewBox="0 0 24 24"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg> Dispatch to squad</button>
           </div>
           <div class="card"><h3>What happens</h3><div class="md" id="dispatchInfo"></div></div>

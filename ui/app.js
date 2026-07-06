@@ -301,17 +301,44 @@ function render(s) {
   renderTasks(s)
   renderReports(s)
 }
-// Overview empty-state (rendered ONLY when state.tasks is empty). A neutral prompt
-// to dispatch the first run — the pipeline stages it will move through, no fabricated
-// target or findings. Uses only .demo-* classes (in app.css).
-const DEMO_LOOP_HTML = `<div class="demo-inline">
+// Overview empty-state: an animated preview of what a run looks like (dispatch →
+// progress → findings stream → report). Uses only .demo-* classes (in app.css); the
+// sample findings are illustrative — rendered ONLY when state.tasks is empty.
+const DEMO_LOOP_HTML = `<p class="empty" style="text-align:left;margin:0 0 12px">No runs yet — here's what one looks like. Queue a target from <b>New dispatch</b> to begin.</p>
+<div class="demo-inline">
   <div class="demo-body">
-    <p class="empty" style="text-align:left;margin:0 0 16px;font-size:14px">No runs yet. Queue a target from <b>New dispatch</b> — every run moves through the same pipeline:</p>
     <div class="demo-stage">
       <div class="demo-s1"><b>▸ DISPATCH</b><small>target accepted · scope gate passed</small></div>
       <div class="demo-s2"><b>▸ LIVE PROGRESS</b><small>recon → fingerprint → plan → specialist waves</small></div>
-      <div class="demo-s3"><b>▸ FINDINGS</b><small>independently verified live as they land</small></div>
-      <div class="demo-s4"><b>▸ REPORT GENERATED</b><small>SCRIBE writes one de-duplicated report</small></div>
+      <div class="demo-s3"><b>▸ FINDINGS</b><small>verified live as they land</small></div>
+      <div class="demo-s4"><b>▸ REPORT GENERATED</b><small>SCRIBE wrote one de-duplicated report</small></div>
+    </div>
+    <div class="demo-cols">
+      <div class="demo-card" style="position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent)"></div>
+        <div style="font-weight:650;font-size:14.5px">juice-shop.local</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--fg-dim);margin-top:3px">ENG-4471 · black-box + source</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;color:var(--accent-2);margin-top:9px"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(124,131,255,.22)"></span>running</div>
+        <div class="demo-bars">
+          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Recon &amp; fingerprint</div><div class="demo-bar b1"><i></i></div></div>
+          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">ATLAS attack plan</div><div class="demo-bar b2"><i></i></div></div>
+          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Specialist waves</div><div class="demo-bar b3"><i></i></div></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:15px;flex-wrap:wrap">
+          <span class="chip" style="color:#22d3ee">SCOUT</span><span class="chip" style="color:#fb7185">VIPER</span><span class="chip" style="color:#fbbf24">DRILL</span><span class="chip" style="color:#34d399">WARDEN</span><span class="chip" style="color:#b08cff">RELAY</span>
+        </div>
+      </div>
+      <div class="demo-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span style="font-size:12.5px;font-weight:600">Findings board</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--fg-dim)">verified · one at a time</span>
+        </div>
+        <div class="demo-find demo-f1"><span class="badge sev-critical">CRIT</span><span class="t">SQL injection · /rest/products/search</span><span class="sc" style="color:var(--emerald)">9.8</span></div>
+        <div class="demo-find demo-f2"><span class="badge sev-high">HIGH</span><span class="t">JWT algorithm confusion</span><span class="sc">8.1</span></div>
+        <div class="demo-find demo-f3"><span class="badge sev-medium">MED</span><span class="t">Stored XSS · product review</span><span class="sc">6.1</span></div>
+        <div class="demo-find demo-f4"><span class="badge sev-high">HIGH</span><span class="t">IDOR · /api/basket/{id}</span><span class="sc">7.5</span></div>
+        <div class="demo-report"><span class="chk">✓</span><div style="flex:1"><div style="font-size:12.5px;font-weight:600">report.md</div><div style="font-family:var(--mono);font-size:10.5px;color:var(--fg-dim)">4 confirmed · correlated + de-duplicated</div></div></div>
+      </div>
     </div>
   </div>
 </div>`
@@ -891,25 +918,23 @@ const isCR = () => $('#fSquad').value === 'code-review'
 const isPT = () => $('#fSquad').value === 'pentest'
 
 // ── pentest credential rows ──
-// Two fixed privilege levels — a high-priv and a low-priv account — so the squad
-// can test cross-privilege authorization (IDOR / privilege escalation). The role
-// is a fixed level, shown as a static label with a hidden `.cr` field so the
-// collector below (reads .cu / .cp / .cr) is unchanged.
-function credRow(role, label) {
+function credRow(u = '', p = '', role = 'normal') {
   const div = document.createElement('div')
   div.className = 'credrow'
   div.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center'
-  div.innerHTML = `<span class="credrole" style="flex:0 0 118px;font-size:12.5px;font-weight:600;color:var(--fg-mut)">${esc(label)}</span>
-    <input class="input cu" placeholder="username" style="flex:2">
-    <input class="input cp" placeholder="password" style="flex:2">
-    <input type="hidden" class="cr" value="${esc(role)}">`
+  div.innerHTML = `<input class="input cu" placeholder="username" value="${esc(u)}" style="flex:2">
+    <input class="input cp" placeholder="password" value="${esc(p)}" style="flex:2">
+    <select class="select cr" style="flex:1">
+      <option value="admin"${role === 'admin' ? ' selected' : ''}>admin</option>
+      <option value="normal"${role === 'normal' ? ' selected' : ''}>normal</option>
+      <option value="other"${role === 'other' ? ' selected' : ''}>other</option>
+    </select>
+    <button type="button" class="btn sm danger cx" title="remove" style="flex:0 0 auto">✕</button>`
+  div.querySelector('.cx').onclick = () => div.remove()
   return div
 }
-function ensureCredRows() {
-  const box = $('#ptCreds'); if (!box || box.children.length) return
-  box.appendChild(credRow('high', 'High-priv user'))
-  box.appendChild(credRow('low', 'Low-priv user'))
-}
+function ensureCredRows() { if (!$('#ptCreds').children.length) $('#ptCreds').appendChild(credRow()) }
+if ($('#ptAddCred')) $('#ptAddCred').onclick = () => $('#ptCreds').appendChild(credRow())
 
 // ATLAS → specialist waves → triage. Pass the squad's roster; falls back to defaults.
 // Purely presentational overview diagram (.dvz-* styles live in app.css); safe to add/remove.
@@ -960,6 +985,7 @@ function updateDispatchInfo() {
       + `\n\nLive status, per-agent cost and model routing appear under **Tasks**. The final report lands under **Reports**.\n\n> Dispatch & cancel flow through the daemon's inbox — the console never writes core state directly.`)
 }
 $('#fSquad').addEventListener('change', updateDispatchInfo)
+$$('#fPriority button').forEach(b => b.onclick = () => { $$('#fPriority button').forEach(x => x.classList.remove('on')); b.classList.add('on') })
 $$('#ptType button').forEach(b => b.onclick = () => { $$('#ptType button').forEach(x => x.classList.remove('on')); b.classList.add('on'); $('#ptFocusField').style.display = b.dataset.v === 'feature' ? 'block' : 'none' })
 // focus-class chips: multi-select toggle (none on = full A→Z). The "Custom /
 // abuse-driven" chip (data-custom) reveals the free-text box instead of being a class.
@@ -998,11 +1024,12 @@ $('#fSubmit').onclick = async () => {
     const dep = $('#crDeployUrl').value.trim(); if (dep) meta.deployUrl = dep
     const mf = +$('#crMaxFeatures').value; if (mf > 0) meta.maxFeatures = mf
     const mp = +$('#crMaxPhase2').value; if (mp > 0) meta.maxPhase2 = mp
-    body = { squad, taskTitle: $('#fTitle').value.trim() || undefined, meta }
+    body = { squad, taskTitle: $('#fTitle').value.trim() || undefined, priority: ($('#fPriority button.on') || {}).dataset?.v || 'normal', meta }
   } else if (isPT()) {
     const mode = ($('#ptMode button.on') || {}).dataset?.v || 'blackbox'
     const targetUrl = $('#ptUrl').value.trim()
     const sourceDir = $('#ptSourceDir').value.trim()
+    const prio = ($('#fPriority button.on') || {}).dataset?.v || 'normal'
     const title = $('#fTitle').value.trim() || undefined
     const credentials = $$('#ptCreds .credrow').map(r => ({
       username: r.querySelector('.cu').value.trim(), password: r.querySelector('.cp').value, role: r.querySelector('.cr').value,
@@ -1014,7 +1041,7 @@ $('#fSubmit').onclick = async () => {
       const meta = { sourceDir }   // stack auto-detected by the code-review engine (stack-agnostic)
       if (targetUrl) meta.deployUrl = targetUrl
       if (credentials.length) meta.testAccounts = { attacker: credentials[0], ...(credentials[1] ? { victim: credentials[1] } : {}) }
-      body = { squad: 'code-review', taskTitle: title, meta }
+      body = { squad: 'code-review', taskTitle: title, priority: prio, meta }
     } else {
       // black-box OR white-box → live pentest (white-box also runs a source-review iteration)
       if (!targetUrl) { toast('Target URL required', 'e.g. https://app.example.com', 'err'); $('#ptUrl').focus(); return }
@@ -1030,12 +1057,12 @@ $('#fSubmit').onclick = async () => {
         if (!sourceDir) { toast('Source directory required', 'White-box needs a live URL and a source directory', 'err'); $('#ptSourceDir').focus(); return }
         meta.sourceDir = sourceDir   // stack auto-detected (stack-agnostic)
       }
-      body = { squad: 'pentest', taskTitle: title, meta }
+      body = { squad: 'pentest', taskTitle: title, priority: prio, meta }
     }
   } else {
     const goal = $('#fGoal').value.trim()
     if (!goal) { toast('Goal required', 'Describe the target or task', 'err'); $('#fGoal').focus(); return }
-    body = { squad, goal, taskTitle: $('#fTitle').value.trim() || goal.slice(0, 80), model: $('#fModel').value || undefined }
+    body = { squad, goal, taskTitle: $('#fTitle').value.trim() || goal.slice(0, 80), priority: ($('#fPriority button.on') || {}).dataset?.v || 'normal', model: $('#fModel').value || undefined }
   }
   $('#fSubmit').disabled = true
   const r = await api('POST', '/api/dispatch', body)
@@ -1067,34 +1094,6 @@ function wireSourceCheck(inputId, hintId) {
 }
 wireSourceCheck('crSourceDir', 'crSourceCheck')
 wireSourceCheck('ptSourceDir', 'ptSourceCheck')
-// Upload a .zip of the source tree → extracted server-side into var/intel/uploads,
-// whose absolute path fills the source field (the daemon then reads it off disk like
-// any pasted path). Raw-bytes POST — no multipart parser needed.
-function wireSourceUpload(fileId, textId, hintId) {
-  const fileInp = document.getElementById(fileId), textInp = document.getElementById(textId), hint = document.getElementById(hintId)
-  if (!fileInp || !textInp) return
-  fileInp.addEventListener('change', async () => {
-    const f = fileInp.files && fileInp.files[0]
-    if (!f) return
-    const setHint = (msg, cls) => { if (hint) { hint.textContent = msg; hint.className = 'hint scheck' + (cls ? ' ' + cls : '') } }
-    setHint(`↑ uploading ${f.name} (${(f.size / 1048576).toFixed(1)} MB)…`)
-    try {
-      const buf = await f.arrayBuffer()
-      const r = await fetch('/api/upload-source', { method: 'POST', headers: { 'content-type': 'application/zip', 'x-filename': f.name }, body: buf }).then(x => x.json())
-      if (r && r.ok) {
-        textInp.value = r.sourceDir
-        setHint(`✓ extracted ${r.files} files → ${r.sourceDir}`, 'ok')
-        textInp.classList.add('src-ok'); textInp.classList.remove('src-bad')
-      } else {
-        setHint(`✗ ${(r && r.error) || 'upload failed'}`, 'bad')
-      }
-    } catch (e) {
-      setHint(`✗ ${e.message || e}`, 'bad')
-    } finally { fileInp.value = '' }
-  })
-}
-wireSourceUpload('crSourceZip', 'crSourceDir', 'crSourceCheck')
-wireSourceUpload('ptSourceZip', 'ptSourceDir', 'ptSourceCheck')
 async function tick() { const s = await api('GET', '/api/state'); if (s && !s.error) render(s); if (currentView === 'overview') renderHealth() }
 // System Health card — the Operational Supervisor's latest snapshot
 async function renderHealth() {
@@ -1111,26 +1110,10 @@ async function renderHealth() {
   $('#healthSub').className = 'sub ' + (h.ok ? '' : 'warn')
   el.innerHTML = `<div class="hbanner ${h.ok ? 'ok' : 'warn'}">${h.ok ? '✓ All operational invariants healthy' : '⚠ Anomaly — see below'}</div>${rows}${meta}${fixes}${sent}`
 }
-// Populate the "Model override" dropdown from the models the SDK/CLI actually
-// advertises for this subscription (falls back to model-config.json server-side).
-// Non-blocking: the dropdown stays usable with its "auto" default until this lands.
-async function populateModels() {
-  const sel = $('#fModel'), hint = $('#fModelHint')
-  if (!sel) return
-  const r = await api('GET', '/api/models')
-  const models = (r && Array.isArray(r.models)) ? r.models : []
-  if (models.length) {
-    sel.innerHTML = '<option value="">auto (router decides)</option>' +
-      models.map(m => `<option value="${esc(m.value)}">${esc(m.label || m.value)}</option>`).join('')
-  }
-  if (hint) hint.textContent = models.length
-    ? `${models.length} models · ${r.source === 'sdk' ? 'from your Claude subscription' : 'from model-config.json'}`
-    : 'Using the router default (model list unavailable).'
-}
 async function boot() {
   const r = await api('GET', '/api/squads')
   SQUADS = (r && r.squads) || []
   SQUAD_BY = Object.fromEntries(SQUADS.map(s => [s.id, s]))
-  renderSquads(); populateModels(); await tick(); setInterval(tick, 2500)
+  renderSquads(); await tick(); setInterval(tick, 2500)
 }
 boot()
