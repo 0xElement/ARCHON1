@@ -139,7 +139,8 @@
                 <div id="ptCreds"></div>
                 <button type="button" class="btn sm ghost" id="ptAddCred" style="margin-top:8px">＋ Add user</button>
                 <div class="hint">Each row: username · password · role. Agents authenticate as each role and test cross-role authorization (IDOR / privilege escalation).</div></div>
-              <div class="field" id="ptStrategyField"><label>Scan strategy</label>
+              <!-- Vulnerability-focus picker disabled: every scan runs the full A→Z deep dive. -->
+              <div class="field" id="ptStrategyField" hidden><label>Scan strategy</label>
                 <div class="hint" style="margin:2px 0 7px">Vulnerability focus — pick classes to run a <b>focused</b> scan (none selected = full A→Z deep dive)</div>
                 <div class="focus-pick" id="ptFocusClasses">
                   <button type="button" data-cls="access-control">Access control / IDOR</button>

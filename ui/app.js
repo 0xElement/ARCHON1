@@ -1022,10 +1022,9 @@ $('#fSubmit').onclick = async () => {
       const featureFocus = $('#ptFocus').value.trim()
       if (testType === 'feature' && !featureFocus) { toast('Focus required', 'Name the features to focus on', 'err'); $('#ptFocus').focus(); return }
       const lines = id => $(id).value.split('\n').map(s => s.trim()).filter(Boolean)
-      const meta = { targetUrl, testType, inScope: lines('#ptInScope'), outOfScope: lines('#ptOutScope'), credentials, skipRecon: false, focusClasses: $$('#ptFocusClasses button.on').map(b => b.dataset.cls).filter(Boolean) }
+      // Vulnerability-focus picker disabled — always run the full A→Z scan (no class narrowing).
+      const meta = { targetUrl, testType, inScope: lines('#ptInScope'), outOfScope: lines('#ptOutScope'), credentials, skipRecon: false, focusClasses: [] }
       if (testType === 'feature') meta.featureFocus = featureFocus
-      const customFocus = $('#ptCustomChip').classList.contains('on') ? $('#ptCustomFocus').value.trim() : ''
-      if (customFocus) meta.customFocus = customFocus
       if (mode === 'whitebox') {
         if (!sourceDir) { toast('Source directory required', 'White-box needs a live URL and a source directory', 'err'); $('#ptSourceDir').focus(); return }
         meta.sourceDir = sourceDir   // stack auto-detected (stack-agnostic)
