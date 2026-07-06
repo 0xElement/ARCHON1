@@ -24,3 +24,6 @@ benchmark/results-*.json
 
 # git bundles (backups)
 *.bundle
+
+# release artifact (produced by npm run pack:release, uploaded to GitHub Releases)
+archon-release.zip

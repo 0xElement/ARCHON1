@@ -304,41 +304,14 @@ function render(s) {
 // Overview empty-state: an animated preview of what a run looks like (dispatch →
 // progress → findings stream → report). Uses only .demo-* classes (in app.css); the
 // sample findings are illustrative — rendered ONLY when state.tasks is empty.
-const DEMO_LOOP_HTML = `<p class="empty" style="text-align:left;margin:0 0 12px">No runs yet — here's what one looks like. Queue a target from <b>New dispatch</b> to begin.</p>
-<div class="demo-inline">
+const DEMO_LOOP_HTML = `<div class="demo-inline">
   <div class="demo-body">
+    <p class="empty" style="text-align:left;margin:0 0 16px;font-size:14px">No runs yet. Queue a target from <b>New dispatch</b> — every run moves through the same pipeline:</p>
     <div class="demo-stage">
       <div class="demo-s1"><b>▸ DISPATCH</b><small>target accepted · scope gate passed</small></div>
       <div class="demo-s2"><b>▸ LIVE PROGRESS</b><small>recon → fingerprint → plan → specialist waves</small></div>
-      <div class="demo-s3"><b>▸ FINDINGS</b><small>verified live as they land</small></div>
-      <div class="demo-s4"><b>▸ REPORT GENERATED</b><small>SCRIBE wrote one de-duplicated report</small></div>
-    </div>
-    <div class="demo-cols">
-      <div class="demo-card" style="position:relative;overflow:hidden">
-        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent)"></div>
-        <div style="font-weight:650;font-size:14.5px">juice-shop.local</div>
-        <div style="font-family:var(--mono);font-size:11px;color:var(--fg-dim);margin-top:3px">ENG-4471 · black-box + source</div>
-        <div style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;color:var(--accent-2);margin-top:9px"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(124,131,255,.22)"></span>running</div>
-        <div class="demo-bars">
-          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Recon &amp; fingerprint</div><div class="demo-bar b1"><i></i></div></div>
-          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">ATLAS attack plan</div><div class="demo-bar b2"><i></i></div></div>
-          <div><div style="font-size:11px;color:var(--fg-mut);margin-bottom:5px">Specialist waves</div><div class="demo-bar b3"><i></i></div></div>
-        </div>
-        <div style="display:flex;gap:6px;margin-top:15px;flex-wrap:wrap">
-          <span class="chip" style="color:#22d3ee">SCOUT</span><span class="chip" style="color:#fb7185">VIPER</span><span class="chip" style="color:#fbbf24">DRILL</span><span class="chip" style="color:#34d399">WARDEN</span><span class="chip" style="color:#b08cff">RELAY</span>
-        </div>
-      </div>
-      <div class="demo-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <span style="font-size:12.5px;font-weight:600">Findings board</span>
-          <span style="font-family:var(--mono);font-size:11px;color:var(--fg-dim)">verified · one at a time</span>
-        </div>
-        <div class="demo-find demo-f1"><span class="badge sev-critical">CRIT</span><span class="t">SQL injection · /rest/products/search</span><span class="sc" style="color:var(--emerald)">9.8</span></div>
-        <div class="demo-find demo-f2"><span class="badge sev-high">HIGH</span><span class="t">JWT algorithm confusion</span><span class="sc">8.1</span></div>
-        <div class="demo-find demo-f3"><span class="badge sev-medium">MED</span><span class="t">Stored XSS · product review</span><span class="sc">6.1</span></div>
-        <div class="demo-find demo-f4"><span class="badge sev-high">HIGH</span><span class="t">IDOR · /api/basket/{id}</span><span class="sc">7.5</span></div>
-        <div class="demo-report"><span class="chk">✓</span><div style="flex:1"><div style="font-size:12.5px;font-weight:600">report.md</div><div style="font-family:var(--mono);font-size:10.5px;color:var(--fg-dim)">4 confirmed · correlated + de-duplicated</div></div></div>
-      </div>
+      <div class="demo-s3"><b>▸ FINDINGS</b><small>independently verified live as they land</small></div>
+      <div class="demo-s4"><b>▸ REPORT GENERATED</b><small>SCRIBE writes one de-duplicated report</small></div>
     </div>
   </div>
 </div>`
