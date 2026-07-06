@@ -62,6 +62,22 @@ function isComplete(ledger) {
   return feats.length > 0 && feats.every(f => TERMINAL.has(f.status))
 }
 function blockers(ledger) { return Object.values((ledger && ledger.features) || {}).filter(f => f.status === 'blocked') }
+function pending(ledger) { return Object.values((ledger && ledger.features) || {}).filter(f => !TERMINAL.has(f.status)) }
+
+// Reconcile raw follow-up items (§9) against the ledger: NEW (unknown slug → must be mapped), DUPLICATE
+// (already a feature). Dedups within the list. Nothing may remain only in followup-features.jsonl — new
+// items get added + mapped; duplicates are accounted for by the existing feature.
+function reconcileFollowups(followups, ledger) {
+  const existing = new Set(Object.keys((ledger && ledger.features) || {}))
+  const seen = new Set()
+  const newFeatures = [], duplicates = []
+  for (const f of followups || []) {
+    if (!f || !f.slug || seen.has(f.slug)) continue
+    seen.add(f.slug)
+    ;(existing.has(f.slug) ? duplicates : newFeatures).push(f)
+  }
+  return { newFeatures, duplicates }
+}
 
 function _writeAtomic(file, data) {
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); const t = `${file}.tmp.${process.pid}.${Math.abs((Date.now() % 1e6))}`; fs.writeFileSync(t, JSON.stringify(data, null, 2)); fs.renameSync(t, file); return true } catch { return false }
@@ -69,7 +85,7 @@ function _writeAtomic(file, data) {
 function save(outDir, ledger) { return _writeAtomic(ledgerPath(outDir), recount(ledger)) }
 function load(outDir) { try { return JSON.parse(fs.readFileSync(ledgerPath(outDir), 'utf8')) } catch { return null } }
 
-module.exports = { STATUSES, DEPTHS, TERMINAL, ledgerPath, build, recount, setFeature, addFeatures, isComplete, blockers, save, load }
+module.exports = { STATUSES, DEPTHS, TERMINAL, ledgerPath, build, recount, setFeature, addFeatures, isComplete, blockers, pending, reconcileFollowups, save, load }
 
 // self-check
 if (require.main === module) {

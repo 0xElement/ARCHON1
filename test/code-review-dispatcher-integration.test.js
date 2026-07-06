@@ -155,6 +155,45 @@ function stubDeps(spawnCalls, emitted = []) {
     fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
   }
 
+  // ── S6: a follow-up a mapper writes gets reconciled — mapped + assessed in a reconcile round ──
+  {
+    const srcDir = makeSourceDir()
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crout-'))
+    const calls = []
+    let wroteFollowup = false
+    const deps = {
+      spawnAgent: async (agentName, taskId, prompt, sessionSuffix) => {
+        calls.push({ agentName, sessionSuffix })
+        if (sessionSuffix && sessionSuffix.includes('-batch')) {
+          const dirM = prompt.match(/(\S+)\/phase1-maps\/features\//)
+          const slugs = [...prompt.matchAll(/slug:\s*([a-z0-9_-]+)/gi)].map(m => m[1])
+          if (dirM) {
+            for (const slug of slugs) { try { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${slug}.md`, `# ${slug}`) } catch {} }
+            // on the FIRST original batch (not a reconcile round), the mapper discovers a related feature
+            if (!wroteFollowup && !sessionSuffix.includes('batchR')) {
+              wroteFollowup = true
+              try { fs.appendFileSync(`${dirM[1]}/phase1-maps/followup-features.jsonl`, JSON.stringify({ slug: 'oauth-callback', name: 'OAuth Callback', domain: 'auth_identity', risk_hint: 'high', keywords: 'oauth' }) + '\n') } catch {}
+            }
+          }
+        }
+        return { code: 0, agentName, cost: { totalCost: 0, model: 'm', tokens: { total: 1 } }, output: '{}' }
+      },
+      trackCosts: () => {}, updateProgress: () => {}, log: () => {}, logActivity: () => {},
+    }
+    await cr.runCodeReview({ taskId: 'cr-s6', squad: 'code-review-squad', projectId: '',
+      meta: { sourceDir: srcDir, vulnClasses: ['xss'], outputDir: outDir, features: [{ slug: 'login', name: 'Login', domain: 'auth_identity', risk_hint: 'high', keywords: 'auth' }] } }, deps)
+    ok('S6: the followup was mapped + assessed in a reconcile round',
+      calls.some(c => c.sessionSuffix.includes('batchR1')) && calls.some(c => c.sessionSuffix.includes('p2-xss-oauth-callback')),
+      calls.map(c => c.sessionSuffix).filter(s => /batchR|oauth/.test(s)).join(','))
+    try {
+      const led = JSON.parse(fs.readFileSync(path.join(outDir, 'phase1-maps', 'mapping-ledger.json'), 'utf8'))
+      ok('S6: ledger accounts for the reconciled feature', led.features['oauth-callback'] && led.features['oauth-callback'].status === 'done')
+      ok('S6: completion gate — every feature terminal',
+        Object.values(led.features).every(f => ['done', 'deep_complete', 'merged', 'duplicate', 'non_security', 'dead_code', 'blocked'].includes(f.status)))
+    } catch (e) { ok('S6: ledger readable', false, e.message) }
+    fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
+  }
+
   // ── Test 1b: DEFAULTS map + deep-assess EVERY feature (no caps) ──
   // Guards BOTH silent caps at once with 12 features and NO maxFeatures / maxPhase2:
   //   • old `maxFeatures || 10` floor  → would map only 10   (now: all 12)

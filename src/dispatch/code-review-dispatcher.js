@@ -128,6 +128,7 @@ const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
 const MAX_FEATURES_PER_BATCH = 8
 const MAX_PARALLEL_MAPPERS = 6
 const BATCH_CONCURRENCY = 3 // per-batch pipeline: how many batches map+review at once (modest overlap)
+const MAX_FOLLOWUP_ROUNDS = 3 // reconciliation rounds — bounds the map→followup→map loop (§4)
 // ONE comprehensive source-file extension set — the SAME list gates BOTH preflight file-detection AND
 // the scripted inventory grep, so any language a real codebase ships in gets enumerated (not just JS/TS).
 // Real source can be anything; keep this broad. The mapping agents also read the live tree directly, so
@@ -739,6 +740,48 @@ async function runCodeReview(dispatch, deps) {
         trackCosts(more)
       }
     } catch (e) { log(`⚠️ re-plan (non-fatal): ${e.message}`) }
+  }
+
+  // S6: FOLLOW-UP RECONCILIATION + completion gate — nothing may remain only in followup-features.jsonl
+  // (§9). Read the followups agents wrote, add genuinely-new features to the ledger + a feature-queue
+  // delta, fast-map + assess them; bounded to MAX_FOLLOWUP_ROUNDS so it always terminates. Then the gate:
+  // every feature must be terminal — a non-terminal one is a coverage gap marked 'blocked' (never silent, §13).
+  if (ledger && (runPhase('mapping') || runPhase('phase2'))) {
+    const readJsonl = (file) => { try { return fs.readFileSync(file, 'utf8').split('\n').map(l => { try { return JSON.parse(l.trim()) } catch { return null } }).filter(Boolean) } catch { return [] } }
+    for (let round = 1; round <= MAX_FOLLOWUP_ROUNDS && !cancelled(); round++) {
+      const { newFeatures } = mappingLedger.reconcileFollowups(readJsonl(`${outDir}/phase1-maps/followup-features.jsonl`), ledger)
+      if (!newFeatures.length) break
+      const fresh = featureBatching.annotate(newFeatures)
+      log(`🔁 Reconcile round ${round}: +${fresh.length} new feature(s) from followups`)
+      logActivity('CURATOR', `🔁 Reconcile round ${round}: +${fresh.length} follow-up feature(s) mapped`, { taskId, squad, projectId: projectId || '' })
+      ledger = mappingLedger.addFeatures(ledger, fresh); mappingLedger.save(outDir, ledger)
+      try { fs.writeFileSync(`${outDir}/phase1-maps/feature-queue.delta.json`, JSON.stringify({ round, features: fresh }, null, 2)) } catch {}
+      const rBatches = featureBatching.assignBatches(featureBatching.createBatches(fresh, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
+      await runWaves(rBatches, BATCH_CONCURRENCY, async (batch) => {
+        if (cancelled()) return null
+        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
+        mappingLedger.save(outDir, ledger)
+        await spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batchR${round}-${batch.id}`, null)
+        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
+        mappingLedger.save(outDir, ledger)
+        if (!runPhase('phase2') || cancelled()) return null
+        const jobs = []
+        for (const f of batch.features) { if (fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`)) { _assessedFeatures.add(f.slug); for (const cls of vulnClasses) { jobs.push({ cls, feature: f }); _doneJobs.push({ cls, feature: f }) } } }
+        await runWaves(jobs, WAVE, async ({ cls, feature }) => {
+          const agent = CLASS[cls].agent
+          const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null)
+          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch {} }
+          return r
+        })
+        return null
+      })
+    }
+    // Completion gate (§13): any non-terminal feature is a coverage gap → 'blocked' (never a silent skip).
+    const stuck = mappingLedger.pending(ledger)
+    for (const f of stuck) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked' })
+    if (stuck.length) mappingLedger.save(outDir, ledger)
+    const nBlocked = mappingLedger.blockers(ledger).length
+    log(`✅ Phase 1 completion gate: ${ledger.features_done}/${ledger.features_total} accounted for${nBlocked ? `, ${nBlocked} blocked (coverage gap — reported, not skipped)` : ''}`)
   }
 
   // The features that were deep-reviewed (feature × class) — what freehand, the report + the return describe.

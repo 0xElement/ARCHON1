@@ -39,6 +39,26 @@ test('addFeatures (reconciliation): adds new, never overwrites, reopens the gate
   assert.ok(!L.isComplete(l), 'a new queued feature reopens completion')
 })
 
+test('S6 reconcileFollowups: new vs duplicate, deduped', () => {
+  const led = L.build('t', [{ id: 'b1', domain: 'auth_identity', owner: 'marshal', features: [{ slug: 'login', name: 'Login' }] }])
+  const { newFeatures, duplicates } = L.reconcileFollowups([
+    { slug: 'login', name: 'dup of existing' },
+    { slug: 'oauth', name: 'OAuth' },
+    { slug: 'oauth', name: 'OAuth again' }, // dedup within the list
+  ], led)
+  assert.equal(newFeatures.length, 1); assert.equal(newFeatures[0].slug, 'oauth')
+  assert.equal(duplicates.length, 1); assert.equal(duplicates[0].slug, 'login')
+})
+
+test('S6 pending: non-terminal features feed the completion gate', () => {
+  let led = L.build('t', [{ id: 'b1', domain: 'x', owner: 'a', features: [{ slug: 'a' }, { slug: 'b' }] }])
+  led = L.setFeature(led, 'a', { status: 'done' })
+  assert.equal(L.pending(led).length, 1)       // b still queued
+  assert.equal(L.pending(led)[0].slug, 'b')
+  led = L.setFeature(led, 'b', { status: 'blocked' }) // gate marks it a coverage gap
+  assert.equal(L.pending(led).length, 0); assert.ok(L.isComplete(led))
+})
+
 test('blockers surfaced; save/load round-trip', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-'))
   let l = L.build('t1', batches)
