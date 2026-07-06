@@ -46,6 +46,8 @@ const { execSync } = require('child_process')
 const sourcePlanner = require('./source-planner') // M3: rank the Phase-2 queue + re-plan from findings
 const candidateIndex = require('../pipeline/candidate-index') // M5: deduped candidate index + validation queue
 const decisionLog = require('../pipeline/decision-log') // M6: agentic decision log
+const featureBatching = require('./feature-batching') // S1: domain grouping + batch fanout
+const mappingLedger = require('./mapping-ledger')     // S2: the mapping ledger (source of truth)
 
 const METH = path.join(__roots.AGENTS_ROOT, 'squads/code-review/methodology')
 
@@ -122,6 +124,9 @@ const FH_MODE = typeof __roots.sourceReviewMode === 'function' ? __roots.sourceR
 const PHASES = ['inventories', 'blueprint', 'discovery', 'mapping', 'consolidate', 'phase2',
   ...(FH_MODE !== 'off' ? ['freehand'] : []), 'verify', 'report']
 const WAVE = 3 // RAM-safe parallelism (mirrors GATE-134 stocks batching)
+// Scalable mapping defaults (spec §4). Fast-map features in domain batches of ≤8, ≤6 mappers in parallel.
+const MAX_FEATURES_PER_BATCH = 8
+const MAX_PARALLEL_MAPPERS = 6
 // ONE comprehensive source-file extension set — the SAME list gates BOTH preflight file-detection AND
 // the scripted inventory grep, so any language a real codebase ships in gets enumerated (not just JS/TS).
 // Real source can be anything; keep this broad. The mapping agents also read the live tree directly, so
@@ -283,6 +288,40 @@ Ranked Security-Sensitive Areas: for each lead give exact file/method/route, why
 Coverage Notes must be honest: what's AuthZ-verified vs mapped-only, assumptions, unmapped files, blockers.
 
 Write the complete markdown file with bash (mkdir -p the dir first). Then reply with a one-line summary: rows mapped, top lead, residual gaps.`
+}
+
+// S3: FAST-map a BATCH of features with ONE agent (scalable — not one agent per feature). FAST = identify
+// ALL reachable security-relevant surfaces per feature (the fast-map fields), NOT exhaustive line-by-line
+// tracing; deep tracing is a later selective pass (S5). The agent owns ONLY its batch, writes one file per
+// feature, and records related work it finds to followup-features.jsonl for reconciliation (S6).
+function batchMapPrompt(owner, batch, taskId, sourceDir, outDir, invDir) {
+  const list = batch.features.map(f => `- ${f.name} (slug: ${f.slug}${f.keywords ? `; keywords: ${f.keywords}` : ''})`).join('\n')
+  return `You are ${owner.toUpperCase()}, a Phase-1 FAST-mapping agent on the code-review squad (leader CURATOR).
+
+${commonHeader(taskId, sourceDir, outDir, invDir)}
+
+## Your batch — domain: ${batch.domain}, risk: ${batch.risk}. Map ONLY these ${batch.features.length} features, nothing else:
+${list}
+
+RULES (§7): map ONLY your batch's features — do NOT map features outside it, do NOT edit another agent's output.
+If you discover related security-relevant work NOT in your batch, append it (do NOT map it) to
+${outDir}/phase1-maps/followup-features.jsonl — one JSON per line: {"slug","name","domain","risk_hint","keywords","reason"}.
+
+Phase 1 is MAPPING, not vulnerability hunting — record surfaces, suspicious paths, Phase-2 leads, gaps, follow-up.
+
+## Method (per feature, FAST — identify ALL reachable security-relevant surfaces; deep per-path tracing is a
+## later selective pass, not now)
+0. Read the App Blueprint at ${outDir}/phase1-maps/app-blueprint.md FIRST (auth/authZ model + shared infra).
+1. grep the inventory files in ${invDir}/ scoped to each feature's keywords, then read the live source under ${sourceDir}.
+2. For EACH feature in your batch, write ${outDir}/phase1-maps/features/<slug>.md (mkdir -p first) with these fast-map fields:
+   Feature name · Domain · Business purpose · UI paths · Frontend components/forms · API endpoints/actions · GraphQL
+   operations · Controllers/handlers · Services/business logic · Models/queries · Middleware · Auth checks · Role/permission
+   checks · Object-ownership checks · Tenant/org/user boundary · Parameters · Sensitive data read/write · File upload/download
+   paths · External calls · Background jobs · Trust boundaries · Ranked Phase-2 leads · Coverage gaps · Risk score.
+   Fast map does NOT need exhaustive per-path tracing, but it MUST identify EVERY reachable security-relevant surface.
+   Endpoint/Action Ledger: ONE ROW per route+method / mutation / worker / action (never merge GET/POST/PUT/DELETE).
+
+Write one complete markdown file PER feature with bash. Then reply one line: features mapped, top leads, follow-ups written.`
 }
 
 function discoveryPrompt(taskId, sourceDir, outDir, invDir, cap) {
@@ -587,21 +626,33 @@ async function runCodeReview(dispatch, deps) {
     return { error: 'empty feature queue', phase: 'discovery' }
   }
 
-  // Phase 1 — per-feature mapping (one agent per feature, RAM-safe waves)
+  // Phase 1 — SCALABLE fast-mapping: domain-grouped BATCHES (≤8 features each, high-risk domains first),
+  // one agent per batch, ≤6 mappers in parallel — instead of one agent per feature. The mapping ledger is
+  // the source of truth: every feature is queued→in_progress→done (or blocked if its map wasn't produced),
+  // so batches never overlap and no feature is lost. Scales to any N (36/150/300+).
   if (cancelled()) return bail('Phase 1 mapping')
+  let ledger = mappingLedger.load(outDir) // may already exist (phasesOnly reuse)
   if (runPhase('mapping')) {
-    updateProgress(25, `Phase 1: mapping ${features.length} features (waves of ${WAVE})`)
-    logActivity('CURATOR', `🗺️ Phase 1: ${features.length} feature-mapping agents`, { taskId, squad, projectId: projectId || '', details: features.map(f => f.slug).join(', ') })
-    // Bump progress as each feature maps so the bar moves continuously and task.lastUpdate stays
-    // fresh (the stuck-task watchdog keys off it) — a large codebase can spend a long time here.
-    let mapped = 0
-    const results = await runWaves(features, WAVE, async (feature, idx) => {
-      const agent = MAPPER_POOL[idx % MAPPER_POOL.length]
-      const r = await spawnAgent(agent, taskId, featureMapPrompt(agent, feature, taskId, sourceDir, outDir, invDir), `task-${taskId}-map-${feature.slug}`, null)
-      updateProgress(25 + Math.round(28 * (++mapped) / features.length), `Phase 1: mapped ${mapped}/${features.length} features`)
+    const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
+    ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
+    updateProgress(25, `Phase 1: fast-mapping ${features.length} features → ${batches.length} batch(es)`)
+    logActivity('CURATOR', `🗺️ Phase 1: ${features.length} features → ${batches.length} domain batch(es) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
+    const results = await runWaves(batches, MAX_PARALLEL_MAPPERS, async (batch) => {
+      for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
+      mappingLedger.save(outDir, ledger)
+      const r = await spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null)
+      // A feature is 'done' (fast) only if its map was actually produced; else 'blocked' (a coverage gap the
+      // completion gate + reconciliation must resolve — never a silent skip).
+      for (const f of batch.features) {
+        const produced = fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`)
+        ledger = mappingLedger.setFeature(ledger, f.slug, produced ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
+      }
+      mappingLedger.save(outDir, ledger)
+      updateProgress(25 + Math.round(28 * ledger.features_done / Math.max(1, features.length)), `Phase 1: fast-mapped ${ledger.features_done}/${features.length}`)
       return r
     })
     trackCosts(results)
+    log(`🗂️ Fast-map complete: ${ledger.features_done}/${ledger.features_total} feature(s) across ${ledger.batches_done}/${ledger.batches_total} batch(es)`)
   }
 
   // Phase 1c — consolidation
@@ -844,5 +895,6 @@ module.exports = {
   PHASES,
   phase2Prompt,
   freehandPrompt,
+  batchMapPrompt,
   FH_MODE,
 }

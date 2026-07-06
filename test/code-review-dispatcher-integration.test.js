@@ -73,9 +73,9 @@ function stubDeps(spawnCalls, emitted = []) {
     ok('inventories written to disk', fs.existsSync(path.join(outDir, 'phase1-maps/inventories/00_MANIFEST.md')))
     ok('phase2 class dirs created', fs.existsSync(path.join(outDir, 'phase2/access-control')) && fs.existsSync(path.join(outDir, 'phase2/xss')))
 
-    const mapCalls = calls.filter(c => c.sessionSuffix.includes('-map-'))
-    ok('one mapping agent per feature (3)', mapCalls.length === 3, 'got ' + mapCalls.length)
-    ok('mapping agents drawn from specialist pool', mapCalls.every(c => cr.MAPPER_POOL.includes(c.agentName)))
+    const mapCalls = calls.filter(c => c.sessionSuffix.includes('-batch-'))
+    ok('S3: mapping runs in domain BATCHES (≤ features), not one-per-feature', mapCalls.length >= 1 && mapCalls.length <= 3, 'got ' + mapCalls.length)
+    ok('mapping batches owned by specialist-pool agents', mapCalls.length > 0 && mapCalls.every(c => cr.MAPPER_POOL.includes(c.agentName)))
     ok('CURATOR consolidates', calls.some(c => c.sessionSuffix.includes('consolidate') && c.agentName === 'curator'))
 
     const p2 = calls.filter(c => c.sessionSuffix.includes('-p2-'))
@@ -100,6 +100,17 @@ function stubDeps(spawnCalls, emitted = []) {
     ok('AUDITOR verifies', calls.some(c => c.agentName === 'auditor'))
     ok('PROBER skipped (no deployUrl)', !calls.some(c => c.agentName === 'prober'))
     ok('SCRIBE reports last', calls[calls.length - 1].agentName === 'scribe')
+  }
+
+  // ── S3: batchMapPrompt scopes an agent to ONLY its batch's features (spec §7/§14) ──
+  {
+    const batch = { id: 'auth_identity-1', domain: 'auth_identity', risk: 'high', owner: 'marshal',
+      features: [{ slug: 'login', name: 'Login' }, { slug: 'reset', name: 'Reset' }] }
+    const p = cr.batchMapPrompt('marshal', batch, 't1', '/src', '/out', '/inv')
+    ok('S3: batch prompt names each assigned feature', p.includes('login') && p.includes('reset'))
+    ok('S3: batch prompt excludes non-batch features', !p.includes('admin-panel'))
+    ok('S3: batch prompt enforces map-ONLY-your-batch + followup channel',
+      /Map ONLY these 2 features/.test(p) && p.includes('followup-features.jsonl'))
   }
 
   // ── Test 1b: DEFAULTS map + deep-assess EVERY feature (no caps) ──
@@ -131,7 +142,7 @@ function stubDeps(spawnCalls, emitted = []) {
         meta: { sourceDir: srcDir, preset: 'generic', vulnClasses: ['access-control'], outputDir: outDir } },
       stubDeps(calls))
     ok('discovery ran (CURATOR)', calls.some(c => c.sessionSuffix.includes('discovery') && c.agentName === 'curator'))
-    ok('discovered 2 features → 2 mapping agents', calls.filter(c => c.sessionSuffix.includes('-map-')).length === 2, 'got ' + calls.filter(c => c.sessionSuffix.includes('-map-')).length)
+    ok('discovered 2 features → fast-mapped in batches', calls.filter(c => c.sessionSuffix.includes('-batch-')).length >= 1 && calls.filter(c => c.sessionSuffix.includes('-batch-')).length <= 2, 'got ' + calls.filter(c => c.sessionSuffix.includes('-batch-')).length)
   }
 
   // ── Test 3: an explicit meta.features queue is used verbatim (capped by maxFeatures); phasesOnly gates ──
