@@ -82,9 +82,14 @@ function stubDeps(spawnCalls, emitted = []) {
     ok('phase2 = maxPhase2(2) × classes(2) = 4 calls', p2.length === 4, 'got ' + p2.length)
     // M0 — each Phase-2 job streams a structured source candidate to the board via emitCandidate.
     ok('M0: each p2 job streamed a candidate → emitCandidate called 4×', emitted.length === 4, 'got ' + emitted.length)
-    ok('M0: candidates are source-shaped (type=candidate, file set, NO url)',
-      emitted.length > 0 && emitted.every(c => c.type === 'candidate' && c.file === 'app.rb' && !c.url),
+    ok('M0: candidates are source-shaped (type=candidate, NO url)',
+      emitted.length > 0 && emitted.every(c => c.type === 'candidate' && !c.url),
       JSON.stringify(emitted[0] || {}).slice(0, 160))
+    // P1 — the file path is normalized to ABSOLUTE against sourceDir (so the triager reads the right
+    // file), while file_rel keeps the specialist's original relative path.
+    ok('P1: candidate file is absolute (resolved vs sourceDir), file_rel keeps the relative',
+      emitted.length > 0 && emitted.every(c => path.isAbsolute(c.file) && c.file === path.resolve(srcDir, 'app.rb') && c.file_rel === 'app.rb'),
+      JSON.stringify(emitted[0] || {}).slice(0, 200))
     ok('M0: source candidate stays SOURCE_CONFIRMED (never RUNTIME_CONFIRMED)',
       emitted.length > 0 && emitted.every(c => c.status === 'SOURCE_CONFIRMED' && c.confirmation_status === 'SOURCE_CONFIRMED'),
       JSON.stringify(emitted[0] || {}).slice(0, 160))

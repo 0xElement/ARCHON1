@@ -322,11 +322,21 @@ Then reply with a one-line summary: features consolidated, total ledger rows, to
 // live board. phase2Prompt tells the specialist to write here; the dispatcher reads it after the job.
 function candFileFor(outDir, cls, slug) { return `${outDir}/phase2/${cls}/${slug}.candidates.jsonl` }
 
+// Resolve a specialist-emitted source path against the reviewed tree. Agents emit RELATIVE paths
+// (e.g. 'routes/auth.js'); the streaming TRIAGER runs from the daemon cwd, not sourceDir, so a relative
+// path would read the wrong file (or nothing) and silently drop the finding — worst on monorepos /
+// subdirectory reviews. Normalizing to absolute at emission makes every downstream consumer correct.
+function _absFile(file, sourceDir) {
+  const f = String(file || '').trim()
+  if (!f) return ''
+  return (path.isAbsolute(f) || !sourceDir) ? f : path.resolve(sourceDir, f)
+}
+
 // Shape a specialist-emitted SOURCE candidate into a live-findings record. It NEVER sets a `url` or any
 // runtime field — that is exactly what keeps deriveConfirmationStatus (finding-schema.js) at
 // SOURCE_CONFIRMED, so a source-only finding can never become RUNTIME_CONFIRMED. type='candidate'
 // passes isCandidate; cwe=cls gives canonicalKey a per-class dedup discriminator.
-function toLiveCandidate(c, cls, feature, agent) {
+function toLiveCandidate(c, cls, feature, agent, sourceDir) {
   if (!c || typeof c !== 'object') return null
   const title = (String(c.hypothesis || c.pattern || c.title || '').split(/[\n.:]/)[0].trim().slice(0, 120))
     || `${cls} candidate in ${feature.name || feature.slug}`
@@ -336,7 +346,9 @@ function toLiveCandidate(c, cls, feature, agent) {
     severity: c.severity || 'Medium', cwe: c.cwe || c.vuln_class || cls, title,
     details: String(c.evidence || c.hypothesis || '').slice(0, 2000),
     feature: c.feature || feature.slug, pattern: c.pattern || '', pattern_id: c.pattern_id || '',
-    file: c.file || '', line: c.line ?? '', source: c.source || '', sink: c.sink || '',
+    // absolute so the TRIAGER (which runs from the daemon cwd) reads the right source file; file_rel keeps
+    // the specialist's original relative path for display.
+    file: _absFile(c.file, sourceDir), file_rel: c.file || '', line: c.line ?? '', source: c.source || '', sink: c.sink || '',
     endpoint: c.endpoint || '', confidence: c.confidence ?? '', hypothesis: c.hypothesis || '',
     evidence: c.evidence || '', status, required_blackbox_proof: c.required_blackbox_proof || '',
     confirmation_status: status === 'NEEDS_LIVE_VALIDATION' ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
@@ -345,13 +357,13 @@ function toLiveCandidate(c, cls, feature, agent) {
 
 // Read a job's candidate JSONL + push each shaped record to the emit sink. Fail-soft: a missing file
 // (specialist wrote none) or malformed lines yield 0 without throwing.
-function emitCandidatesFromFile(candFile, cls, feature, agent, taskId, emitCandidate, log) {
+function emitCandidatesFromFile(candFile, cls, feature, agent, taskId, emitCandidate, log, sourceDir) {
   let raw; try { raw = fs.readFileSync(candFile, 'utf8') } catch { return 0 }
   let n = 0
   for (const line of raw.split('\n')) {
     const s = line.trim(); if (!s) continue
     let c; try { c = JSON.parse(s) } catch { continue }
-    const rec = toLiveCandidate(c, cls, feature, agent)
+    const rec = toLiveCandidate(c, cls, feature, agent, sourceDir)
     if (rec) { try { emitCandidate(taskId, rec); n++ } catch {} }
   }
   if (n && typeof log === 'function') log(`  📡 ${String(agent).toUpperCase()} → ${n} candidate(s) to the live board [${cls}/${feature.slug}]`)
@@ -626,7 +638,7 @@ async function runCodeReview(dispatch, deps) {
       // Stream this job's source candidates to the live board the moment it returns (M0). Fail-soft +
       // no-op when the emit sink isn't injected (unit tests), so the batch path is unchanged without it.
       if (typeof emitCandidate === 'function') {
-        try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log) } catch (e) { log(`  ⚠️ candidate emit failed [${cls}/${feature.slug}]: ${e.message}`) }
+        try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit failed [${cls}/${feature.slug}]: ${e.message}`) }
       }
       updateProgress(62 + Math.round(16 * (++assessed) / jobs.length), `Phase 2: assessed ${assessed}/${jobs.length} (feature × class)`)
       return r
@@ -654,7 +666,7 @@ async function runCodeReview(dispatch, deps) {
         const more = await runWaves(extra, WAVE, async ({ cls, feature }) => {
           const agent = CLASS[cls].agent
           const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2r-${cls}-${feature.slug}`, null)
-          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log) } catch {} }
+          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch {} }
           return r
         })
         trackCosts(more)
@@ -680,7 +692,7 @@ async function runCodeReview(dispatch, deps) {
       const r = await spawnAgent(agent, taskId, freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir), `task-${taskId}-fh-${feature.slug}`, null)
       // Freehand candidates stream to the live board too (M2), through the same sink as Phase 2.
       if (typeof emitCandidate === 'function') {
-        try { emitCandidatesFromFile(`${fhDir}/${feature.slug}.candidates.jsonl`, 'freehand', feature, agent, taskId, emitCandidate, log) } catch (e) { log(`  ⚠️ freehand candidate emit [${feature.slug}]: ${e.message}`) }
+        try { emitCandidatesFromFile(`${fhDir}/${feature.slug}.candidates.jsonl`, 'freehand', feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ freehand candidate emit [${feature.slug}]: ${e.message}`) }
       }
       return r
     })
