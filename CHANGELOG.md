@@ -8,6 +8,14 @@ All notable changes to ARCHON are documented here. The format follows
 
 _Post-1.0 work in progress — see [BACKLOG.md](./BACKLOG.md) and [ROADMAP.md](./ROADMAP.md)._
 
+## [1.0.2] — 2026-07-07
+
+### Fixed
+- **Vulnerability-focus picker reappeared in black-box mode.** v1.0.1 hid `#ptStrategyField` with the
+  `hidden` attribute, but `applyPtMode()` re-set `display:block` on it when black-box/white-box was
+  selected, overriding the attribute. Removed that re-show line so the picker stays hidden and every
+  scan is full A→Z, as intended.
+
 ## [1.0.1] — 2026-07-07
 
 ### Changed
@@ -64,6 +72,7 @@ live on the operator's board. Runs entirely on a Claude subscription over OAuth 
 - ARCHON's white-box review found a real broken-access-control flaw disclosed to GitLab via HackerOne,
   fixed in GitLab's May 2026 security release as **CVE-2026-4524** (CVSS 6.5, CWE-288).
 
-[Unreleased]: https://github.com/ghostshift-content/ARCHON/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/ghostshift-content/ARCHON/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/ghostshift-content/ARCHON/releases/tag/v1.0.2
 [1.0.1]: https://github.com/ghostshift-content/ARCHON/releases/tag/v1.0.1
 [1.0.0]: https://github.com/ghostshift-content/ARCHON/releases/tag/v1.0.0
