@@ -44,6 +44,7 @@ const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process')
 const sourcePlanner = require('./source-planner') // M3: rank the Phase-2 queue + re-plan from findings
+const sourceRuntimePlanner = require('./source-runtime-planner') // M3: session/shard plan (source-runtime-plan.json)
 const candidateIndex = require('../pipeline/candidate-index') // M5: deduped candidate index + validation queue
 const decisionLog = require('../pipeline/decision-log') // M6: agentic decision log
 const featureBatching = require('./feature-batching') // S1: domain grouping + batch fanout
@@ -554,7 +555,7 @@ Reply one line: features covered, findings by confirmation status + severity, to
 
 // ── main ──────────────────────────────────────────────────────────────────────
 async function runCodeReview(dispatch, deps) {
-  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled, onFindingsReady, emitCandidate, startStreamingTriage } = deps
+  const { spawnAgent, trackCosts, updateProgress, log, logActivity, _isTaskCancelled, onFindingsReady, emitCandidate, startStreamingTriage, getQuotaHealth } = deps
   const { taskId, projectId, squad } = dispatch
   const meta = dispatch.meta || {}
   const sourceDir = meta.sourceDir
@@ -764,6 +765,19 @@ async function runCodeReview(dispatch, deps) {
     if (left.length) { mappingLedger.save(outDir, ledger); log(`⚠️ ${left.length} feature(s) still rate-limited after ${DEFER_MAX_RETRIES} attempts → blocked_coverage_gap (coverage gap, reported)`) }
   }
   if (runPhase('mapping') || runPhase('phase2')) {
+    // M3: Source Runtime Planner — decide how many persistent worker sessions map the queue, sharded by
+    // domain/risk, adjusted for live quota health. Persisted for the UI + consumed by the M4 mapping workers.
+    let runtimePlan = null
+    try {
+      const quota = (typeof getQuotaHealth === 'function' ? getQuotaHealth() : 'healthy') || 'healthy'
+      runtimePlan = sourceRuntimePlanner.planSourceRuntime({
+        features, vulnClasses, fileCount: (p0 && p0.fileCount) || 0, quota,
+        maxSessions: Number.isFinite(meta.maxSessions) ? meta.maxSessions : undefined,
+      })
+      fs.writeFileSync(`${outDir}/source-runtime-plan.json`, JSON.stringify({ taskId, mode: deployUrl ? 'white-box' : 'static', ...runtimePlan }, null, 2))
+      log(`🧭 Source Runtime Planner: ${runtimePlan.features_total} feature(s) → ${runtimePlan.mapping_sessions} mapping session(s), ${runtimePlan.max_concurrent_sessions} concurrent (${runtimePlan.strategy}; quota ${quota})`)
+      logActivity('CURATOR', `🧭 Source runtime plan: ${runtimePlan.mapping_sessions} session(s), ${runtimePlan.max_concurrent_sessions} concurrent — ${runtimePlan.reason}`, { taskId, squad, projectId: projectId || '' })
+    } catch (e) { log(`⚠️ Source Runtime Planner (non-fatal): ${e.message}`) }
     const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
     ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
     updateProgress(25, `Phase 1: mapping ${features.length} features → ${batches.length} batch(es)`)

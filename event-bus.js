@@ -9453,6 +9453,9 @@ async function dispatchToAgent(dispatch) {
       const crResult = await codeReviewDispatcher.runCodeReview(dispatch, {
         spawnAgent, trackCosts: trackCostsLocal, updateProgress: updateProgressLocal,
         log, logActivity, _isTaskCancelled,
+        // M3: live quota health feeds the Source Runtime Planner's session sizing (fewer sessions when the
+        // subscription is warm/constrained; pause when cooling). Fail-soft → 'healthy' if anything throws.
+        getQuotaHealth: () => { try { return quotaManager.summarizeHealth(['balanced', 'fast', 'powerful'].map((fam) => `anthropic/${modelRouter.resolveFamily(fam)}`).filter(Boolean)) } catch { return 'healthy' } },
         emitCandidate: (tid, rec) => {
           try {
             // AGENT-INDEPENDENT dedup key (class|file|line|title) so the mid-run candidate-file watcher

@@ -82,6 +82,13 @@ function stubDeps(spawnCalls, emitted = []) {
     ok('3 features mapped', res.featuresMapped === 3, 'got ' + res.featuresMapped)
     ok('inventories written to disk', fs.existsSync(path.join(outDir, 'phase1-maps/inventories/00_MANIFEST.md')))
     ok('phase2 class dirs created', fs.existsSync(path.join(outDir, 'phase2/access-control')) && fs.existsSync(path.join(outDir, 'phase2/xss')))
+    // M3: the Source Runtime Planner wrote a plan artifact with an honest session decision
+    ok('M3: source-runtime-plan.json written', fs.existsSync(path.join(outDir, 'source-runtime-plan.json')))
+    try {
+      const plan = JSON.parse(fs.readFileSync(path.join(outDir, 'source-runtime-plan.json'), 'utf8'))
+      ok('M3: plan has a session decision + reason', plan.mapping_sessions >= 1 && plan.max_concurrent_sessions >= 1 && typeof plan.reason === 'string' && plan.mode === 'static',
+        `sessions=${plan.mapping_sessions} concurrent=${plan.max_concurrent_sessions} mode=${plan.mode}`)
+    } catch (e) { ok('M3: plan readable', false, e.message) }
 
     const mapCalls = calls.filter(c => c.sessionSuffix.includes('-batch-'))
     ok('S3: mapping runs in domain BATCHES (≤ features), not one-per-feature', mapCalls.length >= 1 && mapCalls.length <= 3, 'got ' + mapCalls.length)

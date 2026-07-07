@@ -246,12 +246,37 @@ function isRateLimitError(output) {
   return /429|rate.limit|quota.exceeded|too.many.requests|rate_limit_exceeded|usage.limit|capacity|overloaded/i.test(output || '')
 }
 
+/**
+ * M3: one-word health summary across a model set, for the Source Runtime Planner's session sizing.
+ *   healthy     — every model dispatchable, no recent errors
+ *   warm        — every model dispatchable, but some have taken recent hits (errorCount > 0)
+ *   constrained — at least one model in cooldown, but at least one still free (reroute possible)
+ *   cooling     — every model in cooldown (nothing dispatchable right now)
+ * @param {string[]} models e.g. ['anthropic/claude-sonnet-4-6','anthropic/claude-haiku-4-5','anthropic/claude-opus-4-8']
+ */
+function summarizeHealth(models) {
+  const list = (models && models.length) ? models : []
+  if (!list.length) return 'healthy'
+  const state = loadState()
+  let free = 0, cooling = 0, hits = 0
+  for (const m of list) {
+    if (canDispatch(m).allowed) free++
+    else cooling++
+    const ms = getModelState(state, m)
+    if ((ms.errorCount || 0) > 0) hits++
+  }
+  if (cooling >= list.length) return 'cooling'
+  if (cooling > 0) return 'constrained'
+  return hits > 0 ? 'warm' : 'healthy'
+}
+
 module.exports = {
   canDispatch,
   reportLimit,
   reportSuccess,
   getBestAvailableModel,
   getStatus,
+  summarizeHealth,
   isRateLimitError,
   loadState,
 }
