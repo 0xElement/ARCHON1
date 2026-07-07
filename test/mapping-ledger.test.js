@@ -123,6 +123,19 @@ test('S2: review rollups — reviewed_no_issue / candidate_found / reviewed coun
   assert.equal(l.features.b.duplicate_key, 'b:xss:f.rb:sink')
 })
 
+test('§6: freehand upgrades a reviewed_no_issue feature to candidate_found (mapping preserved)', () => {
+  let l = L.build('t', [{ id: 'b', domain: 'x', owner: 'a', features: [{ slug: 'checkout' }] }])
+  l = L.setFeature(l, 'checkout', { status: 'done' })
+  l = L.setReview(l, 'checkout', 'reviewed_no_issue')        // Phase 2 found nothing
+  assert.equal(l.features_reviewed_no_issue, 1)
+  l = L.setReview(l, 'checkout', 'candidate_found', { freehand_candidates: 2 }) // freehand later finds one
+  assert.equal(l.features.checkout.status, 'done', 'mapping untouched')
+  assert.equal(l.features.checkout.review_status, 'candidate_found')
+  assert.equal(l.features.checkout.freehand_candidates, 2)
+  assert.equal(l.features_candidates, 1)
+  assert.equal(l.features_reviewed_no_issue, 0, 'no longer counted as no-issue')
+})
+
 test('blockers surfaced; save/load round-trip', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-'))
   let l = L.build('t1', batches)

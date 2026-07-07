@@ -1097,16 +1097,25 @@ async function runCodeReview(dispatch, deps) {
     const fhFeatures = p2Features.slice(0, maxFreehand)
     updateProgress(78, `Phase 3 (freehand): ${fhFeatures.length} features [${FH_MODE}]`)
     logActivity('CURATOR', `🔎 Phase 3 freehand review (${FH_MODE}): ${fhFeatures.length} features`, { taskId, squad, projectId: projectId || '' })
+    const fhCandidateCounts = {} // slug → # freehand candidates (applied to the ledger after the waves)
     const results = await runWaves(fhFeatures, WAVE, async (feature, idx) => {
       const agent = MAPPER_POOL[idx % MAPPER_POOL.length]
       const r = await spawnAgent(agent, taskId, freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir), `task-${taskId}-fh-${feature.slug}`, null)
       // Freehand candidates stream to the live board too (M2), through the same sink as Phase 2.
       if (typeof emitCandidate === 'function') {
-        try { emitCandidatesFromFile(`${fhDir}/${feature.slug}.candidates.jsonl`, 'freehand', feature, agent, taskId, emitCandidate, log, sourceDir, crMode) } catch (e) { log(`  ⚠️ freehand candidate emit [${feature.slug}]: ${e.message}`) }
+        try { const n = emitCandidatesFromFile(`${fhDir}/${feature.slug}.candidates.jsonl`, 'freehand', feature, agent, taskId, emitCandidate, log, sourceDir, crMode); if (n) fhCandidateCounts[feature.slug] = (fhCandidateCounts[feature.slug] || 0) + n } catch (e) { log(`  ⚠️ freehand candidate emit [${feature.slug}]: ${e.message}`) }
       }
       return r
     })
     trackCosts(results)
+    // §4/§6: freehand can surface a candidate on a feature Phase 2 marked reviewed_no_issue — reflect that on
+    // the review dimension (upgrade to candidate_found) and record a separate freehand_candidates count, so the
+    // ledger never shows "no issue" for a feature that actually produced one. Applied after the concurrent
+    // waves to avoid racing on the shared ledger; mapping status is untouched.
+    if (ledger && Object.keys(fhCandidateCounts).length) {
+      for (const [slug, n] of Object.entries(fhCandidateCounts)) ledger = mappingLedger.setReview(ledger, slug, 'candidate_found', { freehand_candidates: n })
+      mappingLedger.save(outDir, ledger)
+    }
   }
 
   // Stop the mid-run candidate watcher (P2). The post-job emits already captured every file's final

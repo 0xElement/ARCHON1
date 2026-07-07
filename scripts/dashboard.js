@@ -120,7 +120,13 @@ function sourceRuntimeForTask(taskId) {
     runtime_confirmed: (validation && validation.runtime_confirmed) || 0, disproven: (validation && validation.disproven) || 0,
     triage_sessions: candidates_emitted ? triageLadder(candidates_emitted) : 0,
   }
-  return { taskId, mode: (plan && plan.mode) || 'static', plan, counts, coverage, pipeline, sessions: Object.values(bySession), recent: events.slice(-12), rateLimit, validation }
+  // parity §9.4: planned (from the plan) vs actually-active mapping sessions, so the UI can explain quota
+  // backoff (e.g. planned 4, active 3 because quota was constrained). A mapping session is "active" once it
+  // has started and hasn't yet mapped all its assigned features.
+  const planned_sessions = (plan && plan.mapping_sessions) || 0
+  const active_sessions = Object.values(bySession).filter(s => /map-worker/.test(String(s.session_id)) && (s.mapped || 0) < (s.assigned_total || 0)).length
+  const runtime = { planned_sessions, active_sessions, quota_mode: (plan && plan.quota) || rateLimit, reason: (plan && plan.reason) || '' }
+  return { taskId, mode: (plan && plan.mode) || 'static', plan, counts, coverage, pipeline, runtime, sessions: Object.values(bySession), recent: events.slice(-12), rateLimit, validation }
 }
 function listReports() {
   const out = []

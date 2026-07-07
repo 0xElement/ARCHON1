@@ -622,7 +622,8 @@ async function injectSourceRuntimeCard(t) {
         <h3 style="margin:0">Source Runtime <span style="font-weight:400;color:var(--fg-dim);font-size:12px">· ${esc(d.mode || 'static')}</span></h3>
         <span style="font-size:11.5px">rate limit: <b style="color:${rlColor}">${esc(rl)}</b></span>
       </div>
-      <div class="hint" style="margin:6px 0 12px">Planner: ${plan.features_total || c.total || 0} features → ${plan.mapping_sessions || '?'} mapping · ${esc(String(reviewSess))} review · ${esc(String(triageSess))} triage sessions (${plan.max_concurrent_sessions || '?'} concurrent) · ${esc(plan.strategy || '')}</div>
+      <div class="hint" style="margin:6px 0 4px">Planner: ${plan.features_total || c.total || 0} features → ${plan.mapping_sessions || '?'} mapping · ${esc(String(reviewSess))} review · ${esc(String(triageSess))} triage sessions (${plan.max_concurrent_sessions || '?'} concurrent) · ${esc(plan.strategy || '')}</div>
+      ${d.runtime ? `<div class="hint" style="margin:0 0 12px">quota: <b style="color:${rlColor}">${esc(d.runtime.quota_mode || 'healthy')}</b> · ${esc(String(d.runtime.active_sessions))}/${esc(String(d.runtime.planned_sessions))} sessions active${d.runtime.reason ? ` · ${esc(d.runtime.reason)}` : ''}</div>` : ''}
       <div class="src-stats">
         ${stat('Mapped', (c.mapped || 0) + '/' + (c.total || 0), 'var(--emerald)')}
         ${stat('In progress', c.in_progress || 0)}
