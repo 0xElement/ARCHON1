@@ -28,7 +28,12 @@ findings, validate before reporting.
   and a deterministic duplicate_key so the same source→sink flow collapses to one.
 - **Dashboard cards** — Feature Coverage (discovered / mapped / deep / reviewed / no-issue /
   candidates / blocked / deferred / follow-ups), Findings Pipeline (candidates → triage → validated →
-  judged, with the validation-status breakdown), and a live Timeline event feed.
+  judged, with the validation-status breakdown), and a live Timeline event feed. The plan line also
+  shows quota mode, planned-vs-active sessions and the sizing reason (explains quota backoff), and the
+  triager emits its real session count to the timeline (used over the estimate when present).
+- **Freehand review accounting** — a freehand candidate on a feature Phase 2 marked `reviewed_no_issue`
+  upgrades its review status to `candidate_found` (with a `freehand_candidates` count), so the ledger
+  never reports "no issue" for a feature that produced one.
 
 ### Fixed
 - **A failed review marked its feature `blocked`, wiping the mapping status.** Review outcomes now write
@@ -38,6 +43,13 @@ findings, validate before reporting.
   `SOURCE_CONFIRMED`. Both `status` and `confirmation_status` now derive from one canonical classifier
   (DISPROVEN stays disproven; unknown/hypothesis stays `NEEDS_LIVE_VALIDATION`; source can never
   self-claim `RUNTIME_CONFIRMED`) and can no longer diverge.
+- **Freehand findings were categorised as `freehand`.** The candidate now keeps its emitted vulnerability
+  class (`c.vuln_class || c.vulnerability_class || cls`) for `cwe`, `vulnerability_class` and the
+  `duplicate_key`, so a freehand business-logic finding is classed correctly and dedupes against a
+  Phase-2 hit on the same flow.
+- **In-run candidate dedupe ignored `duplicate_key`.** It now prefers the deterministic `duplicate_key`
+  (same source→sink flow collapses despite different wording; distinct flows sharing file/line/title
+  don't collapse), falling back to `cwe|file|line|title` only when absent.
 
 ## [1.1.0] — 2026-07-07
 
