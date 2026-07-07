@@ -94,6 +94,35 @@ test('S7 renderGateMd: counts, coverage gaps, ledger table', () => {
   assert.match(L.renderGateMd(led), /No coverage gaps/)
 })
 
+test('S2: review_status is independent — a failed review never clobbers a done map (parity §4)', () => {
+  let l = L.build('t', [{ id: 'b', domain: 'x', owner: 'a', features: [{ slug: 'up', name: 'Uploads', risk_hint: 'high' }] }])
+  l = L.setFeature(l, 'up', { status: 'done', depth: 'deep' })      // mapping finished
+  assert.equal(l.features.up.mapping_status, 'done', 'projected mapping_status')
+  assert.equal(l.features.up.review_status, 'pending', 'review not started yet')
+  assert.equal(l.features_mapped, 1)
+  l = L.setReview(l, 'up', 'failed', { status: 'blocked', assigned_agent: 'marshal', error: 'timeout' }) // review dies
+  assert.equal(l.features.up.status, 'done', 'mapping status UNTOUCHED by a review write')
+  assert.equal(l.features.up.mapping_status, 'done')
+  assert.equal(l.features.up.review_status, 'failed')
+  assert.equal(l.features.up.assigned_agent, 'marshal')  // per-item review field carried
+  assert.equal(l.features_mapped, 1, 'still counts as mapped')
+  assert.equal(l.features_review_failed, 1)
+  assert.equal(l.features_deep_mapped, 1)
+})
+
+test('S2: review rollups — reviewed_no_issue / candidate_found / reviewed count', () => {
+  let l = L.build('t', [{ id: 'b', domain: 'x', owner: 'a', features: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }])
+  for (const s of ['a', 'b', 'c']) l = L.setFeature(l, s, { status: 'done' })
+  l = L.setReview(l, 'a', 'reviewed_no_issue')
+  l = L.setReview(l, 'b', 'candidate_found', { duplicate_key: 'b:xss:f.rb:sink' })
+  // c stays review pending
+  assert.equal(l.features_reviewed, 2, 'a + b reached a review conclusion')
+  assert.equal(l.features_reviewed_no_issue, 1)
+  assert.equal(l.features_candidates, 1)
+  assert.equal(l.features_review_pending, 1, 'c not yet reviewed')
+  assert.equal(l.features.b.duplicate_key, 'b:xss:f.rb:sink')
+})
+
 test('blockers surfaced; save/load round-trip', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-'))
   let l = L.build('t1', batches)

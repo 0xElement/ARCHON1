@@ -27,13 +27,27 @@ const MAPPED = new Set(['done', 'reviewed'])
 const TERMINAL = new Set(['done', 'reviewed', 'merged', 'duplicate', 'non_security', 'dead_code', 'blocked_coverage_gap', 'blocked', 'failed'])
 const DEFERRED = new Set(['queued_retry', 'deferred_rate_limit'])
 
+// S2 (parity §4/§8): review is a SEPARATE dimension from mapping. A feature's `status` tracks MAPPING; its
+// `review_status` tracks static review independently, so a failed review can never clobber a `done` map.
+const REVIEW_STATUSES = ['pending', 'in_progress', 'reviewed_no_issue', 'candidate_found', 'needs_more_context', 'failed', 'duplicate']
+// A feature is "reviewed" once its review reached a real conclusion (issue found, no issue, or a dup of one).
+const REVIEW_TERMINAL = new Set(['reviewed_no_issue', 'candidate_found', 'duplicate'])
+// Project the internal mapping `status` onto the spec's 4-value mapping_status (parity §4).
+function mappingStatusOf(status) {
+  if (status === 'done' || status === 'reviewed' || status === 'merged' || status === 'duplicate' || status === 'non_security' || status === 'dead_code') return 'done'
+  if (status === 'blocked' || status === 'blocked_coverage_gap' || status === 'failed') return 'blocked'
+  if (status === 'in_progress' || status === 'claimed' || status === 'assigned' || DEFERRED.has(status)) return 'in_progress'
+  return 'pending' // queued
+}
+
 function ledgerPath(outDir) { return path.join(outDir, 'phase1-maps', 'mapping-ledger.json') }
 
 function _feature(f, batch) {
   return {
-    slug: f.slug, name: f.name || f.slug, domain: f.domain || (batch && batch.domain) || 'misc',
-    status: 'queued', depth: null, owner: (batch && batch.owner) || null, batch: batch && batch.id,
+    id: f.slug, slug: f.slug, name: f.name || f.slug, domain: f.domain || (batch && batch.domain) || 'misc',
+    status: 'queued', review_status: 'pending', depth: null, owner: (batch && batch.owner) || null, batch: batch && batch.id,
     risk: f.risk_hint || (batch && batch.risk) || 'medium', output: `phase1-maps/features/${f.slug}.md`,
+    vulnerability_classes: f.vuln_classes || f.vulnerability_classes || null,
   }
 }
 
@@ -52,7 +66,6 @@ function recount(ledger) {
   const n = s => feats.filter(f => f.status === s).length
   ledger.features_total = feats.length
   ledger.features_mapped = feats.filter(f => MAPPED.has(f.status)).length
-  ledger.features_reviewed = n('reviewed')
   ledger.features_in_progress = n('in_progress') + n('claimed') + n('assigned')
   ledger.features_queued = n('queued')
   ledger.features_deferred = feats.filter(f => DEFERRED.has(f.status)).length
@@ -60,6 +73,16 @@ function recount(ledger) {
   ledger.features_blocked = n('blocked_coverage_gap') + n('blocked')
   ledger.features_accounted = feats.filter(f => TERMINAL.has(f.status)).length
   ledger.features_done = ledger.features_accounted // back-compat: "accounted for" (terminal), NOT "mapped"
+  // S2: review-dimension rollups (independent of mapping). Stamp the projected mapping_status per feature too.
+  for (const f of feats) f.mapping_status = mappingStatusOf(f.status)
+  const rv = s => feats.filter(f => (f.review_status || 'pending') === s).length
+  ledger.features_reviewed = feats.filter(f => REVIEW_TERMINAL.has(f.review_status)).length
+  ledger.features_reviewed_no_issue = rv('reviewed_no_issue')
+  ledger.features_candidates = rv('candidate_found')
+  ledger.features_review_pending = rv('pending')
+  ledger.features_review_in_progress = rv('in_progress')
+  ledger.features_review_failed = rv('failed')
+  ledger.features_deep_mapped = feats.filter(f => f.depth === 'deep' || f.depth === 'deep_complete').length
   const byBatch = {}
   for (const f of feats) { const b = f.batch || '_'; (byBatch[b] = byBatch[b] || []).push(f) }
   ledger.batches_total = Object.keys(byBatch).length
@@ -71,6 +94,17 @@ function recount(ledger) {
 function setFeature(ledger, slug, patch) {
   if (!ledger.features) ledger.features = {}
   ledger.features[slug] = { ...(ledger.features[slug] || { slug }), ...(patch || {}) }
+  return recount(ledger)
+}
+
+// S2 (parity §4): set a feature's REVIEW status + per-item review fields (assigned_session, assigned_agent,
+// started_at, finished_at, duplicate_key, error, vulnerability_classes). NEVER writes the mapping `status` — a
+// failed/duplicate review must not clobber a `done` map. Any `status` in the patch is ignored.
+function setReview(ledger, slug, review_status, patch) {
+  if (!ledger.features) ledger.features = {}
+  const cur = ledger.features[slug] || { slug }
+  const { status: _ignore, mapping_status: _ignore2, ...safe } = (patch || {})
+  ledger.features[slug] = { ...cur, review_status: review_status || cur.review_status || 'pending', ...safe }
   return recount(ledger)
 }
 
@@ -138,7 +172,7 @@ function _writeAtomic(file, data) {
 function save(outDir, ledger) { return _writeAtomic(ledgerPath(outDir), recount(ledger)) }
 function load(outDir) { try { return JSON.parse(fs.readFileSync(ledgerPath(outDir), 'utf8')) } catch { return null } }
 
-module.exports = { STATUSES, DEPTHS, MAPPED, TERMINAL, DEFERRED, ledgerPath, build, recount, setFeature, addFeatures, isComplete, blockers, deferred, pending, reconcileFollowups, renderGateMd, save, load }
+module.exports = { STATUSES, DEPTHS, MAPPED, TERMINAL, DEFERRED, REVIEW_STATUSES, REVIEW_TERMINAL, mappingStatusOf, ledgerPath, build, recount, setFeature, setReview, addFeatures, isComplete, blockers, deferred, pending, reconcileFollowups, renderGateMd, save, load }
 
 // self-check
 if (require.main === module) {
