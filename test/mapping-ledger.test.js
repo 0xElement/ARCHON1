@@ -29,6 +29,27 @@ test('setFeature rolls up features_done + batches_done; completion gate needs AL
   assert.ok(L.isComplete(l), 'every feature terminal → complete')
 })
 
+test('M1 honest counters: mapped counts only done/reviewed; rate-limit is deferred not mapped/blocked', () => {
+  let l = L.build('t1', batches) // login, reset, search
+  l = L.setFeature(l, 'login', { status: 'done' })
+  l = L.setFeature(l, 'reset', { status: 'deferred_rate_limit' }) // paused by a rate limit
+  l = L.setFeature(l, 'search', { status: 'in_progress' })
+  assert.equal(l.features_mapped, 1, 'only login is mapped')
+  assert.equal(l.features_deferred, 1, 'reset is deferred (rate-limit), NOT blocked')
+  assert.equal(l.features_blocked, 0, 'a rate limit is never a coverage gap')
+  assert.equal(l.features_in_progress, 1)
+  assert.equal(l.features_accounted, 1, 'only the mapped one is accounted for')
+  assert.equal(l.features_done, l.features_accounted, 'features_done stays a back-compat alias for accounted')
+  assert.ok(!L.isComplete(l), 'deferred + in_progress keep the gate open')
+  assert.equal(L.deferred(l).length, 1)
+  // real coverage gap after retry budget vs legacy alias — both count as blocked, neither counts as mapped
+  l = L.setFeature(l, 'reset', { status: 'blocked_coverage_gap' })
+  l = L.setFeature(l, 'search', { status: 'done' })
+  assert.equal(l.features_mapped, 2)
+  assert.equal(l.features_blocked, 1)
+  assert.ok(L.isComplete(l), 'done + blocked_coverage_gap are terminal → gate closes')
+})
+
 test('addFeatures (reconciliation): adds new, never overwrites, reopens the gate', () => {
   let l = L.build('t1', batches)
   for (const s of ['login', 'reset', 'search']) l = L.setFeature(l, s, { status: 'done' })

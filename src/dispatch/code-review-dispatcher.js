@@ -165,6 +165,18 @@ async function runWaves(items, size, fn) {
   return out
 }
 
+// M1: the honest one-line mapping status the UI shows. Headline is MAPPED (real map files); deferred (rate-limit)
+// and blocked (coverage gaps) are shown separately, never folded into the mapped count.
+function mappingStatusLine(ledger, total) {
+  const t = total || ledger.features_total || 0
+  let s = `Phase 1: mapping features ${ledger.features_mapped || 0}/${t}`
+  const extra = []
+  if (ledger.features_in_progress) extra.push(`${ledger.features_in_progress} in progress`)
+  if (ledger.features_deferred) extra.push(`${ledger.features_deferred} deferred (rate-limit)`)
+  if (ledger.features_blocked) extra.push(`${ledger.features_blocked} blocked`)
+  return extra.length ? `${s} · ${extra.join(' · ')}` : s
+}
+
 // Detect the primary language/stack of the source tree — INFORMATIONAL ONLY (labels the inventory
 // manifest). It never changes behaviour: inventory + feature discovery are identical for every
 // project, so any repo (Rails, Django, Express/Nest, Spring, Laravel, Go, .NET, …) reviews the same way.
@@ -722,10 +734,14 @@ async function runCodeReview(dispatch, deps) {
       for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, mapExists(f.slug) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
       mappingLedger.save(outDir, ledger)
       trackCosts([mr].filter(Boolean))
-      updateProgress(25 + Math.round(15 * ledger.features_done / Math.max(1, features.length)), `Phase 1: mapping features ${ledger.features_done}/${features.length}`)
+      // M1: progress is driven by features_MAPPED (real map files), never by accounted-for (which includes
+      // blocked/deferred). The status line stays honest — deferred (rate-limit) is shown, never hidden as "done".
+      updateProgress(25 + Math.round(15 * ledger.features_mapped / Math.max(1, features.length)), mappingStatusLine(ledger, features.length))
       return null
     })
-    log(`🗺️ Phase 1 fast-map complete: ${ledger.features_done}/${ledger.features_total} feature(s) mapped`)
+    log(`🗺️ Phase 1 fast-map complete: ${ledger.features_mapped}/${ledger.features_total} feature(s) mapped` +
+      (ledger.features_deferred ? ` · ${ledger.features_deferred} deferred (rate-limit)` : '') +
+      (ledger.features_blocked ? ` · ${ledger.features_blocked} blocked` : ''))
     // 1b. SELECTIVE deep mapping — high-risk features get the full UI→route→authz→service→model→sink chain
     // map, in a SEPARATE wave so deep-map never blocks fast-mapping (it used to hold a batch slot and stall
     // the normal-risk batches). Normal features stay fast (selective by design). Opt out with meta.deepMap:false.
@@ -789,7 +805,7 @@ async function runCodeReview(dispatch, deps) {
     for (const f of stuck) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked' })
     if (stuck.length) mappingLedger.save(outDir, ledger)
     const nBlocked = mappingLedger.blockers(ledger).length
-    log(`✅ Phase 1 completion gate: ${ledger.features_done}/${ledger.features_total} accounted for${nBlocked ? `, ${nBlocked} blocked (coverage gap — reported, not skipped)` : ''}`)
+    log(`✅ Phase 1 completion gate: ${ledger.features_mapped}/${ledger.features_total} mapped · ${ledger.features_accounted}/${ledger.features_total} accounted for${nBlocked ? `, ${nBlocked} blocked (coverage gap — reported, not skipped)` : ''}`)
     // S7: deterministic completion-gate artifact from the ledger (authoritative — the CURATOR consolidation
     // also produces coverage matrices, but this one can never drift from the ledger's truth).
     try { fs.mkdirSync(`${outDir}/phase1-maps`, { recursive: true }); fs.writeFileSync(`${outDir}/phase1-maps/completion-gate.md`, mappingLedger.renderGateMd(ledger)) } catch {}
@@ -932,7 +948,7 @@ async function runCodeReview(dispatch, deps) {
   // Phase 3 — SCRIBE report. A1: coverage is derived from the LEDGER (the single source of truth), so
   // follow-up-created + blocked features are counted correctly — not from the original `features` array.
   const coverage = ledger
-    ? { mapped: ledger.features_total, deeplyReviewed: p2Features.length, blocked: mappingLedger.blockers(ledger).length, capped: Math.max(0, ledger.features_total - p2Features.length) }
+    ? { mapped: ledger.features_mapped, deeplyReviewed: p2Features.length, blocked: mappingLedger.blockers(ledger).length, deferred: ledger.features_deferred, capped: Math.max(0, ledger.features_total - p2Features.length) }
     : { mapped: features.length, deeplyReviewed: p2Features.length, capped: Math.max(0, features.length - p2Features.length) }
   if (cancelled()) return bail('Phase 3 report')
   if (runPhase('report')) {
@@ -955,8 +971,9 @@ async function runCodeReview(dispatch, deps) {
   return {
     stack, sourceDir, fileCount: p0.fileCount,
     features: allFeatures.map(f => f.slug),
-    featuresMapped: ledger ? ledger.features_total : features.length,
-    featuresAccountedFor: ledger ? ledger.features_done : features.length,
+    featuresMapped: ledger ? ledger.features_mapped : features.length,
+    featuresAccountedFor: ledger ? ledger.features_accounted : features.length,
+    featuresDeferred: ledger ? ledger.features_deferred : 0,
     blockers: ledger ? mappingLedger.blockers(ledger).length : 0,
     phase2Features: p2Features.map(f => f.slug),
     vulnClasses,

@@ -6,10 +6,26 @@
 const fs = require('fs')
 const path = require('path')
 
-const STATUSES = ['queued', 'assigned', 'in_progress', 'done', 'merged', 'duplicate', 'non_security', 'dead_code', 'blocked']
+// M1: honest statuses. Non-terminal statuses keep the Phase-1 completion gate OPEN (work is still owed):
+// queued/claimed/in_progress are active; queued_retry/deferred_rate_limit are transient pauses (a rate limit
+// is NEVER a coverage gap — the work resumes after cooldown). Terminal statuses are "accounted for": the
+// feature is mapped (done/reviewed), reconciled away (merged/duplicate/non_security/dead_code), a true
+// unreviewable gap after the retry budget (blocked_coverage_gap; legacy alias 'blocked'), or a hard failure.
+const STATUSES = [
+  'queued', 'claimed', 'assigned', 'in_progress',                 // active (non-terminal)
+  'queued_retry', 'deferred_rate_limit',                          // transient pauses (non-terminal)
+  'done', 'reviewed',                                             // mapped / reviewed (terminal)
+  'merged', 'duplicate', 'non_security', 'dead_code',             // reconciled (terminal)
+  'blocked_coverage_gap', 'blocked', 'failed',                    // gaps / failures (terminal; 'blocked' = legacy alias)
+]
 const DEPTHS = ['fast', 'deep', 'deep_complete']
-// A feature is "accounted for" (completion gate §13) when its status is terminal.
-const TERMINAL = new Set(['done', 'merged', 'duplicate', 'non_security', 'dead_code', 'blocked'])
+// "Mapped" = a real feature-map file was produced (done, or done-then-reviewed). Rate-limit/blocked/failed are
+// NEVER mapped. This is the honest numerator the UI must show — not the accounted-for total.
+const MAPPED = new Set(['done', 'reviewed'])
+// A feature is "accounted for" (completion gate §13) when its status is terminal — includes real coverage gaps
+// and failures, but NOT transient rate-limit pauses.
+const TERMINAL = new Set(['done', 'reviewed', 'merged', 'duplicate', 'non_security', 'dead_code', 'blocked_coverage_gap', 'blocked', 'failed'])
+const DEFERRED = new Set(['queued_retry', 'deferred_rate_limit'])
 
 function ledgerPath(outDir) { return path.join(outDir, 'phase1-maps', 'mapping-ledger.json') }
 
@@ -28,11 +44,22 @@ function build(taskId, batches) {
   return recount({ taskId: String(taskId), features_total: 0, features_done: 0, batches_total: 0, batches_done: 0, features })
 }
 
-// Recompute rollup counts: features_done = terminal features; batches_done = batches whose features are all terminal.
+// Recompute rollup counts. M1: honest, separated counters. `features_mapped` (done+reviewed) is the number the
+// UI must show as progress — it counts ONLY features with a real map file, never blocked/deferred/failed.
+// `features_done` is kept as a back-compat alias for features_accounted (terminal count).
 function recount(ledger) {
   const feats = Object.values(ledger.features || {})
+  const n = s => feats.filter(f => f.status === s).length
   ledger.features_total = feats.length
-  ledger.features_done = feats.filter(f => TERMINAL.has(f.status)).length
+  ledger.features_mapped = feats.filter(f => MAPPED.has(f.status)).length
+  ledger.features_reviewed = n('reviewed')
+  ledger.features_in_progress = n('in_progress') + n('claimed') + n('assigned')
+  ledger.features_queued = n('queued')
+  ledger.features_deferred = feats.filter(f => DEFERRED.has(f.status)).length
+  ledger.features_failed = n('failed')
+  ledger.features_blocked = n('blocked_coverage_gap') + n('blocked')
+  ledger.features_accounted = feats.filter(f => TERMINAL.has(f.status)).length
+  ledger.features_done = ledger.features_accounted // back-compat: "accounted for" (terminal), NOT "mapped"
   const byBatch = {}
   for (const f of feats) { const b = f.batch || '_'; (byBatch[b] = byBatch[b] || []).push(f) }
   ledger.batches_total = Object.keys(byBatch).length
@@ -61,7 +88,11 @@ function isComplete(ledger) {
   const feats = Object.values((ledger && ledger.features) || {})
   return feats.length > 0 && feats.every(f => TERMINAL.has(f.status))
 }
-function blockers(ledger) { return Object.values((ledger && ledger.features) || {}).filter(f => f.status === 'blocked') }
+// True coverage gaps only — 'blocked' is the legacy alias for 'blocked_coverage_gap'. A rate-limit pause is
+// deferred, NOT a blocker (see deferred()).
+function blockers(ledger) { return Object.values((ledger && ledger.features) || {}).filter(f => f.status === 'blocked' || f.status === 'blocked_coverage_gap') }
+// Features paused by a transient rate limit — the completion gate must WAIT on these, never close over them.
+function deferred(ledger) { return Object.values((ledger && ledger.features) || {}).filter(f => DEFERRED.has(f.status)) }
 function pending(ledger) { return Object.values((ledger && ledger.features) || {}).filter(f => !TERMINAL.has(f.status)) }
 
 // Reconcile raw follow-up items (§9) against the ledger: NEW (unknown slug → must be mapped), DUPLICATE
@@ -89,7 +120,11 @@ function renderGateMd(ledger) {
   const rows = feats.slice().sort((a, b) => String(a.slug).localeCompare(String(b.slug)))
     .map(f => `| ${f.slug} | ${f.domain} | ${f.risk} | ${f.status} | ${f.depth || '-'} | ${f.owner || '-'} |`)
   return `# Phase 1 Completion Gate\n\n` +
-    `${ledger.features_done || 0}/${ledger.features_total || 0} feature(s) accounted for · ${ledger.batches_done || 0}/${ledger.batches_total || 0} batch(es).\n\n` +
+    `**Mapped: ${ledger.features_mapped || 0}/${ledger.features_total || 0}** · ` +
+    `in-progress ${ledger.features_in_progress || 0} · queued ${ledger.features_queued || 0} · ` +
+    `deferred (rate-limit) ${ledger.features_deferred || 0} · blocked ${ledger.features_blocked || 0} · ` +
+    `failed ${ledger.features_failed || 0} — ${ledger.features_accounted || 0}/${ledger.features_total || 0} accounted for · ` +
+    `${ledger.batches_done || 0}/${ledger.batches_total || 0} batch(es).\n\n` +
     `Status counts: ${Object.entries(byStatus).map(([k, v]) => `${k}=${v}`).join(', ') || '(none)'}\n\n` +
     (blocked.length
       ? `## ⚠️ Coverage gaps (blocked: ${blocked.length}) — reviewed + reported, never silently skipped\n${blocked.map(f => `- ${f.slug} (${f.domain})`).join('\n')}\n`
@@ -103,7 +138,7 @@ function _writeAtomic(file, data) {
 function save(outDir, ledger) { return _writeAtomic(ledgerPath(outDir), recount(ledger)) }
 function load(outDir) { try { return JSON.parse(fs.readFileSync(ledgerPath(outDir), 'utf8')) } catch { return null } }
 
-module.exports = { STATUSES, DEPTHS, TERMINAL, ledgerPath, build, recount, setFeature, addFeatures, isComplete, blockers, pending, reconcileFollowups, renderGateMd, save, load }
+module.exports = { STATUSES, DEPTHS, MAPPED, TERMINAL, DEFERRED, ledgerPath, build, recount, setFeature, addFeatures, isComplete, blockers, deferred, pending, reconcileFollowups, renderGateMd, save, load }
 
 // self-check
 if (require.main === module) {
@@ -120,7 +155,13 @@ if (require.main === module) {
   L = setFeature(L, 'login', { status: 'done', depth: 'fast' })
   L = setFeature(L, 'reset', { status: 'done', depth: 'deep_complete' })
   assert.strictEqual(L.features_done, 2)
+  assert.strictEqual(L.features_mapped, 2, 'both done → mapped')
   assert.strictEqual(L.batches_done, 1, 'auth batch done (both its features terminal)')
+  // M1: a rate-limited feature is DEFERRED, never mapped, and keeps the gate open
+  L = setFeature(L, 'search', { status: 'deferred_rate_limit' })
+  assert.strictEqual(L.features_mapped, 2, 'deferred does NOT count as mapped')
+  assert.strictEqual(L.features_deferred, 1)
+  assert.ok(!isComplete(L), 'deferred (rate-limit) keeps the completion gate open')
   L = setFeature(L, 'search', { status: 'non_security' }) // still counts as accounted-for
   assert.strictEqual(L.features_done, 3); assert.ok(isComplete(L), 'all terminal → complete')
   // addFeatures (reconciliation) never overwrites
