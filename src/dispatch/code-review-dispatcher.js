@@ -440,12 +440,16 @@ function toLiveCandidate(c, cls, feature, agent, sourceDir, mode) {
     || `${cls} candidate in ${feature.name || feature.slug}`
   const status = candidateConfirmation(c.status)
   const fileRel = c.file || ''
+  // Preserve the emitted vulnerability class: a freehand job is dispatched with cls='freehand' but the
+  // specialist tags the real class (business-logic, access-control, …) in c.vuln_class — honour it so the
+  // board categorises the finding correctly and its duplicate_key lines up with a Phase-2 hit on the same class.
+  const vClass = c.vuln_class || c.vulnerability_class || cls
   // affected_files: an explicit array wins; else the single file. requires_runtime_validation is true for any
   // source-substantiated finding that hasn't been live-proven (a DISPROVEN one needs nothing further).
   const affected = Array.isArray(c.affected_files) && c.affected_files.length ? c.affected_files : (fileRel ? [fileRel] : [])
   return {
     type: 'candidate', mode: mode || 'static', agent: String(agent).toUpperCase(), original_agent: String(agent),
-    severity: c.severity || 'Medium', cwe: c.cwe || c.vuln_class || cls, vulnerability_class: cls, title,
+    severity: c.severity || 'Medium', cwe: c.cwe || vClass, vulnerability_class: vClass, title,
     details: String(c.evidence || c.hypothesis || '').slice(0, 2000),
     feature: c.feature || feature.slug, pattern: c.pattern || '', pattern_id: c.pattern_id || '',
     // absolute so the TRIAGER (which runs from the daemon cwd) reads the right source file; file_rel keeps
@@ -454,13 +458,21 @@ function toLiveCandidate(c, cls, feature, agent, sourceDir, mode) {
     source: c.source || '', sink: c.sink || '', endpoint: c.endpoint || '', affected_endpoint: c.endpoint || c.affected_endpoint || '',
     confidence: c.confidence ?? '', hypothesis: c.hypothesis || '', exploit_hypothesis: c.exploit_hypothesis || c.hypothesis || '',
     evidence: c.evidence || '', code_block: c.code_block || c.vulnerable_code || c.evidence || '',
-    recommendation: c.recommendation || '', duplicate_key: c.duplicate_key || _dupKey(feature, cls, fileRel, c),
+    recommendation: c.recommendation || '', duplicate_key: c.duplicate_key || _dupKey(feature, vClass, fileRel, c),
     // a DISPROVEN finding needs nothing further; anything else source-substantiated still wants live proof.
     requires_runtime_validation: c.requires_runtime_validation ?? (status !== 'DISPROVEN'),
     // status and confirmation_status are ONE truth — never let them diverge (that misrepresents validation).
     status, required_blackbox_proof: c.required_blackbox_proof || '',
     confirmation_status: status,
   }
+}
+
+// The in-run emit dedupe key (used by event-bus's emitCandidate). Prefer the candidate's deterministic
+// duplicate_key — it collapses the SAME source→sink flow even when two specialists phrase the title
+// differently — and fall back to cwe|file|line|title only when a candidate carries no duplicate_key. Pure.
+function candidateDedupeKey(rec) {
+  if (rec && rec.duplicate_key) return String(rec.duplicate_key)
+  return `${(rec && rec.cwe) || ''}|${(rec && rec.file) || ''}|${(rec && rec.line) || ''}|${String((rec && rec.title) || '').slice(0, 60)}`
 }
 
 // Read a job's candidate JSONL + push each shaped record to the emit sink. Fail-soft: a missing file
@@ -1221,6 +1233,7 @@ module.exports = {
   selectVulnClasses,
   toLiveCandidate,
   candidateConfirmation,
+  candidateDedupeKey,
   DEFAULT_CLASSES,
   CLASS,
   MAPPER_POOL,

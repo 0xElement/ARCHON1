@@ -9463,9 +9463,10 @@ async function dispatchToAgent(dispatch) {
         getQuotaHealth: () => { try { return quotaManager.summarizeHealth(['balanced', 'fast', 'powerful'].map((fam) => `anthropic/${modelRouter.resolveFamily(fam)}`).filter(Boolean)) } catch { return 'healthy' } },
         emitCandidate: (tid, rec) => {
           try {
-            // AGENT-INDEPENDENT dedup key (class|file|line|title) so the mid-run candidate-file watcher
-            // (P2) and the post-job emit collapse to ONE record even though they pass different agent labels.
-            const k = `${rec.cwe || ''}|${rec.file || ''}|${rec.line || ''}|${String(rec.title || '').slice(0, 60)}`
+            // AGENT-INDEPENDENT dedup key so the mid-run candidate-file watcher (P2) and the post-job emit
+            // collapse to ONE record even though they pass different agent labels. Prefers the candidate's
+            // deterministic duplicate_key (feature:class:file:sink), else cwe|file|line|title (see dispatcher).
+            const k = codeReviewDispatcher.candidateDedupeKey(rec)
             if (_crEmitKeys.has(k)) return false
             _crEmitKeys.add(k)
             fs.appendFileSync(`${agentPaths.INTEL_ROOT}/live-findings-${tid}.jsonl`, JSON.stringify(rec) + '\n')

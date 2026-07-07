@@ -71,3 +71,31 @@ test('S3 FIX: status and confirmation_status never diverge (one source of truth)
     assert.notEqual(rec.confirmation_status, 'RUNTIME_CONFIRMED', 'a source candidate can never self-claim RUNTIME_CONFIRMED')
   }
 })
+
+test('FIX-1: a freehand candidate preserves its emitted vulnerability class (not "freehand")', () => {
+  // freehand jobs are dispatched with cls='freehand'; the specialist tags the REAL class in vuln_class.
+  const fh = { feature: 'checkout', file: 'app/checkout.rb', line: 8, sink: 'coupon apply', vuln_class: 'business-logic', status: 'SOURCE_CONFIRMED' }
+  const rec = cr.toLiveCandidate(fh, 'freehand', { slug: 'checkout' }, 'breaker', '/src', 'static')
+  assert.equal(rec.vulnerability_class, 'business-logic', 'the emitted class wins over the freehand dispatch label')
+  assert.equal(rec.cwe, 'business-logic')
+  assert.ok(rec.duplicate_key.startsWith('checkout:business-logic:'), 'duplicate_key carries the real class, so it lines up with a Phase-2 business-logic hit')
+  // vulnerability_class alias is honoured too, and an explicit cwe still wins for cwe
+  assert.equal(cr.toLiveCandidate({ ...fh, vuln_class: undefined, vulnerability_class: 'access-control' }, 'freehand', { slug: 'checkout' }, 'b', '/s', 'static').vulnerability_class, 'access-control')
+})
+
+test('FIX-2: candidateDedupeKey prefers duplicate_key — same flow, different title → COLLAPSE', () => {
+  const a = { cwe: 'xss', file: 'a.rb', line: 1, title: 'Reflected XSS in search', duplicate_key: 'search:xss:a.rb:render' }
+  const b = { cwe: 'xss', file: 'a.rb', line: 9, title: 'XSS — attacker injects script via q param', duplicate_key: 'search:xss:a.rb:render' }
+  assert.equal(cr.candidateDedupeKey(a), cr.candidateDedupeKey(b), 'same duplicate_key → one record, despite different title/line')
+})
+
+test('FIX-2: candidateDedupeKey does NOT collapse different flows that share file/line/title', () => {
+  const a = { cwe: 'xss', file: 'a.rb', line: 1, title: 'Injection', duplicate_key: 'f:xss:a.rb:render' }
+  const b = { cwe: 'xss', file: 'a.rb', line: 1, title: 'Injection', duplicate_key: 'f:sqli:a.rb:query' }
+  assert.notEqual(cr.candidateDedupeKey(a), cr.candidateDedupeKey(b), 'distinct duplicate_key must stay two records even when file/line/title match')
+})
+
+test('FIX-2: candidateDedupeKey falls back to cwe|file|line|title when no duplicate_key', () => {
+  const a = { cwe: 'xss', file: 'a.rb', line: 3, title: 'X' }
+  assert.equal(cr.candidateDedupeKey(a), 'xss|a.rb|3|X')
+})
