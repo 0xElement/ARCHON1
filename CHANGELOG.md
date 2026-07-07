@@ -6,7 +6,33 @@ All notable changes to ARCHON are documented here. The format follows
 
 ## [Unreleased]
 
-_Post-1.1 work in progress — see [BACKLOG.md](./BACKLOG.md) and [ROADMAP.md](./ROADMAP.md)._
+_Post-1.2 work in progress — see [BACKLOG.md](./BACKLOG.md) and [ROADMAP.md](./ROADMAP.md)._
+
+## [1.2.0] — 2026-07-07
+
+Source-runtime parity: the whole static / white-box pipeline now runs as the same controlled,
+few-persistent-session agentic runtime as mapping — plan once, assign clearly, stream progress and
+findings, validate before reporting.
+
+### Added
+- **Spec session ladder** — 1-30→1, 31-90→3, 91-200→4, 201-500→5, 500+→6 persistent sessions, as a
+  quota-gated ceiling (backs off to fewer sessions when the subscription bucket is warm/cooling).
+- **Review as its own dimension** — every feature now tracks `review_status`
+  (pending / in_progress / reviewed_no_issue / candidate_found / needs_more_context / failed /
+  duplicate) independently of mapping, plus per-item ledger fields (assigned agent, finished_at,
+  vulnerability_classes, duplicate_key). A failed review can no longer clobber a completed map.
+- **Triage session ladder** — source-review triage scales 1-20→1, 21-75→2, 76-200→3, 200+→4 (cap 4);
+  black-box triage is unchanged.
+- **Richer streamed candidates** — each candidate carries mode (static/white-box), vulnerability_class,
+  affected_files, affected_endpoint, exploit_hypothesis, requires_runtime_validation, recommendation,
+  and a deterministic duplicate_key so the same source→sink flow collapses to one.
+- **Dashboard cards** — Feature Coverage (discovered / mapped / deep / reviewed / no-issue /
+  candidates / blocked / deferred / follow-ups), Findings Pipeline (candidates → triage → validated →
+  judged, with the validation-status breakdown), and a live Timeline event feed.
+
+### Fixed
+- **A failed review marked its feature `blocked`, wiping the mapping status.** Review outcomes now write
+  the review dimension only; the mapping `done` is preserved and the failure is recorded separately.
 
 ## [1.1.0] — 2026-07-07
 
