@@ -359,8 +359,19 @@ let tdTaskId = '', tdBackTo = 'tasks', tdSub = 'overview', tdLogLoaded = false
 
 /* ── per-run detail page (Overview / Findings / Report) ── */
 async function openTaskPage(taskId) {
-  // resolve to the engagement root so iterations all open the same aggregated page
-  try { const ir = await api('GET', '/api/iterations?taskId=' + encodeURIComponent(taskId)); if (ir && ir.engagementId) taskId = ir.engagementId } catch {}
+  // resolve to the engagement root so iterations all open the same aggregated page — but only if the
+  // root actually has a run. A combined white-box engagement's root is the *deferred* black-box
+  // iteration (no task record until it starts), which would render "Run not found." In that case fall
+  // back to an iteration that has a live run (e.g. the white-box code review).
+  try {
+    const ir = await api('GET', '/api/iterations?taskId=' + encodeURIComponent(taskId))
+    if (ir && ir.engagementId) {
+      const tasks = (lastState && lastState.tasks) || []
+      const has = id => tasks.some(x => String(x.id) === String(id))
+      taskId = has(ir.engagementId) ? ir.engagementId
+        : ((ir.iterations || []).map(it => it.taskId).find(has) || ir.engagementId)
+    }
+  } catch {}
   tdBackTo = currentView === 'task' ? tdBackTo : currentView
   tdTaskId = taskId; fnTaskId = taskId; tdLogLoaded = false; lrunSevFilter = ''
   const t = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(taskId)) || { id: taskId }
@@ -545,6 +556,43 @@ function renderTaskOverview(force) {
   $$('#td-overview .lrun-sev').forEach(b => b.onclick = () => { lrunSevFilter = b.dataset.sev; renderTaskOverview(true) })
   $$('#td-overview .lrun-find .row[data-fkey]').forEach(r => r.onclick = () => openFindingPage(r.dataset.fkey))
   const cc = $('#tdCancel'); if (cc) cc.onclick = async () => { cc.disabled = true; const r = await api('POST', '/api/cancel', { taskId: t.id }); toast(r && !r.error ? 'Cancel sent' : 'Cancel failed', t.id, r && !r.error ? 'ok' : 'err') }
+  // M5: static/white-box runs get a Source Runtime card (planner decision, honest mapping counts, per-worker
+  // progress). The API returns null for non-source tasks, so this is a no-op for pentest.
+  if (/code-review/.test(String(t.squad || '')) || t.mode === 'white-box' || t.mode === 'static') injectSourceRuntimeCard(t)
+}
+async function injectSourceRuntimeCard(t) {
+  let d = null
+  try { d = await api('GET', '/api/source-runtime?taskId=' + encodeURIComponent(t.id)) } catch {}
+  if (!d || (!d.plan && !(d.counts && d.counts.total))) return
+  const host = $('#td-overview'); if (!host || String(tdTaskId) !== String(t.id)) return
+  const c = d.counts || {}, plan = d.plan || {}, rl = d.rateLimit || 'healthy'
+  const rlColor = rl === 'healthy' ? 'var(--emerald)' : 'var(--amber, #f59e0b)'
+  const stat = (label, val, color) => `<div class="src-stat"><span class="src-stat-v"${color ? ` style="color:${color}"` : ''}>${val}</span><span class="src-stat-l">${label}</span></div>`
+  const workers = (d.sessions || []).map(s => `
+    <div class="src-worker">
+      <div class="src-worker-h"><b>${esc(s.owner || s.session_id)}</b><span>${s.mapped}/${s.assigned_total || '?'}</span></div>
+      ${s.current ? `<div class="src-worker-sub">current: ${esc(s.current)}</div>` : ''}
+      ${s.last_event ? `<div class="src-worker-ev">${esc(s.last_event)}</div>` : ''}
+    </div>`).join('') || '<div class="hint">workers starting…</div>'
+  const html = `
+    <div class="card src-runtime" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Source Runtime <span style="font-weight:400;color:var(--fg-dim);font-size:12px">· ${esc(d.mode || 'static')}</span></h3>
+        <span style="font-size:11.5px">rate limit: <b style="color:${rlColor}">${esc(rl)}</b></span>
+      </div>
+      <div class="hint" style="margin:6px 0 12px">Planner: ${plan.features_total || c.total || 0} features → ${plan.mapping_sessions || '?'} mapping sessions (${plan.max_concurrent_sessions || '?'} concurrent) · ${esc(plan.strategy || '')}</div>
+      <div class="src-stats">
+        ${stat('Mapped', (c.mapped || 0) + '/' + (c.total || 0), 'var(--emerald)')}
+        ${stat('In progress', c.in_progress || 0)}
+        ${stat('Queued', c.queued || 0)}
+        ${stat('Deferred (rate-limit)', c.deferred || 0, c.deferred ? 'var(--amber, #f59e0b)' : '')}
+        ${stat('Blocked gaps', c.blocked || 0, c.blocked ? 'var(--rose, #ef4444)' : '')}
+      </div>
+      <div class="src-workers">${workers}</div>
+    </div>`
+  const existing = host.querySelector('.src-runtime')
+  if (existing) existing.outerHTML = html
+  else host.insertAdjacentHTML('afterbegin', html)
 }
 async function renderTaskReport() {
   const t = (lastState ? lastState.tasks : []).find(x => String(x.id) === String(tdTaskId)) || { id: tdTaskId }

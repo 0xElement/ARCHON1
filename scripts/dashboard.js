@@ -46,6 +46,38 @@ function readLines(rel, max) {
     return ls.slice(-max).map(l => { try { return JSON.parse(l) } catch { return { raw: l } } })
   } catch { return [] }
 }
+
+// M5: the Source Runtime card for a static / white-box task — the planner decision, honest mapping counts
+// (from the ledger — mapped is done-only, deferred/blocked shown separately), per-worker progress, and the
+// last events. Returns null for a task that isn't a source review (no plan / ledger / events).
+function sourceRuntimeForTask(taskId) {
+  if (!taskId) return null
+  const crDir = path.join(INTEL, 'code-review', taskId)
+  let plan = null, ledger = null, events = []
+  try { plan = JSON.parse(fs.readFileSync(path.join(crDir, 'source-runtime-plan.json'), 'utf-8')) } catch {}
+  try { ledger = JSON.parse(fs.readFileSync(path.join(crDir, 'phase1-maps', 'mapping-ledger.json'), 'utf-8')) } catch {}
+  try { events = fs.readFileSync(path.join(INTEL, `source-runtime-${taskId}.jsonl`), 'utf-8').trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean) } catch {}
+  if (!plan && !ledger && !events.length) return null
+  const counts = ledger ? {
+    total: ledger.features_total || 0, mapped: ledger.features_mapped || 0, in_progress: ledger.features_in_progress || 0,
+    queued: ledger.features_queued || 0, deferred: ledger.features_deferred || 0, blocked: ledger.features_blocked || 0,
+    reviewed: ledger.features_reviewed || 0, accounted: ledger.features_accounted || 0,
+  } : {}
+  // per-worker progress: fold the event stream by session_id (last-write-wins for current/last_event)
+  const bySession = {}
+  for (const e of events) {
+    if (!e.session_id) continue
+    const s = bySession[e.session_id] || (bySession[e.session_id] = { session_id: e.session_id, owner: e.owner || null, assigned_total: 0, mapped: 0, current: null, last_event: null })
+    if (e.owner) s.owner = e.owner
+    if (e.assigned_total) s.assigned_total = e.assigned_total
+    if (e.feature) s.current = e.feature
+    if (e.status === 'done') s.mapped++
+    if (e.message) s.last_event = e.message
+  }
+  const last = events.length ? events[events.length - 1] : null
+  const rateLimit = last && last.status === 'rate_limit_pause' ? 'cooling' : (plan && plan.quota) || 'healthy'
+  return { taskId, mode: (plan && plan.mode) || 'static', plan, counts, sessions: Object.values(bySession), recent: events.slice(-12), rateLimit }
+}
 function listReports() {
   const out = []
   const dirs = ['reports', 'pentest', 'code-review']
@@ -588,7 +620,12 @@ function findingsForSingleTask(id, label) {
   // land with full details. As the WRITER completes findings one-by-one, they appear here.
   // Fallback: if this task has NO findings-detail at all (older run, or writer never ran),
   // show the validated set so the board isn't blank for legacy reports.
-  const _hasDetail = detail && Object.keys(detail).length > 0
+  let _hasDetail = detail && Object.keys(detail).length > 0
+  // Resilience: if the detail map was keyed under a DIFFERENT id scheme than the current validated
+  // set (e.g. the Phase 2v AUDITOR reverse-check re-ids T-* → CR-*), detail[f.id] misses for every
+  // finding and the board goes blank mid-run. Detect a total mismatch (no validated id maps to any
+  // detail entry) and fall back to showing the validated set instead of an empty board.
+  if (_hasDetail && !validated.some(f => detail[f.id])) _hasDetail = false
   // 1) AUDITOR-validated findings (the trusted set) — minus non-findings, and (when enrichment
   //    has run) minus any not yet written up by the WRITER.
   for (const f of validated.filter(f => (!f.taskId || String(f.taskId) === id) && isRealFinding(f) && (!_hasDetail || detail[f.id]))) {
@@ -847,6 +884,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && p === '/api/iterations') {
       return json(res, 200, iterationsForTask(url.searchParams.get('taskId') || ''))
+    }
+    if (req.method === 'GET' && p === '/api/source-runtime') {
+      return json(res, 200, sourceRuntimeForTask(url.searchParams.get('taskId') || '') || { plan: null, counts: {}, sessions: [], recent: [] })
     }
     if (req.method === 'GET' && p === '/api/logs') {
       return json(res, 200, logsForTask(url.searchParams.get('taskId') || ''))

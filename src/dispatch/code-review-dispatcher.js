@@ -733,18 +733,26 @@ async function runCodeReview(dispatch, deps) {
   }
   // M2: shared mapping helpers — defined at function scope so the separate reconcile `if` block reuses them.
   const mapExists = (slug) => fs.existsSync(`${outDir}/phase1-maps/features/${slug}.md`)
+  // M5: append a Source Runtime event so the dashboard can render a live worker card. Fail-soft — telemetry
+  // must never break the run. One line per event: {ts, taskId, session_id, phase, feature, status, ...}.
+  const emitRuntimeEvent = (ev) => {
+    try { fs.appendFileSync(`${__roots.INTEL_ROOT}/source-runtime-${taskId}.jsonl`, JSON.stringify({ ts: new Date().toISOString(), taskId, ...ev }) + '\n') } catch {}
+  }
   // Map ONE batch and record honest per-feature status: done (map file written) · deferred_rate_limit
   // (retryable rate limit — resumes after cooldown, NEVER a coverage gap) · blocked (real miss, no map file).
   const mapAndRecord = async (batch, sessionSuffix) => {
     if (cancelled()) return null
     for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
     mappingLedger.save(outDir, ledger)
+    emitRuntimeEvent({ session_id: batch.id, owner: batch.owner, phase: 'mapping', status: 'session_start', assigned_total: batch.features.length, message: `worker ${batch.owner} mapping ${batch.features.length} feature(s)` })
     const mr = await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), sessionSuffix, null, { deferOnRateLimit: true }), `batch-map ${batch.id}`)
     const rateLimited = !!(mr && mr.retryable && mr.reason === 'rate_limited')
     for (const f of batch.features) {
-      if (mapExists(f.slug)) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'done', depth: 'fast' })
-      else if (rateLimited) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'deferred_rate_limit', cooldownUntil: (mr && mr.cooldownUntil) || null })
-      else ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked' })
+      let status
+      if (mapExists(f.slug)) { ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'done', depth: 'fast' }); status = 'done' }
+      else if (rateLimited) { ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'deferred_rate_limit', cooldownUntil: (mr && mr.cooldownUntil) || null }); status = 'deferred_rate_limit' }
+      else { ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked' }); status = 'blocked' }
+      emitRuntimeEvent({ session_id: batch.id, owner: batch.owner, phase: 'mapping', feature: f.slug, status, mapped_count: ledger.features_mapped, assigned_total: batch.features.length, message: status === 'done' ? `mapped ${f.slug}` : status === 'deferred_rate_limit' ? `rate-limited on ${f.slug} — will resume` : `no map produced for ${f.slug}` })
     }
     mappingLedger.save(outDir, ledger)
     trackCosts([mr].filter(Boolean))
@@ -761,6 +769,7 @@ async function runCodeReview(dispatch, deps) {
       if (!stuck.length) return
       const waitMs = Math.min(DEFER_MAX_WAIT_MS, Math.max(0, ...stuck.map(f => new Date(f.cooldownUntil || 0).getTime() - Date.now())))
       log(`⏸️ ${label}: ${stuck.length} feature(s) deferred by rate limit — resume ${attempt}/${DEFER_MAX_RETRIES} in ${Math.ceil(waitMs / 60000)} min`)
+      emitRuntimeEvent({ phase: 'mapping', status: 'rate_limit_pause', deferred: stuck.length, attempt, resume_in_min: Math.ceil(waitMs / 60000), message: `${label}: ${stuck.length} deferred — resume ${attempt}/${DEFER_MAX_RETRIES} in ${Math.ceil(waitMs / 60000)} min` })
       updateProgress(25 + Math.round(15 * ledger.features_mapped / Math.max(1, ledger.features_total)), mappingStatusLine(ledger, ledger.features_total))
       if (waitMs > 0) await sleep(waitMs + 3000)
       if (cancelled()) return
@@ -785,6 +794,7 @@ async function runCodeReview(dispatch, deps) {
       fs.writeFileSync(`${outDir}/source-runtime-plan.json`, JSON.stringify({ taskId, mode: deployUrl ? 'white-box' : 'static', ...runtimePlan }, null, 2))
       log(`🧭 Source Runtime Planner: ${runtimePlan.features_total} feature(s) → ${runtimePlan.mapping_sessions} mapping session(s), ${runtimePlan.max_concurrent_sessions} concurrent (${runtimePlan.strategy}; quota ${quota})`)
       logActivity('CURATOR', `🧭 Source runtime plan: ${runtimePlan.mapping_sessions} session(s), ${runtimePlan.max_concurrent_sessions} concurrent — ${runtimePlan.reason}`, { taskId, squad, projectId: projectId || '' })
+      emitRuntimeEvent({ phase: 'planning', status: 'planned', mapping_sessions: runtimePlan.mapping_sessions, max_concurrent_sessions: runtimePlan.max_concurrent_sessions, strategy: runtimePlan.strategy, quota, assigned_total: runtimePlan.features_total, message: runtimePlan.reason })
     } catch (e) { log(`⚠️ Source Runtime Planner (non-fatal): ${e.message}`) }
     // M4: the mapping UNITS are the planner's shards — FEW persistent worker sessions, each mapping a whole
     // shard of features in one long-running call (fewer, longer sessions = less rate-limit pressure). Each
