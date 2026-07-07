@@ -319,32 +319,40 @@ Write the complete markdown file with bash (mkdir -p the dir first). Then reply 
 // feature, and records related work it finds to followup-features.jsonl for reconciliation (S6).
 function batchMapPrompt(owner, batch, taskId, sourceDir, outDir, invDir) {
   const list = batch.features.map(f => `- ${f.name} (slug: ${f.slug}${f.keywords ? `; keywords: ${f.keywords}` : ''})`).join('\n')
-  return `You are ${owner.toUpperCase()}, a Phase-1 FAST-mapping agent on the code-review squad (leader CURATOR).
+  return `You are ${owner.toUpperCase()}, a PERSISTENT Phase-1 source-review worker session on the code-review squad (leader CURATOR).
 
 ${commonHeader(taskId, sourceDir, outDir, invDir)}
 
-## Your batch — domain: ${batch.domain}, risk: ${batch.risk}. Map ONLY these ${batch.features.length} features, nothing else:
+## You are a long-running worker session, NOT a one-feature agent (M4)
+You own a SHARD of ${batch.features.length} features and map ALL of them in THIS one session. Work through them one at a
+time and DO NOT stop after the first — keep going until every assigned feature has a map file on disk. Do not ask the
+operator what to do next; decide and proceed. If a tool call fails or you are interrupted, resume with the next feature —
+a transient failure is NOT a coverage decision. NEVER report a feature as done unless its map file actually exists.
+
+## Your shard — domain: ${batch.domain}, risk: ${batch.risk}. Map ONLY these ${batch.features.length} features, nothing else:
 ${list}
 
-RULES (§7): map ONLY your batch's features — do NOT map features outside it, do NOT edit another agent's output.
-If you discover related security-relevant work NOT in your batch, append it (do NOT map it) to
+RULES (§7): map ONLY your shard's features — do NOT map features outside it, do NOT edit another agent's output.
+If you discover related security-relevant work NOT in your shard, append it (do NOT map it) to
 ${outDir}/phase1-maps/followup-features.jsonl — one JSON per line: {"slug","name","domain","risk_hint","keywords","reason"}.
 
 Phase 1 is MAPPING, not vulnerability hunting — record surfaces, suspicious paths, Phase-2 leads, gaps, follow-up.
 
-## Method (per feature, FAST — identify ALL reachable security-relevant surfaces; deep per-path tracing is a
-## later selective pass, not now)
-0. Read the App Blueprint at ${outDir}/phase1-maps/app-blueprint.md FIRST (auth/authZ model + shared infra).
-1. grep the inventory files in ${invDir}/ scoped to each feature's keywords, then read the live source under ${sourceDir}.
-2. For EACH feature in your batch, write ${outDir}/phase1-maps/features/<slug>.md (mkdir -p first) with these fast-map fields:
+## Worker loop — repeat for EACH feature in your shard, in order (FAST — identify ALL reachable security-relevant
+## surfaces; deep per-path tracing is a later selective pass, not now):
+0. (once) Read the App Blueprint at ${outDir}/phase1-maps/app-blueprint.md FIRST (auth/authZ model + shared infra).
+1. grep the inventory files in ${invDir}/ scoped to the feature's keywords, then read the live source under ${sourceDir}.
+2. Write ${outDir}/phase1-maps/features/<slug>.md (mkdir -p first) with these fast-map fields:
    Feature name · Domain · Business purpose · UI paths · Frontend components/forms · API endpoints/actions · GraphQL
    operations · Controllers/handlers · Services/business logic · Models/queries · Middleware · Auth checks · Role/permission
    checks · Object-ownership checks · Tenant/org/user boundary · Parameters · Sensitive data read/write · File upload/download
    paths · External calls · Background jobs · Trust boundaries · Ranked Phase-2 leads · Coverage gaps · Risk score.
    Fast map does NOT need exhaustive per-path tracing, but it MUST identify EVERY reachable security-relevant surface.
    Endpoint/Action Ledger: ONE ROW per route+method / mutation / worker / action (never merge GET/POST/PUT/DELETE).
+3. Move to the NEXT feature and repeat until ALL ${batch.features.length} are mapped.
 
-Write one complete markdown file PER feature with bash. Then reply one line: features mapped, top leads, follow-ups written.`
+Write each feature's markdown file with bash AS YOU FINISH THAT FEATURE (so partial progress survives an interruption),
+not all at the end. Then reply one line: features mapped, top leads, follow-ups written.`
 }
 
 function discoveryPrompt(taskId, sourceDir, outDir, invDir, cap) {
@@ -778,16 +786,30 @@ async function runCodeReview(dispatch, deps) {
       log(`🧭 Source Runtime Planner: ${runtimePlan.features_total} feature(s) → ${runtimePlan.mapping_sessions} mapping session(s), ${runtimePlan.max_concurrent_sessions} concurrent (${runtimePlan.strategy}; quota ${quota})`)
       logActivity('CURATOR', `🧭 Source runtime plan: ${runtimePlan.mapping_sessions} session(s), ${runtimePlan.max_concurrent_sessions} concurrent — ${runtimePlan.reason}`, { taskId, squad, projectId: projectId || '' })
     } catch (e) { log(`⚠️ Source Runtime Planner (non-fatal): ${e.message}`) }
-    const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
+    // M4: the mapping UNITS are the planner's shards — FEW persistent worker sessions, each mapping a whole
+    // shard of features in one long-running call (fewer, longer sessions = less rate-limit pressure). Each
+    // shard is a batch object (mapAndRecord + the persistent-worker batchMapPrompt map ALL its features).
+    // Fall back to the classic small-batch split only if the planner produced no sessions.
+    const shardUnits = (runtimePlan && runtimePlan.sessions && runtimePlan.sessions.length)
+      ? runtimePlan.sessions.map((s, i) => ({
+          id: s.session_id, owner: MAPPER_POOL[i % MAPPER_POOL.length],
+          domain: (s.domain_focus && s.domain_focus.join('+')) || 'misc', risk: 'mixed',
+          features: (s.features || []).map((slug) => _featureBySlug.get(slug)).filter(Boolean),
+        })).filter((u) => u.features.length)
+      : null
+    const batches = (shardUnits && shardUnits.length)
+      ? shardUnits
+      : featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
+    const mapConcurrency = (runtimePlan && runtimePlan.max_concurrent_sessions) || BATCH_CONCURRENCY
     ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
-    updateProgress(25, `Phase 1: mapping ${features.length} features → ${batches.length} batch(es)`)
-    logActivity('CURATOR', `🗺️ Phase 1 mapping: ${features.length} features → ${batches.length} domain batch(es) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
+    updateProgress(25, `Phase 1: mapping ${features.length} features → ${batches.length} worker session(s), ${mapConcurrency} concurrent`)
+    logActivity('CURATOR', `🗺️ Phase 1 mapping: ${features.length} features → ${batches.length} persistent worker session(s) (${mapConcurrency} concurrent) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
     const ownerOf = {}; for (const b of batches) for (const f of b.features) ownerOf[f.slug] = b.owner
-    // 1a. FAST-MAP every batch first (map only) — the "map all first" barrier. mapAndRecord marks a
+    // 1a. FAST-MAP every shard first (map only) — the "map all first" barrier. mapAndRecord marks a
     // rate-limited mapper's features deferred_rate_limit; drainDeferred then pauses and resumes them so a
-    // transient limit never becomes a coverage gap and never counts as mapped.
+    // transient limit never becomes a coverage gap and never counts as mapped. Concurrency = planner's cap.
     if (runPhase('mapping')) {
-      await runWaves(batches, BATCH_CONCURRENCY, (batch) => mapAndRecord(batch, `task-${taskId}-batch-${batch.id}`))
+      await runWaves(batches, mapConcurrency, (batch) => mapAndRecord(batch, `task-${taskId}-batch-${batch.id}`))
       await drainDeferred('fast-map')
     }
     log(`🗺️ Phase 1 fast-map complete: ${ledger.features_mapped}/${ledger.features_total} feature(s) mapped` +
@@ -797,7 +819,8 @@ async function runCodeReview(dispatch, deps) {
     // map, in a SEPARATE wave so deep-map never blocks fast-mapping (it used to hold a batch slot and stall
     // the normal-risk batches). Normal features stay fast (selective by design). Opt out with meta.deepMap:false.
     if (meta.deepMap !== false && runPhase('mapping') && !cancelled()) {
-      const highRisk = batches.filter(b => b.risk === 'high').flatMap(b => b.features).filter(f => mapExists(f.slug))
+      // M4: shard batches carry mixed risk, so select high-risk FEATURES by their own risk_hint (not batch.risk).
+      const highRisk = features.filter(f => String(f.risk_hint || f.risk || '').toLowerCase() === 'high' && mapExists(f.slug))
       if (highRisk.length) {
         for (const f of highRisk) ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep' })
         mappingLedger.save(outDir, ledger)

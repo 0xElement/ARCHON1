@@ -214,8 +214,10 @@ function stubDeps(spawnCalls, emitted = []) {
         if (sessionSuffix && sessionSuffix.includes('-batch')) {
           const dirM = prompt.match(/(\S+)\/phase1-maps\/features\//)
           const slugs = [...prompt.matchAll(/slug:\s*([a-z0-9_-]+)/gi)].map(m => m[1])
-          if (slugs.includes('admin')) throw new Error('mapper crashed on the admin batch') // one batch fails hard
-          if (dirM) for (const slug of slugs) { try { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${slug}.md`, `# ${slug}`) } catch {} }
+          // M4: a persistent worker writes each map file AS IT FINISHES that feature, so a mid-shard crash
+          // still leaves the healthy features mapped. Write every non-'admin' feature, THEN crash on admin.
+          if (dirM) for (const slug of slugs) { if (slug === 'admin') continue; try { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${slug}.md`, `# ${slug}`) } catch {} }
+          if (slugs.includes('admin')) throw new Error('mapper crashed on the admin feature') // crashes before writing admin's map
         }
         return { code: 0, agentName, cost: { totalCost: 0, tokens: { total: 0 } }, output: '{}' }
       },
