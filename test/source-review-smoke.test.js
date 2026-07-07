@@ -38,10 +38,13 @@ function fixtureStub(calls, emitted) {
         const slugs = [...prompt.matchAll(/slug:\s*([a-z0-9_-]+)/gi)].map(m => m[1])
         if (dirM) for (const s of slugs) { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${s}.md`, `# ${s}`) }
       }
-      if (sessionSuffix.includes('-p2-')) {
-        const cm = prompt.match(/(\S+\.candidates\.jsonl)/)
-        const cls = (sessionSuffix.match(/-p2-([a-z-]+)-/) || [])[1]
-        if (cm && KNOWN[cls]) { fs.mkdirSync(path.dirname(cm[1]), { recursive: true }); fs.writeFileSync(cm[1], JSON.stringify(KNOWN[cls]) + '\n') }
+      // M6: a persistent review session lists per-job candidate paths in its prompt; write the KNOWN candidate
+      // for each path whose (class, slug) matches a real fixture vuln (orders→access-control, profile→xss).
+      if (/-p2rev-|-p2r-|-p2-/.test(sessionSuffix)) {
+        for (const m of prompt.matchAll(/(\S+\/phase2\/([^/\s]+)\/([^/\s]+)\.candidates\.jsonl)/g)) {
+          const [, cf, cls, slug] = m
+          if (KNOWN[cls] && KNOWN[cls].feature === slug) { fs.mkdirSync(path.dirname(cf), { recursive: true }); fs.writeFileSync(cf, JSON.stringify(KNOWN[cls]) + '\n') }
+        }
       }
       return { code: 0, output: '{}' }
     },
@@ -50,10 +53,10 @@ function fixtureStub(calls, emitted) {
   }
 }
 
-test('Finding 1+3: follow-ups reach the return payload; a feature whose Phase-2 all fail → blocked, not assessed', async () => {
-  const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf13-'))
+test('Finding 1: a follow-up feature is mapped, reaches the return payload, and is assessed', async () => {
+  const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf1-'))
   fs.writeFileSync(path.join(srcDir, 'app.rb'), 'class A; def show; Order.find(params[:id]); end; end\n')
-  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf13o-'))
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf1o-'))
   const emitted = []
   const stub = {
     spawnAgent: async (agentName, taskId, prompt, sessionSuffix) => {
@@ -69,28 +72,55 @@ test('Finding 1+3: follow-ups reach the return payload; a feature whose Phase-2 
           if (slugs.includes('alpha')) fs.appendFileSync(`${dirM[1]}/phase1-maps/followup-features.jsonl`, JSON.stringify({ slug: 'gamma', name: 'Gamma', domain: 'misc', reason: 'discovered shared sink' }) + '\n')
         }
       }
-      if (sessionSuffix.includes('-p2-')) {
-        if (sessionSuffix.includes('-alpha')) throw new Error('specialist crashed') // Finding 3: ALL of alpha's Phase-2 jobs throw
-        const cm = prompt.match(/(\S+\.candidates\.jsonl)/)
-        if (cm) { fs.mkdirSync(path.dirname(cm[1]), { recursive: true }); fs.writeFileSync(cm[1], JSON.stringify({ pattern: 'idor', file: 'app.rb', line: 1, source: 'params[:id]', sink: 'Order.find', severity: 'High', status: 'SOURCE_CONFIRMED', required_blackbox_proof: 'p' }) + '\n') }
+      if (/-p2rev-|-p2-/.test(sessionSuffix)) { // M6 review session: write a candidate per job path
+        for (const m of prompt.matchAll(/(\S+\/phase2\/[^/\s]+\/([^/\s]+)\.candidates\.jsonl)/g)) {
+          const [, cf] = m; fs.mkdirSync(path.dirname(cf), { recursive: true })
+          fs.writeFileSync(cf, JSON.stringify({ pattern: 'idor', file: 'app.rb', line: 1, source: 'params[:id]', sink: 'Order.find', severity: 'High', status: 'SOURCE_CONFIRMED', required_blackbox_proof: 'p' }) + '\n')
+        }
       }
       return { code: 0, output: '{}' }
     },
     trackCosts: () => {}, updateProgress: () => {}, log: () => {}, logActivity: () => {}, emitCandidate: (t, r) => emitted.push(r),
   }
-  const res = await cr.runCodeReview({ taskId: 'cr-f13', squad: 'code-review-squad', projectId: '',
+  const res = await cr.runCodeReview({ taskId: 'cr-f1', squad: 'code-review-squad', projectId: '',
     meta: { sourceDir: srcDir, vulnClasses: ['access-control'], outputDir: outDir } }, stub)
 
-  // Finding 1: the follow-up feature is in the ledger AND reaches the downstream/return feature list
   assert.ok(res.features.includes('gamma'), 'follow-up gamma reached the return payload')
-  // Finding 3: alpha's only specialist threw → blocked, NOT silently counted as reviewed
-  assert.ok(!res.phase2Features.includes('alpha'), 'alpha not counted assessed')
-  assert.ok(res.blockers >= 1, 'alpha reported as a blocker')
+  assert.ok(res.phase2Features.includes('gamma'), 'the follow-up WAS assessed')
   const led = JSON.parse(fs.readFileSync(path.join(outDir, 'phase1-maps', 'mapping-ledger.json'), 'utf8'))
-  assert.equal(led.features.alpha.status, 'blocked')
-  assert.ok(res.phase2Features.includes('gamma'), 'the healthy follow-up WAS assessed')
-  // the failed job is recorded (audit trail, not swallowed)
-  assert.ok(fs.existsSync(path.join(outDir, 'phase1-maps', 'phase2-failures.jsonl')), 'failed job recorded')
+  assert.equal(led.features.gamma.status, 'done')
+
+  fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
+})
+
+test('Finding 3 (M6): a review SESSION failure blocks its features — recorded, not swallowed', async () => {
+  const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf3-'))
+  fs.writeFileSync(path.join(srcDir, 'app.rb'), 'class A; def show; Order.find(params[:id]); end; end\n')
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf3o-'))
+  const stub = {
+    spawnAgent: async (agentName, taskId, prompt, sessionSuffix) => {
+      if (sessionSuffix.includes('discovery')) return { code: 0, output: JSON.stringify([
+        { slug: 'alpha', name: 'Alpha', domain: 'auth_identity', risk_hint: 'high', keywords: 'a' },
+      ]) }
+      if (sessionSuffix.includes('-batch')) {
+        const dirM = prompt.match(/(\S+)\/phase1-maps\/features\//)
+        const slugs = [...prompt.matchAll(/slug:\s*([a-z0-9_-]+)/gi)].map(m => m[1])
+        if (dirM) for (const s of slugs) { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${s}.md`, `# ${s}`) }
+      }
+      if (sessionSuffix.includes('-p2rev-')) throw new Error('review specialist session crashed') // the only review session fails
+      return { code: 0, output: '{}' }
+    },
+    trackCosts: () => {}, updateProgress: () => {}, log: () => {}, logActivity: () => {}, emitCandidate: () => {},
+  }
+  const res = await cr.runCodeReview({ taskId: 'cr-f3', squad: 'code-review-squad', projectId: '',
+    meta: { sourceDir: srcDir, vulnClasses: ['access-control'], outputDir: outDir } }, stub)
+
+  // alpha was mapped, but its only review session failed → the ledger marks it a review coverage gap (blocked),
+  // never silently counted as reviewed, and the failure is recorded in the audit trail.
+  const led = JSON.parse(fs.readFileSync(path.join(outDir, 'phase1-maps', 'mapping-ledger.json'), 'utf8'))
+  assert.equal(led.features.alpha.status, 'blocked', 'a failed review session → blocked coverage gap')
+  assert.ok(res.blockers >= 1, 'alpha reported as a blocker')
+  assert.ok(fs.existsSync(path.join(outDir, 'phase1-maps', 'phase2-failures.jsonl')), 'failed session recorded (audit trail)')
 
   fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
 })

@@ -42,18 +42,20 @@ function stubDeps(spawnCalls, emitted = []) {
           try { fs.mkdirSync(`${dirM[1]}/phase1-maps/features`, { recursive: true }); fs.writeFileSync(`${dirM[1]}/phase1-maps/features/${slug}.md`, `# ${slug}\nfast map`) } catch {}
         }
       }
-      // A real Phase-2 specialist also writes a structured candidate JSONL; simulate it so the
-      // dispatcher's emitCandidate path is exercised. Pull the exact candidate-file path out of the
-      // prompt (robust vs. parsing class/slug from the session suffix).
-      if (sessionSuffix && sessionSuffix.includes('-p2-')) {
-        const m = prompt.match(/(\S+\.candidates\.jsonl)/)
-        if (m) { try {
-          fs.mkdirSync(path.dirname(m[1]), { recursive: true })
-          fs.writeFileSync(m[1], JSON.stringify({ feature: 'auth', pattern: 'idor', file: 'app.rb', line: 2,
-            source: 'params[:id]', sink: 'User.find', severity: 'High', confidence: 80,
-            hypothesis: 'IDOR on user object', evidence: 'User.find(params[:id])',
-            status: 'SOURCE_CONFIRMED', required_blackbox_proof: '' }) + '\n')
-        } catch {} }
+      // M6: a persistent review session (suffix -p2rev-, also legacy -p2-/-p2r-) works MANY jobs in one call
+      // and writes one candidate JSONL PER job. Simulate that: write a candidate for EVERY candidate-file path
+      // listed in the prompt (parse feature/class from the path), so per-job streaming is exercised.
+      if (sessionSuffix && /-p2rev-|-p2r-|-p2-/.test(sessionSuffix)) {
+        for (const m of prompt.matchAll(/(\S+\/phase2\/([^/\s]+)\/([^/\s]+)\.candidates\.jsonl)/g)) {
+          const [, cf, cls, slug] = m
+          try {
+            fs.mkdirSync(path.dirname(cf), { recursive: true })
+            fs.writeFileSync(cf, JSON.stringify({ feature: slug, pattern: 'idor', file: 'app.rb', line: 2,
+              source: 'params[:id]', sink: 'User.find', severity: 'High', confidence: 80,
+              hypothesis: 'IDOR on user object', evidence: 'User.find(params[:id])',
+              status: 'SOURCE_CONFIRMED', required_blackbox_proof: '', cls }) + '\n')
+          } catch {}
+        }
       }
       return { code: 0, agentName, cost: { totalCost: 0.2, model: 'm', tokens: { total: 1 } }, output: '{}' }
     },
@@ -95,13 +97,15 @@ function stubDeps(spawnCalls, emitted = []) {
     ok('mapping batches owned by specialist-pool agents', mapCalls.length > 0 && mapCalls.every(c => cr.MAPPER_POOL.includes(c.agentName)))
     ok('CURATOR consolidates', calls.some(c => c.sessionSuffix.includes('consolidate') && c.agentName === 'curator'))
 
-    const p2 = calls.filter(c => c.sessionSuffix.includes('-p2-'))
-    ok('phase2 = maxPhase2(2) × classes(2) = 4 calls', p2.length === 4, 'got ' + p2.length)
-    // S4 — per-batch pipeline: Phase 2 for a feature runs only AFTER a batch has fast-mapped it (map→review
-    // per batch), so review starts as soon as the first batch is mapped, not after all mapping.
+    const p2 = calls.filter(c => c.sessionSuffix.includes('-p2rev-'))
+    // M6: review runs as PERSISTENT specialist sessions (one per agent), NOT one spawn per (feature×class).
+    ok('M6: phase2 runs as persistent specialist sessions (2 agents), not per-job', p2.length === 2, 'got ' + p2.length)
+    const rq = fs.readFileSync(path.join(outDir, 'phase2-review-queue.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l))
+    ok('M6: review queue has maxPhase2(2) × classes(2) = 4 jobs', rq.length === 4, 'got ' + rq.length)
+    // S4 — per-batch pipeline: Phase 2 runs only AFTER mapping, so review starts after the first fast-map.
     {
       const firstBatch = calls.findIndex(c => c.sessionSuffix.includes('-batch-'))
-      const firstP2 = calls.findIndex(c => c.sessionSuffix.includes('-p2-'))
+      const firstP2 = calls.findIndex(c => c.sessionSuffix.includes('-p2rev-'))
       ok('S4: Phase 2 starts only after a batch has fast-mapped', firstBatch >= 0 && firstP2 > firstBatch, `batch@${firstBatch} p2@${firstP2}`)
     }
     // M0 — each Phase-2 job streams a structured source candidate to the board via emitCandidate.
@@ -119,8 +123,8 @@ function stubDeps(spawnCalls, emitted = []) {
       JSON.stringify(emitted[0] || {}).slice(0, 160))
     // M3 — with every (feature × selected-class) pair assessed, re-plan is correctly a no-op (no -p2r- jobs).
     ok('M3: no spurious re-plan when coverage is complete', !calls.some(c => c.sessionSuffix.includes('-p2r-')), 'unexpected re-plan spawn')
-    ok('access-control routed to MARSHAL', p2.some(c => c.sessionSuffix.includes('p2-access-control') && c.agentName === 'marshal'))
-    ok('xss routed to CIPHER', p2.some(c => c.sessionSuffix.includes('p2-xss') && c.agentName === 'cipher'))
+    ok('access-control routed to MARSHAL', rq.some(j => j.cls === 'access-control' && j.agent === 'marshal') && p2.some(c => c.agentName === 'marshal'))
+    ok('xss routed to CIPHER', rq.some(j => j.cls === 'xss' && j.agent === 'cipher') && p2.some(c => c.agentName === 'cipher'))
     ok('AUDITOR verifies', calls.some(c => c.agentName === 'auditor'))
     ok('PROBER skipped (no deployUrl)', !calls.some(c => c.agentName === 'prober'))
     ok('SCRIBE reports last', calls[calls.length - 1].agentName === 'scribe')
@@ -191,9 +195,10 @@ function stubDeps(spawnCalls, emitted = []) {
       meta: { sourceDir: srcDir, vulnClasses: ['xss'], outputDir: outDir, features: [{ slug: 'login', name: 'Login', domain: 'auth_identity', risk_hint: 'high', keywords: 'auth' }] } }, deps)
     ok('A1: featuresMapped is ledger-derived — counts the follow-up feature (2, not the original 1)', res.featuresMapped === 2, 'got ' + res.featuresMapped)
     ok('A2: deterministic gate written to consolidated/ (the path SCRIBE reads)', fs.existsSync(path.join(outDir, 'phase1-maps', 'consolidated', 'phase1_completion_gate.md')))
-    ok('S6: the followup was mapped + assessed in a reconcile round',
-      calls.some(c => c.sessionSuffix.includes('batchR1')) && calls.some(c => c.sessionSuffix.includes('p2-xss-oauth-callback')),
-      calls.map(c => c.sessionSuffix).filter(s => /batchR|oauth/.test(s)).join(','))
+    ok('S6: the followup was mapped in a reconcile round + queued for review (M6 review queue)',
+      calls.some(c => c.sessionSuffix.includes('batchR1')) &&
+      fs.readFileSync(path.join(outDir, 'phase2-review-queue.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).some(j => j.feature === 'oauth-callback' && j.cls === 'xss'),
+      calls.map(c => c.sessionSuffix).filter(s => /batchR|p2rev/.test(s)).join(','))
     try {
       const led = JSON.parse(fs.readFileSync(path.join(outDir, 'phase1-maps', 'mapping-ledger.json'), 'utf8'))
       ok('S6: ledger accounts for the reconciled feature', led.features['oauth-callback'] && led.features['oauth-callback'].status === 'done')
@@ -256,8 +261,12 @@ function stubDeps(spawnCalls, emitted = []) {
       stubDeps(calls))
     ok('1b: no error', !res.error, JSON.stringify(res).slice(0, 120))
     ok('1b: DEFAULT maps ALL 12 features (not the old floor-10)', res.featuresMapped === 12, 'got ' + res.featuresMapped)
-    const p2b = calls.filter(c => c.sessionSuffix.includes('-p2-'))
-    ok('1b: DEFAULT deep-assesses ALL 12 features × 2 classes = 24 (not the old top-6 → 12)', p2b.length === 24, 'got ' + p2b.length)
+    // M6: 24 jobs (12×2) are all queued for review, but they run as FEW persistent specialist sessions
+    // (one per agent: access-control→MARSHAL, xss→CIPHER = 2), not 24 fresh spawns.
+    const rqb = fs.readFileSync(path.join(outDir, 'phase2-review-queue.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l))
+    ok('1b: DEFAULT queues ALL 12 features × 2 classes = 24 review jobs (no top-6 cap)', rqb.length === 24, 'got ' + rqb.length)
+    const p2b = calls.filter(c => c.sessionSuffix.includes('-p2rev-'))
+    ok('1b: M6 runs those 24 jobs as 2 persistent specialist sessions, not 24 spawns', p2b.length === 2, 'got ' + p2b.length)
   }
 
   // ── Test 2: generic discovery path ──

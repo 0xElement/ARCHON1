@@ -130,6 +130,7 @@ const MAX_FEATURES_PER_BATCH = 8
 const MAX_PARALLEL_MAPPERS = 6
 const BATCH_CONCURRENCY = 3 // Phase 1 mapping: how many domain batches map at once
 const PHASE2_CONCURRENCY = 6 // Phase 2 review: wave width once every feature is mapped (review fans out wider than mapping)
+const REVIEW_SESSION_CONCURRENCY = 3 // M6: how many PERSISTENT specialist review sessions run at once (default 3; the spec's cap)
 const MAX_FOLLOWUP_ROUNDS = 3 // reconciliation rounds — bounds the map→followup→map loop (§4)
 // M2: rate-limit deferral. A rate-limited mapper marks its feature deferred_rate_limit (never blocked); the
 // dispatcher pauses until cooldown, then resumes. Bounded so a persistent limit can't loop forever — after
@@ -490,6 +491,52 @@ APPEND each candidate line the MOMENT you confirm it (one JSON object per line) 
 Write the report to: ${outFile} (mkdir -p first). Then reply one line: rows reverse-checked, findings (by severity), residual gaps.`
 }
 
+// M6: a PERSISTENT review-worker prompt — one specialist session works through MANY (feature × class) jobs in a
+// single call, instead of one fresh spawn per job. Each job keeps its own per-job report + candidate + pattern-
+// review + rejected files (so streaming/audit are unchanged); the worker just processes them back-to-back.
+function reviewSessionPrompt(agent, jobs, taskId, sourceDir, outDir) {
+  const catalogFor = (cls) => {
+    const c = CLASS[cls]
+    if (c.catalog) return `${METH}/catalogs/${c.catalog}`
+    try { const p = require('../intel/pattern-catalog').catalogPathFor(cls); if (p) return p } catch {}
+    return `(no catalog file — apply your full ${cls} pattern set)`
+  }
+  const rows = jobs.map((j, i) => {
+    const cf = candFileFor(outDir, j.cls, j.feature.slug)
+    return `${i + 1}. [${j.cls}] feature "${j.feature.slug}"
+   feature map (read fully): ${outDir}/phase1-maps/features/${j.feature.slug}.md
+   pattern catalog (apply EVERY pattern): ${catalogFor(j.cls)}
+   report → ${outDir}/phase2/${j.cls}/${j.feature.slug}.md
+   candidates (JSONL, append live) → ${cf}
+   pattern-review → ${outDir}/phase2/${j.cls}/${j.feature.slug}_pattern_review.md`
+  }).join('\n')
+  return `You are ${agent.toUpperCase()}, a PERSISTENT Phase-2 review worker session on the code-review squad (leader CURATOR).
+
+You own ${jobs.length} review job(s) below and process ALL of them in THIS one session — do NOT stop after the first,
+do NOT ask what to do next. A rate limit or tool failure is not a decision to skip a job; resume with the next one.
+
+Source tree: ${sourceDir}
+Router + anti-drift contract: ${METH}/prompts/phase2_vulnerability_assessment_router.md , ${METH}/checklists/anti_drift_execution_contract.md
+Report template + CVSS: ${METH}/templates/phase2_feature_report_template.md , ${METH}/templates/cvss_scoring_guide.md
+
+## Your review queue — process EACH job in order:
+${rows}
+
+## For EACH job above (repeat the full method per (feature, class) — do not batch or summarize across jobs):
+1. Read that feature's map fully: Endpoint/Action Ledger, files, gaps, follow-ups, same-functionality notes, ranked leads.
+2. Reverse-check EVERY ledger row + listed file + unresolved item + same-functionality sibling — re-read the source behind
+   each row and apply the FULL pattern catalog for that job's class (ranked leads set ORDER, not scope).
+3. For EVERY finding, the MOMENT you confirm it, APPEND one JSON object (JSONL, one per line) to THAT job's candidates
+   file (mkdir -p first) — do NOT batch to the end (a watcher streams each new line to the live board within ~10s):
+   {"feature":"<slug>","pattern":"<name>","pattern_id":"<catalog id or ''>","file":"<path>","line":<n>,"code_block":"<exact vulnerable source lines, verbatim>","source":"<untrusted input entry>","sink":"<dangerous sink>","endpoint":"<route/action or ''>","severity":"Critical|High|Medium|Low|Info","confidence":<0-100>,"hypothesis":"<attacker action>","evidence":"<file:line source→sink trace>","status":"SOURCE_CONFIRMED|NEEDS_LIVE_VALIDATION","required_blackbox_proof":"<what a live test must show, or ''>"}
+   Status: SOURCE_CONFIRMED (you read the bug) or NEEDS_LIVE_VALIDATION (needs a live hit) — NEVER RUNTIME_CONFIRMED here.
+4. Write that job's report file + pattern-review (EACH catalog pattern: matched_candidate/reviewed_no_issue/not_applicable/
+   needs_more_context). Rejected patterns → ${outDir}/rejected/<cls>-<slug>.jsonl (mkdir -p first).
+5. Move to the NEXT job and repeat until ALL ${jobs.length} are done.
+
+Then reply one line: jobs reviewed, findings by severity, residual gaps.`
+}
+
 // Phase 3 — freehand senior-pentester review (Autonomous OS Block D). Open-ended
 // reasoning to surface novel / business-logic vulns that the pattern pass misses.
 // fhDir = phase2/freehand (active, AUDITOR-globbed) or a non-globbed sibling (shadow).
@@ -713,14 +760,39 @@ async function runCodeReview(dispatch, deps) {
   async function assessBatch(considered, onProgress, concurrency) {
     const jobs = []
     for (const f of considered) for (const cls of vulnClasses) { jobs.push({ cls, feature: f }); _doneJobs.push({ cls, feature: f }) }
+    // M6: persist the review queue, then group jobs into PERSISTENT specialist sessions — one session per agent
+    // works through MANY (feature × class) jobs in a single call, instead of one fresh spawn per job. Each job
+    // keeps its own per-job candidate/report files, so streaming + audit + per-feature accounting are unchanged.
+    try { fs.mkdirSync(outDir, { recursive: true }); for (const j of jobs) fs.appendFileSync(`${outDir}/phase2-review-queue.jsonl`, JSON.stringify({ agent: CLASS[j.cls].agent, cls: j.cls, feature: j.feature.slug }) + '\n') } catch {}
+    const byAgent = new Map()
+    for (const j of jobs) { const a = CLASS[j.cls].agent; if (!byAgent.has(a)) byAgent.set(a, []); byAgent.get(a).push(j) }
+    const sessions = [...byAgent.entries()]
     const ok = {}
-    const res = await runWaves(jobs, concurrency || WAVE, async ({ cls, feature }) => {
+    const reviewConcurrency = Math.max(1, Math.min(sessions.length, concurrency ? Math.min(concurrency, REVIEW_SESSION_CONCURRENCY) : REVIEW_SESSION_CONCURRENCY))
+    const res = await runWaves(sessions, reviewConcurrency, async ([agent, ajobs]) => {
       if (cancelled()) return null
-      const agent = CLASS[cls].agent
-      const r = await safeSpawn(() => spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2-${cls}-${feature.slug}`, null),
-        `phase2 ${cls}/${feature.slug}`, (e) => { try { fs.appendFileSync(_phase2FailLog, JSON.stringify({ feature: feature.slug, cls, reason: (e && e.message) || String(e) }) + '\n') } catch {} })
-      if (r) { ok[feature.slug] = (ok[feature.slug] || 0) + 1; if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit [${cls}/${feature.slug}]: ${e.message}`) } } }
-      if (onProgress) onProgress()
+      emitRuntimeEvent({ session_id: `review-${agent}`, owner: agent, phase: 'review', status: 'session_start', assigned_total: ajobs.length, message: `${agent} reviewing ${ajobs.length} job(s)` })
+      // M6: review sessions are rate-limit-aware — pause + resume, never sleep-block or drop coverage.
+      let r = null
+      for (let attempt = 0; attempt <= DEFER_MAX_RETRIES; attempt++) {
+        r = await safeSpawn(() => spawnAgent(agent, taskId, reviewSessionPrompt(agent, ajobs, taskId, sourceDir, outDir), `task-${taskId}-p2rev-${agent}`, null, { deferOnRateLimit: true }),
+          `phase2 ${agent} (${ajobs.length} jobs)`, (e) => { for (const j of ajobs) { try { fs.appendFileSync(_phase2FailLog, JSON.stringify({ feature: j.feature.slug, cls: j.cls, reason: (e && e.message) || String(e) }) + '\n') } catch {} } })
+        if (!(r && r.retryable && r.reason === 'rate_limited')) break
+        const waitMs = Math.min(DEFER_MAX_WAIT_MS, Math.max(0, new Date(r.cooldownUntil || 0).getTime() - Date.now()))
+        emitRuntimeEvent({ session_id: `review-${agent}`, owner: agent, phase: 'review', status: 'rate_limit_pause', attempt: attempt + 1, message: `${agent} rate-limited — resume ${attempt + 1}/${DEFER_MAX_RETRIES} in ${Math.ceil(waitMs / 60000)} min` })
+        if (cancelled()) break
+        if (waitMs > 0) await sleep(waitMs + 3000)
+      }
+      const succeeded = !!(r && !r.retryable)
+      for (const j of ajobs) {
+        if (succeeded) {
+          ok[j.feature.slug] = (ok[j.feature.slug] || 0) + 1
+          const cf = candFileFor(outDir, j.cls, j.feature.slug)
+          if (fs.existsSync(cf) && typeof emitCandidate === 'function') { try { emitCandidatesFromFile(cf, j.cls, j.feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit [${j.cls}/${j.feature.slug}]: ${e.message}`) } }
+        }
+        emitRuntimeEvent({ session_id: `review-${agent}`, owner: agent, phase: 'review', feature: j.feature.slug, cls: j.cls, status: succeeded ? 'reviewed' : 'failed', message: `${agent} ${succeeded ? 'reviewed' : 'failed'} ${j.feature.slug}/${j.cls}` })
+        if (onProgress) onProgress()
+      }
       return r
     })
     trackCosts(res)
