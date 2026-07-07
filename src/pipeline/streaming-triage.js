@@ -49,7 +49,18 @@ function triageWorkers(cap, step, backlog, base) {
   return Math.max(1, Math.min(c, b + Math.floor(bl / s)))
 }
 
-module.exports = { nextBatch, triageWorkers }
+// S4 (parity §6): the source-review triage-session ladder — how many concurrent triage sessions for a given
+// candidate backlog. 1-20→1, 21-75→2, 76-200→3, 200+→4 (hard cap 4). Used for the code-review squad; black-box
+// triage keeps triageWorkers(). Pure + deterministic.
+function triageSessions(backlog) {
+  const n = Number(backlog) > 0 ? Number(backlog) : 0
+  if (n <= 20) return 1
+  if (n <= 75) return 2
+  if (n <= 200) return 3
+  return 4
+}
+
+module.exports = { nextBatch, triageWorkers, triageSessions }
 
 // self-check: the tail-and-dedup contract across successive polls.
 if (require.main === module) {
@@ -79,5 +90,10 @@ if (require.main === module) {
   assert.strictEqual(triageWorkers(3, 20, 500), 3)
   assert.strictEqual(triageWorkers(1, 20, 500), 1)
   assert.strictEqual(triageWorkers(3, 20, 5, 1), 1)   // explicit base=1 restores the old 1→serial start
-  console.log('ok — streaming-triage nextBatch tails + dedups; triageWorkers base+scale+cap')
+  // triageSessions: source-review ladder 1-20→1, 21-75→2, 76-200→3, 200+→4 (cap 4)
+  assert.strictEqual(triageSessions(0), 1); assert.strictEqual(triageSessions(20), 1)
+  assert.strictEqual(triageSessions(21), 2); assert.strictEqual(triageSessions(75), 2)
+  assert.strictEqual(triageSessions(76), 3); assert.strictEqual(triageSessions(200), 3)
+  assert.strictEqual(triageSessions(201), 4); assert.strictEqual(triageSessions(5000), 4)
+  console.log('ok — streaming-triage nextBatch tails + dedups; triageWorkers + triageSessions ladders')
 }

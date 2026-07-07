@@ -9012,7 +9012,8 @@ STEP 2 — if REAL, write the complete finding. Match the gold format: cat the c
 // "AGENT → TRIAGE → verdict" conversation. Fail-soft; returns { stop } (stop drains + returns
 // the confirmed count). Only started when Phase 2.7 is enabled (else the old batch flow runs).
 function startStreamingTriage(taskId, squad, projectId, targetUrl) {
-  const { nextBatch, triageWorkers } = require('./src/pipeline/streaming-triage')
+  const { nextBatch, triageWorkers, triageSessions } = require('./src/pipeline/streaming-triage')
+  const _isCodeReview = /code-review/.test(String(squad || ''))
   const { parseFindingsJsonl } = require('./src/pipeline/loose-jsonl')
   const liveFile = `${agentPaths.INTEL_ROOT}/live-findings-${taskId}.jsonl`
   const detailFile = `${agentPaths.INTEL_ROOT}/findings-detail-${taskId}.json`
@@ -9060,7 +9061,11 @@ function startStreamingTriage(taskId, squad, projectId, targetUrl) {
     // runWithConcurrency hands each out via a synchronous idx++ — so N workers never grab the
     // same finding, and none over-loops. Pool size scales with the backlog; caps.triageConcurrency=1
     // reproduces the old strictly-serial drain (one-by-one, emit order).
-    const workers = triageWorkers(_cap(squad, 'triageConcurrency', TRIAGE_MAX_WORKERS), _cap(squad, 'triageScaleStep', TRIAGE_SCALE_STEP), fresh.length, _cap(squad, 'triageMinWorkers', TRIAGE_MIN_WORKERS))
+    // S4 (parity §6): source-review triage follows the candidate→session ladder (cap 4); black-box keeps the
+    // backlog-scaled pool. Both stay bounded by the operator triageConcurrency cap.
+    const workers = _isCodeReview
+      ? Math.min(triageSessions(fresh.length), _cap(squad, 'triageConcurrency', TRIAGE_MAX_WORKERS))
+      : triageWorkers(_cap(squad, 'triageConcurrency', TRIAGE_MAX_WORKERS), _cap(squad, 'triageScaleStep', TRIAGE_SCALE_STEP), fresh.length, _cap(squad, 'triageMinWorkers', TRIAGE_MIN_WORKERS))
     await runWithConcurrency(fresh, workers, triageOne)
   }
 

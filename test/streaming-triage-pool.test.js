@@ -6,7 +6,18 @@
 //      up to `limit` in parallel.
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { triageWorkers } = require('../src/pipeline/streaming-triage')
+const { triageWorkers, triageSessions } = require('../src/pipeline/streaming-triage')
+
+test('triageSessions: source-review candidate→session ladder (parity §6), cap 4', () => {
+  assert.strictEqual(triageSessions(0), 1)
+  assert.strictEqual(triageSessions(20), 1)
+  assert.strictEqual(triageSessions(21), 2)
+  assert.strictEqual(triageSessions(75), 2)
+  assert.strictEqual(triageSessions(76), 3)
+  assert.strictEqual(triageSessions(200), 3)
+  assert.strictEqual(triageSessions(201), 4)
+  assert.strictEqual(triageSessions(9999), 4)   // hard cap 4 sessions
+})
 
 test('triageWorkers: two hands by default, a 3rd walks up at 20+, capped at 3', () => {
   assert.strictEqual(triageWorkers(3, 20, 0), 2)    // baseline: two triagers work by default
