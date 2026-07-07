@@ -574,25 +574,55 @@ async function injectSourceRuntimeCard(t) {
       ${s.current ? `<div class="src-worker-sub">current: ${esc(s.current)}</div>` : ''}
       ${s.last_event ? `<div class="src-worker-ev">${esc(s.last_event)}</div>` : ''}
     </div>`).join('') || '<div class="hint">workers starting…</div>'
+  // parity §9: Feature Coverage card — discovered / mapped / deep / reviewed / no-issue / candidates / gaps.
+  const cov = d.coverage
+  const section = (title, inner) => `
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border, rgba(255,255,255,.08))">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">${title}</div>${inner}
+      </div>`
+  const coverageHtml = cov ? section('Feature Coverage', `<div class="src-stats">
+          ${stat('Discovered', cov.discovered || 0)}
+          ${stat('Mapped', (cov.mapped || 0) + '/' + (cov.discovered || 0), 'var(--emerald)')}
+          ${stat('Deep review', cov.deep_mapped || 0)}
+          ${stat('Reviewed', cov.reviewed || 0)}
+          ${stat('No issue', cov.no_issue || 0)}
+          ${stat('With candidates', cov.with_candidates || 0, cov.with_candidates ? 'var(--accent-2, #8b9dff)' : '')}
+          ${stat('Blocked', cov.blocked || 0, cov.blocked ? 'var(--rose, #ef4444)' : '')}
+          ${stat('Deferred', cov.deferred || 0, cov.deferred ? 'var(--amber, #f59e0b)' : '')}
+          ${stat('Follow-ups', cov.followups || 0)}
+        </div>`) : ''
+  // parity §9: Findings Pipeline card — candidates → triage → validated → judged, + validation breakdown.
+  const p = d.pipeline
+  const pipelineHtml = (p && (p.candidates_emitted || p.validated)) ? section('Findings Pipeline', `<div class="src-stats">
+          ${stat('Candidates', p.candidates_emitted || 0)}
+          ${stat('In triage', p.in_triage || 0)}
+          ${stat('Validated', p.validated || 0, 'var(--accent-2, #8b9dff)')}
+          ${stat('Judged', p.judged || 0, 'var(--emerald)')}
+          ${stat('Needs live', p.needs_live || 0, p.needs_live ? 'var(--amber, #f59e0b)' : '')}
+          ${stat('Runtime confirmed', p.runtime_confirmed || 0, 'var(--emerald)')}
+          ${stat('Disproven', p.disproven || 0, p.disproven ? 'var(--rose, #ef4444)' : '')}
+        </div>`) : ''
   // M7: white-box validation breakdown — source-confirmed vs needs-live vs runtime-confirmed vs disproven.
   const v = d.validation
-  const validationHtml = (v && v.total) ? `
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border, rgba(255,255,255,.08))">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px">${d.mode === 'white-box' ? 'White-Box Validation' : 'Finding validation'}</div>
-        <div class="src-stats">
+  const validationHtml = (v && v.total) ? section(d.mode === 'white-box' ? 'White-Box Validation' : 'Finding validation', `<div class="src-stats">
           ${stat('Source confirmed', v.source_confirmed || 0, 'var(--accent-2, #8b9dff)')}
           ${stat('Needs live validation', v.needs_live || 0, v.needs_live ? 'var(--amber, #f59e0b)' : '')}
           ${stat('Runtime confirmed', v.runtime_confirmed || 0, 'var(--emerald)')}
           ${stat('Disproven', v.disproven || 0, v.disproven ? 'var(--rose, #ef4444)' : '')}
-        </div>
-      </div>` : ''
+        </div>`) : ''
+  // parity §9: live event feed off source-runtime-<taskId>.jsonl (most-recent last).
+  const feed = (d.recent || []).slice(-8).reverse().map(e =>
+    `<div class="src-worker-ev"><span style="color:var(--fg-dim)">${esc(String(e.ts || '').slice(11, 19))}</span> ${esc(e.message || e.status || e.session_id || '')}</div>`).join('')
+  const timelineHtml = feed ? section('Timeline', `<div class="src-feed">${feed}</div>`) : ''
+  const reviewSess = (plan.review && plan.review.max_concurrent_sessions) || '?'
+  const triageSess = (p && p.triage_sessions) || '?'
   const html = `
     <div class="card src-runtime" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Source Runtime <span style="font-weight:400;color:var(--fg-dim);font-size:12px">· ${esc(d.mode || 'static')}</span></h3>
         <span style="font-size:11.5px">rate limit: <b style="color:${rlColor}">${esc(rl)}</b></span>
       </div>
-      <div class="hint" style="margin:6px 0 12px">Planner: ${plan.features_total || c.total || 0} features → ${plan.mapping_sessions || '?'} mapping sessions (${plan.max_concurrent_sessions || '?'} concurrent) · ${esc(plan.strategy || '')}</div>
+      <div class="hint" style="margin:6px 0 12px">Planner: ${plan.features_total || c.total || 0} features → ${plan.mapping_sessions || '?'} mapping · ${esc(String(reviewSess))} review · ${esc(String(triageSess))} triage sessions (${plan.max_concurrent_sessions || '?'} concurrent) · ${esc(plan.strategy || '')}</div>
       <div class="src-stats">
         ${stat('Mapped', (c.mapped || 0) + '/' + (c.total || 0), 'var(--emerald)')}
         ${stat('In progress', c.in_progress || 0)}
@@ -601,7 +631,10 @@ async function injectSourceRuntimeCard(t) {
         ${stat('Blocked gaps', c.blocked || 0, c.blocked ? 'var(--rose, #ef4444)' : '')}
       </div>
       <div class="src-workers">${workers}</div>
+      ${coverageHtml}
+      ${pipelineHtml}
       ${validationHtml}
+      ${timelineHtml}
     </div>`
   const existing = host.querySelector('.src-runtime')
   if (existing) existing.outerHTML = html

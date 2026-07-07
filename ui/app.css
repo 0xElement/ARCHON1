@@ -732,3 +732,5 @@ ol.fsteps li { font-size: 13px; line-height: 1.5; }
 .src-runtime .src-worker-h span { font-family: var(--mono); color: var(--fg-dim); }
 .src-runtime .src-worker-sub { font-size: 11px; color: var(--accent-2, #8b9dff); margin-top: 3px; font-family: var(--mono); }
 .src-runtime .src-worker-ev { font-size: 10.5px; color: var(--fg-dim); margin-top: 3px; }
+.src-runtime .src-feed { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.src-runtime .src-feed .src-worker-ev { margin-top: 0; font-size: 11px; line-height: 1.5; }

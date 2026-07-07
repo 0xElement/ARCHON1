@@ -100,7 +100,27 @@ function sourceRuntimeForTask(taskId) {
       validation = { total: vf.length, source_confirmed: by.SOURCE_CONFIRMED || 0, needs_live: by.NEEDS_LIVE_VALIDATION || 0, runtime_confirmed: by.RUNTIME_CONFIRMED || 0, disproven: by.DISPROVEN || 0 }
     }
   } catch {}
-  return { taskId, mode: (plan && plan.mode) || 'static', plan, counts, sessions: Object.values(bySession), recent: events.slice(-12), rateLimit, validation }
+  // parity §9: Feature Coverage card — separate counters straight off the ledger (S2 rollups) + follow-ups.
+  const followups = (() => { try { return fs.readFileSync(path.join(crDir, 'phase1-maps', 'followup-features.jsonl'), 'utf-8').trim().split('\n').filter(Boolean).length } catch { return 0 } })()
+  const coverage = ledger ? {
+    discovered: ledger.features_total || 0, mapped: counts.mapped, deep_mapped: ledger.features_deep_mapped || 0,
+    reviewed: ledger.features_reviewed || 0, no_issue: ledger.features_reviewed_no_issue || 0,
+    with_candidates: ledger.features_candidates || 0, blocked: counts.blocked, deferred: counts.deferred, followups,
+  } : null
+  // parity §9: Findings Pipeline card — candidates emitted → in triage → validated → judged, with the
+  // validation-status breakdown. Counts are line-counts of the live streaming artifacts (fail-soft to 0).
+  const jsonlCount = (p) => { try { return fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean).length } catch { return 0 } }
+  const candidates_emitted = jsonlCount(path.join(INTEL, `live-findings-${taskId}.jsonl`))
+  const judged = jsonlCount(path.join(INTEL, `JUDGED-FINDINGS-${taskId}.jsonl`))
+  const validatedN = validation ? validation.total : 0
+  const triageLadder = (n) => n <= 20 ? 1 : n <= 75 ? 2 : n <= 200 ? 3 : 4 // parity §6
+  const pipeline = {
+    candidates_emitted, in_triage: Math.max(0, candidates_emitted - validatedN), validated: validatedN, judged,
+    needs_live: (validation && validation.needs_live) || 0, source_confirmed: (validation && validation.source_confirmed) || 0,
+    runtime_confirmed: (validation && validation.runtime_confirmed) || 0, disproven: (validation && validation.disproven) || 0,
+    triage_sessions: candidates_emitted ? triageLadder(candidates_emitted) : 0,
+  }
+  return { taskId, mode: (plan && plan.mode) || 'static', plan, counts, coverage, pipeline, sessions: Object.values(bySession), recent: events.slice(-12), rateLimit, validation }
 }
 function listReports() {
   const out = []
