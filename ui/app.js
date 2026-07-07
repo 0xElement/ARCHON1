@@ -574,6 +574,18 @@ async function injectSourceRuntimeCard(t) {
       ${s.current ? `<div class="src-worker-sub">current: ${esc(s.current)}</div>` : ''}
       ${s.last_event ? `<div class="src-worker-ev">${esc(s.last_event)}</div>` : ''}
     </div>`).join('') || '<div class="hint">workers starting…</div>'
+  // M7: white-box validation breakdown — source-confirmed vs needs-live vs runtime-confirmed vs disproven.
+  const v = d.validation
+  const validationHtml = (v && v.total) ? `
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border, rgba(255,255,255,.08))">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">${d.mode === 'white-box' ? 'White-Box Validation' : 'Finding validation'}</div>
+        <div class="src-stats">
+          ${stat('Source confirmed', v.source_confirmed || 0, 'var(--accent-2, #8b9dff)')}
+          ${stat('Needs live validation', v.needs_live || 0, v.needs_live ? 'var(--amber, #f59e0b)' : '')}
+          ${stat('Runtime confirmed', v.runtime_confirmed || 0, 'var(--emerald)')}
+          ${stat('Disproven', v.disproven || 0, v.disproven ? 'var(--rose, #ef4444)' : '')}
+        </div>
+      </div>` : ''
   const html = `
     <div class="card src-runtime" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -589,6 +601,7 @@ async function injectSourceRuntimeCard(t) {
         ${stat('Blocked gaps', c.blocked || 0, c.blocked ? 'var(--rose, #ef4444)' : '')}
       </div>
       <div class="src-workers">${workers}</div>
+      ${validationHtml}
     </div>`
   const existing = host.querySelector('.src-runtime')
   if (existing) existing.outerHTML = html

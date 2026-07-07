@@ -76,7 +76,18 @@ function sourceRuntimeForTask(taskId) {
   }
   const last = events.length ? events[events.length - 1] : null
   const rateLimit = last && last.status === 'rate_limit_pause' ? 'cooling' : (plan && plan.quota) || 'healthy'
-  return { taskId, mode: (plan && plan.mode) || 'static', plan, counts, sessions: Object.values(bySession), recent: events.slice(-12), rateLimit }
+  // M7: white-box validation breakdown — count the source findings by confirmation status. A source-only
+  // finding stays SOURCE_CONFIRMED; only a live-proven one is RUNTIME_CONFIRMED. Also surface the correlation
+  // report (matched/unmatched) when the deferred black-box validation run has produced one.
+  let validation = null
+  try {
+    const vf = fs.readFileSync(path.join(INTEL, `VALIDATED-FINDINGS-${taskId}.jsonl`), 'utf-8').trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+    if (vf.length) {
+      const by = {}; for (const f of vf) { const s = String(f.confirmation_status || 'NEEDS_LIVE_VALIDATION').toUpperCase(); by[s] = (by[s] || 0) + 1 }
+      validation = { total: vf.length, source_confirmed: by.SOURCE_CONFIRMED || 0, needs_live: by.NEEDS_LIVE_VALIDATION || 0, runtime_confirmed: by.RUNTIME_CONFIRMED || 0, disproven: by.DISPROVEN || 0 }
+    }
+  } catch {}
+  return { taskId, mode: (plan && plan.mode) || 'static', plan, counts, sessions: Object.values(bySession), recent: events.slice(-12), rateLimit, validation }
 }
 function listReports() {
   const out = []
