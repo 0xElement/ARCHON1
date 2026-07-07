@@ -419,11 +419,26 @@ function _dupKey(feature, cls, fileRel, c) {
   return [norm(c.feature || feature.slug), norm(cls), norm(fileRel), norm(c.sink || c.source)].join(':')
 }
 
+// Canonical confirmation status for a source-review candidate — the SINGLE source of truth for both the
+// `status` and `confirmation_status` fields (they must never diverge). A candidate can be:
+//   • DISPROVEN            — refuted (killed / false positive). Never relabelled as confirmed.
+//   • SOURCE_CONFIRMED     — affirmatively substantiated in code (the specialist SAID so).
+//   • NEEDS_LIVE_VALIDATION — a hypothesis awaiting a live target (the conservative default for anything the
+//                             specialist did not affirmatively confirm — never over-promoted to SOURCE_CONFIRMED).
+// RUNTIME_CONFIRMED is impossible at the source stage (code can't self-prove runtime) → downgraded to
+// SOURCE_CONFIRMED; only captured live proof upgrades it later. Mirrors agents/finding-schema deriveConfirmationStatus.
+function candidateConfirmation(raw) {
+  const s = String(raw == null ? '' : raw).toUpperCase().trim().replace(/[\s-]+/g, '_')
+  if (s === 'DISPROVEN' || s === 'KILLED' || s === 'FALSE_POSITIVE') return 'DISPROVEN'
+  if (s === 'SOURCE_CONFIRMED' || s === 'CONFIRMED' || s === 'RUNTIME_CONFIRMED') return 'SOURCE_CONFIRMED'
+  return 'NEEDS_LIVE_VALIDATION'
+}
+
 function toLiveCandidate(c, cls, feature, agent, sourceDir, mode) {
   if (!c || typeof c !== 'object') return null
   const title = (String(c.hypothesis || c.pattern || c.title || '').split(/[\n.:]/)[0].trim().slice(0, 120))
     || `${cls} candidate in ${feature.name || feature.slug}`
-  const status = (c.status === 'NEEDS_LIVE_VALIDATION' || c.status === 'DISPROVEN') ? c.status : 'SOURCE_CONFIRMED'
+  const status = candidateConfirmation(c.status)
   const fileRel = c.file || ''
   // affected_files: an explicit array wins; else the single file. requires_runtime_validation is true for any
   // source-substantiated finding that hasn't been live-proven (a DISPROVEN one needs nothing further).
@@ -440,9 +455,11 @@ function toLiveCandidate(c, cls, feature, agent, sourceDir, mode) {
     confidence: c.confidence ?? '', hypothesis: c.hypothesis || '', exploit_hypothesis: c.exploit_hypothesis || c.hypothesis || '',
     evidence: c.evidence || '', code_block: c.code_block || c.vulnerable_code || c.evidence || '',
     recommendation: c.recommendation || '', duplicate_key: c.duplicate_key || _dupKey(feature, cls, fileRel, c),
+    // a DISPROVEN finding needs nothing further; anything else source-substantiated still wants live proof.
     requires_runtime_validation: c.requires_runtime_validation ?? (status !== 'DISPROVEN'),
+    // status and confirmation_status are ONE truth — never let them diverge (that misrepresents validation).
     status, required_blackbox_proof: c.required_blackbox_proof || '',
-    confirmation_status: status === 'NEEDS_LIVE_VALIDATION' ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
+    confirmation_status: status,
   }
 }
 
@@ -1203,6 +1220,7 @@ module.exports = {
   buildInventories,
   selectVulnClasses,
   toLiveCandidate,
+  candidateConfirmation,
   DEFAULT_CLASSES,
   CLASS,
   MAPPER_POOL,

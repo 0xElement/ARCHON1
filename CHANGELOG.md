@@ -33,6 +33,11 @@ findings, validate before reporting.
 ### Fixed
 - **A failed review marked its feature `blocked`, wiping the mapping status.** Review outcomes now write
   the review dimension only; the mapping `done` is preserved and the failure is recorded separately.
+- **A streamed candidate's `confirmation_status` could misrepresent validation truth.** A `DISPROVEN`
+  candidate was relabelled `SOURCE_CONFIRMED`, and any unconfirmed/hypothesis status was over-promoted to
+  `SOURCE_CONFIRMED`. Both `status` and `confirmation_status` now derive from one canonical classifier
+  (DISPROVEN stays disproven; unknown/hypothesis stays `NEEDS_LIVE_VALIDATION`; source can never
+  self-claim `RUNTIME_CONFIRMED`) and can no longer diverge.
 
 ## [1.1.0] — 2026-07-07
 

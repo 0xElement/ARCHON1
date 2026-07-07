@@ -8,7 +8,7 @@ const cr = require('../src/dispatch/code-review-dispatcher')
 
 const feature = { slug: 'file-uploads-attachments', name: 'File uploads' }
 const raw = {
-  feature: 'file-uploads-attachments', pattern: 'path-traversal',
+  feature: 'file-uploads-attachments', pattern: 'path-traversal', status: 'SOURCE_CONFIRMED',
   file: 'app/uploaders/file_uploader.rb', line: 12, source: 'user-controlled filename',
   sink: 'filesystem path construction', endpoint: 'POST /uploads', severity: 'High', confidence: 0.72,
   hypothesis: 'crafted filename may influence stored path', evidence: 'source→sink flow',
@@ -46,4 +46,28 @@ test('S3: an explicit duplicate_key / affected_files[] from the specialist wins'
   const rec = cr.toLiveCandidate({ ...raw, duplicate_key: 'custom-key', affected_files: ['a.rb', 'b.rb'] }, 'path-traversal', feature, 'marshal', '/src', 'static')
   assert.equal(rec.duplicate_key, 'custom-key')
   assert.deepEqual(rec.affected_files, ['a.rb', 'b.rb'])
+})
+
+test('S3 FIX: a DISPROVEN candidate stays DISPROVEN — never relabelled SOURCE_CONFIRMED', () => {
+  const rec = cr.toLiveCandidate({ ...raw, status: 'DISPROVEN' }, 'path-traversal', feature, 'marshal', '/src', 'static')
+  assert.equal(rec.status, 'DISPROVEN')
+  assert.equal(rec.confirmation_status, 'DISPROVEN', 'the validation-truth field must NOT read SOURCE_CONFIRMED')
+  assert.equal(rec.requires_runtime_validation, false, 'a refuted finding needs no further validation')
+  // 'KILLED' is the same verdict in the sibling vocabulary
+  assert.equal(cr.toLiveCandidate({ ...raw, status: 'KILLED' }, 'path-traversal', feature, 'm', '/s', 'static').confirmation_status, 'DISPROVEN')
+})
+
+test('S3 FIX: an unconfirmed/hypothesis status is NOT over-promoted to SOURCE_CONFIRMED', () => {
+  for (const s of ['', undefined, 'matched_candidate', 'needs_blackbox_validation', 'SUSPECTED', 'NEEDS-LIVE']) {
+    const rec = cr.toLiveCandidate({ ...raw, status: s }, 'path-traversal', feature, 'marshal', '/src', 'static')
+    assert.equal(rec.confirmation_status, 'NEEDS_LIVE_VALIDATION', `status=${JSON.stringify(s)} → hypothesis, not confirmed`)
+  }
+})
+
+test('S3 FIX: status and confirmation_status never diverge (one source of truth)', () => {
+  for (const s of ['SOURCE_CONFIRMED', 'NEEDS_LIVE_VALIDATION', 'DISPROVEN', 'RUNTIME_CONFIRMED', 'garbage', '']) {
+    const rec = cr.toLiveCandidate({ ...raw, status: s }, 'path-traversal', feature, 'marshal', '/src', 'static')
+    assert.equal(rec.status, rec.confirmation_status, `status=${JSON.stringify(s)}: fields must agree`)
+    assert.notEqual(rec.confirmation_status, 'RUNTIME_CONFIRMED', 'a source candidate can never self-claim RUNTIME_CONFIRMED')
+  }
 })

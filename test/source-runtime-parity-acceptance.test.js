@@ -53,9 +53,12 @@ test('§11: follow-up features are never lost (reconcileFollowups)', () => {
 })
 
 test('§11: source-only findings are NOT marked runtime-confirmed (S3/M7)', () => {
-  const rec = cr.toLiveCandidate({ feature: 'f', file: 'a.rb', sink: 's' }, 'access-control', { slug: 'f' }, 'marshal', '/s', 'static')
+  const rec = cr.toLiveCandidate({ feature: 'f', file: 'a.rb', sink: 's', status: 'SOURCE_CONFIRMED' }, 'access-control', { slug: 'f' }, 'marshal', '/s', 'static')
   assert.equal(rec.confirmation_status, 'SOURCE_CONFIRMED')
+  assert.notEqual(rec.confirmation_status, 'RUNTIME_CONFIRMED')
   assert.ok(!rec.url, 'no fabricated runtime evidence')
+  // and a refuted finding is never relabelled confirmed (the DISPROVEN → SOURCE_CONFIRMED bug)
+  assert.equal(cr.toLiveCandidate({ feature: 'f', file: 'a.rb', sink: 's', status: 'DISPROVEN' }, 'access-control', { slug: 'f' }, 'm', '/s', 'static').confirmation_status, 'DISPROVEN')
   // only real captured runtime proof promotes; a URL alone does not
   const src = { confirmation_status: 'NEEDS_LIVE_VALIDATION' }
   assert.notEqual(wb.finalizeSourceStatus(src, { confirmation_status: 'RUNTIME_CONFIRMED', url: 'https://x' }).status, 'RUNTIME_CONFIRMED')
