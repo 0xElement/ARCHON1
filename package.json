@@ -1,6 +1,6 @@
 {
   "name": "archon",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "ARCHON — autonomous AI web-application penetration testing. White-box (source) + black-box (live) in one engagement, with independent verification, operator triage, and a merged report.",
   "main": "event-bus.js",
   "repository": {

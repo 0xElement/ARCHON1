@@ -6,7 +6,30 @@ All notable changes to ARCHON are documented here. The format follows
 
 ## [Unreleased]
 
-_Post-1.0 work in progress — see [BACKLOG.md](./BACKLOG.md) and [ROADMAP.md](./ROADMAP.md)._
+_Post-1.1 work in progress — see [BACKLOG.md](./BACKLOG.md) and [ROADMAP.md](./ROADMAP.md)._
+
+## [1.1.0] — 2026-07-07
+
+### Added
+- **Source Runtime: static & white-box review now runs as a few persistent, Claude-Code-style worker
+  sessions** instead of many short-lived spawns. A planner sizes the run (session ladder by feature
+  count, sharded by domain/risk, capped for concurrency) and each worker maps many features in one
+  long-lived context — closer to how a human reviewer works, and far easier on the rate limit.
+- **Rate-limit-aware execution that never stalls coverage.** A rate limit becomes a typed, retryable
+  `deferred_rate_limit` that pauses and resumes the affected features — it is no longer conflated with
+  a permanent `blocked` coverage gap. Quota health feeds back into session sizing (warm → fewer,
+  cooling → pause to one).
+- **Honest mapping ledger.** Distinct counters for mapped / in-progress / queued / deferred / blocked /
+  reviewed, so progress reports "mapped" (real work done) rather than an accounted-for total that hid
+  transient defers and blocks behind one number.
+- **Source Runtime dashboard card.** Live per-worker progress, plan/session breakdown, deferred and
+  blocked counts, and a White-Box Validation section (`GET /api/source-runtime`).
+
+### Changed
+- **White-box source→runtime validation is explicit.** A source candidate carries its live-validation
+  target (affected endpoint + required black-box proof) to the board and the deferred pentest queue. A
+  source-only finding stays `SOURCE_CONFIRMED` and is promoted to `RUNTIME_CONFIRMED` **only** with real
+  captured runtime proof — never on a URL alone.
 
 ## [1.0.2] — 2026-07-07
 
