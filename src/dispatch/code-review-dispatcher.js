@@ -130,6 +130,12 @@ const MAX_PARALLEL_MAPPERS = 6
 const BATCH_CONCURRENCY = 3 // Phase 1 mapping: how many domain batches map at once
 const PHASE2_CONCURRENCY = 6 // Phase 2 review: wave width once every feature is mapped (review fans out wider than mapping)
 const MAX_FOLLOWUP_ROUNDS = 3 // reconciliation rounds — bounds the map→followup→map loop (§4)
+// M2: rate-limit deferral. A rate-limited mapper marks its feature deferred_rate_limit (never blocked); the
+// dispatcher pauses until cooldown, then resumes. Bounded so a persistent limit can't loop forever — after
+// the budget, still-deferred features become a real blocked_coverage_gap (reported, not silently dropped).
+const DEFER_MAX_RETRIES = 6
+const DEFER_MAX_WAIT_MS = 35 * 60 * 1000 // cap a single cooldown wait (covers the 30-min quota ladder rung)
+const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)))
 // ONE comprehensive source-file extension set — the SAME list gates BOTH preflight file-detection AND
 // the scripted inventory grep, so any language a real codebase ships in gets enumerated (not just JS/TS).
 // Real source can be anything; keep this broad. The mapping agents also read the live tree directly, so
@@ -716,29 +722,60 @@ async function runCodeReview(dispatch, deps) {
     mappingLedger.save(outDir, ledger)
     return res
   }
+  // M2: shared mapping helpers — defined at function scope so the separate reconcile `if` block reuses them.
+  const mapExists = (slug) => fs.existsSync(`${outDir}/phase1-maps/features/${slug}.md`)
+  // Map ONE batch and record honest per-feature status: done (map file written) · deferred_rate_limit
+  // (retryable rate limit — resumes after cooldown, NEVER a coverage gap) · blocked (real miss, no map file).
+  const mapAndRecord = async (batch, sessionSuffix) => {
+    if (cancelled()) return null
+    for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
+    mappingLedger.save(outDir, ledger)
+    const mr = await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), sessionSuffix, null, { deferOnRateLimit: true }), `batch-map ${batch.id}`)
+    const rateLimited = !!(mr && mr.retryable && mr.reason === 'rate_limited')
+    for (const f of batch.features) {
+      if (mapExists(f.slug)) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'done', depth: 'fast' })
+      else if (rateLimited) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'deferred_rate_limit', cooldownUntil: (mr && mr.cooldownUntil) || null })
+      else ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked' })
+    }
+    mappingLedger.save(outDir, ledger)
+    trackCosts([mr].filter(Boolean))
+    updateProgress(25 + Math.round(15 * ledger.features_mapped / Math.max(1, ledger.features_total)), mappingStatusLine(ledger, ledger.features_total))
+    return mr
+  }
+  // Resume deferred (rate-limited) features: pause until the latest cooldown, re-map, repeat. Bounded by
+  // DEFER_MAX_RETRIES; whatever is still rate-limited after that becomes a REPORTED coverage gap, never a
+  // silent drop and never counted as mapped. This is the dispatcher-level "pause/resume, never block" loop.
+  const drainDeferred = async (label) => {
+    for (let attempt = 1; attempt <= DEFER_MAX_RETRIES; attempt++) {
+      if (cancelled()) return
+      const stuck = mappingLedger.deferred(ledger)
+      if (!stuck.length) return
+      const waitMs = Math.min(DEFER_MAX_WAIT_MS, Math.max(0, ...stuck.map(f => new Date(f.cooldownUntil || 0).getTime() - Date.now())))
+      log(`⏸️ ${label}: ${stuck.length} feature(s) deferred by rate limit — resume ${attempt}/${DEFER_MAX_RETRIES} in ${Math.ceil(waitMs / 60000)} min`)
+      updateProgress(25 + Math.round(15 * ledger.features_mapped / Math.max(1, ledger.features_total)), mappingStatusLine(ledger, ledger.features_total))
+      if (waitMs > 0) await sleep(waitMs + 3000)
+      if (cancelled()) return
+      const feats = stuck.map(f => _featureBySlug.get(f.slug) || { slug: f.slug, name: (f.name || f.slug), domain: f.domain, risk_hint: f.risk }).filter(Boolean)
+      const rb = featureBatching.assignBatches(featureBatching.createBatches(feats, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
+      await runWaves(rb, BATCH_CONCURRENCY, (batch) => mapAndRecord(batch, `task-${taskId}-defer${attempt}-${batch.id}`))
+    }
+    const left = mappingLedger.deferred(ledger)
+    for (const f of left) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked_coverage_gap', note: `rate-limit retries exhausted after ${DEFER_MAX_RETRIES} attempts` })
+    if (left.length) { mappingLedger.save(outDir, ledger); log(`⚠️ ${left.length} feature(s) still rate-limited after ${DEFER_MAX_RETRIES} attempts → blocked_coverage_gap (coverage gap, reported)`) }
+  }
   if (runPhase('mapping') || runPhase('phase2')) {
     const batches = featureBatching.assignBatches(featureBatching.createBatches(features, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
     ledger = mappingLedger.build(taskId, batches); mappingLedger.save(outDir, ledger)
     updateProgress(25, `Phase 1: mapping ${features.length} features → ${batches.length} batch(es)`)
     logActivity('CURATOR', `🗺️ Phase 1 mapping: ${features.length} features → ${batches.length} domain batch(es) across ${MAPPER_POOL.length} mappers`, { taskId, squad, projectId: projectId || '', details: batches.map(b => `${b.id}(${b.owner})`).join(', ') })
-    const mapExists = (slug) => fs.existsSync(`${outDir}/phase1-maps/features/${slug}.md`)
     const ownerOf = {}; for (const b of batches) for (const f of b.features) ownerOf[f.slug] = b.owner
-    // 1a. FAST-MAP every batch first (map only). Nothing else holds a batch's slot, so all features get a
-    // fast map quickly — no batch waits on another batch's deep-map or review. This is the "map all first" barrier.
-    if (runPhase('mapping')) await runWaves(batches, BATCH_CONCURRENCY, async (batch) => {
-      if (cancelled()) return null
-      for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
-      mappingLedger.save(outDir, ledger)
-      const mr = await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batch-${batch.id}`, null), `batch-map ${batch.id}`)
-      // If the mapper failed, its features simply have no map file → marked 'blocked' (fail-forward).
-      for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, mapExists(f.slug) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
-      mappingLedger.save(outDir, ledger)
-      trackCosts([mr].filter(Boolean))
-      // M1: progress is driven by features_MAPPED (real map files), never by accounted-for (which includes
-      // blocked/deferred). The status line stays honest — deferred (rate-limit) is shown, never hidden as "done".
-      updateProgress(25 + Math.round(15 * ledger.features_mapped / Math.max(1, features.length)), mappingStatusLine(ledger, features.length))
-      return null
-    })
+    // 1a. FAST-MAP every batch first (map only) — the "map all first" barrier. mapAndRecord marks a
+    // rate-limited mapper's features deferred_rate_limit; drainDeferred then pauses and resumes them so a
+    // transient limit never becomes a coverage gap and never counts as mapped.
+    if (runPhase('mapping')) {
+      await runWaves(batches, BATCH_CONCURRENCY, (batch) => mapAndRecord(batch, `task-${taskId}-batch-${batch.id}`))
+      await drainDeferred('fast-map')
+    }
     log(`🗺️ Phase 1 fast-map complete: ${ledger.features_mapped}/${ledger.features_total} feature(s) mapped` +
       (ledger.features_deferred ? ` · ${ledger.features_deferred} deferred (rate-limit)` : '') +
       (ledger.features_blocked ? ` · ${ledger.features_blocked} blocked` : ''))
@@ -753,10 +790,11 @@ async function runCodeReview(dispatch, deps) {
         updateProgress(40, `Phase 1: deep-mapping ${highRisk.length} high-risk feature(s)`)
         await runWaves(highRisk, MAX_PARALLEL_MAPPERS, async (f) => {
           if (cancelled()) return null
-          const dr = await safeSpawn(() => spawnAgent(ownerOf[f.slug], taskId, featureMapPrompt(ownerOf[f.slug], f, taskId, sourceDir, outDir, invDir), `task-${taskId}-deep-${f.slug}`, null), `deep-map ${f.slug}`)
+          const dr = await safeSpawn(() => spawnAgent(ownerOf[f.slug], taskId, featureMapPrompt(ownerOf[f.slug], f, taskId, sourceDir, outDir, invDir), `task-${taskId}-deep-${f.slug}`, null, { deferOnRateLimit: true }), `deep-map ${f.slug}`)
           trackCosts([dr].filter(Boolean))
-          // Deep succeeded → deep_complete; failed → stays 'deep' (attempted); the fast map still stands.
-          if (dr) { ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep_complete' }); mappingLedger.save(outDir, ledger) }
+          // Deep succeeded → deep_complete. A rate-limited deep-map (dr.retryable) is skipped, not retried —
+          // the fast map already stands, so the feature stays mapped at fast depth (deep is enrichment, not coverage).
+          if (dr && !dr.retryable) { ledger = mappingLedger.setFeature(ledger, f.slug, { depth: 'deep_complete' }); mappingLedger.save(outDir, ledger) }
           return null
         })
         log(`🔬 Deep-mapped ${highRisk.length} high-risk feature(s)`)
@@ -780,16 +818,10 @@ async function runCodeReview(dispatch, deps) {
       ledger = mappingLedger.addFeatures(ledger, fresh); mappingLedger.save(outDir, ledger)
       try { fs.writeFileSync(`${outDir}/phase1-maps/feature-queue.delta.json`, JSON.stringify({ round, features: fresh }, null, 2)) } catch {}
       const rBatches = featureBatching.assignBatches(featureBatching.createBatches(fresh, { maxPerBatch: MAX_FEATURES_PER_BATCH }), MAPPER_POOL)
-      await runWaves(rBatches, BATCH_CONCURRENCY, async (batch) => {
-        if (cancelled()) return null
-        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'in_progress', owner: batch.owner })
-        mappingLedger.save(outDir, ledger)
-        await safeSpawn(() => spawnAgent(batch.owner, taskId, batchMapPrompt(batch.owner, batch, taskId, sourceDir, outDir, invDir), `task-${taskId}-batchR${round}-${batch.id}`, null), `reconcile-map ${batch.id}`)
-        for (const f of batch.features) ledger = mappingLedger.setFeature(ledger, f.slug, fs.existsSync(`${outDir}/phase1-maps/features/${f.slug}.md`) ? { status: 'done', depth: 'fast' } : { status: 'blocked' })
-        mappingLedger.save(outDir, ledger)
-        // reconcile maps only — the follow-up features join the single Phase 2 review pool below the gate.
-        return null
-      })
+      // reconcile maps only — the follow-up features join the single Phase 2 review pool below the gate.
+      // mapAndRecord makes reconcile rate-limit-aware too (deferred, not blocked); drain resumes them.
+      await runWaves(rBatches, BATCH_CONCURRENCY, (batch) => mapAndRecord(batch, `task-${taskId}-batchR${round}-${batch.id}`))
+      await drainDeferred(`reconcile-r${round}`)
     }
     // A3: nothing may remain ONLY in followup-features.jsonl (§9). After the rounds, any followup slug not
     // in the ledger (more followups than the round budget) → a 'blocked' feature; invalid (no-slug) records
@@ -800,7 +832,11 @@ async function runCodeReview(dispatch, deps) {
       invalid.forEach((raw, i) => { const slug = `unresolved-followup-${i + 1}`; if (!ledger.features[slug]) { ledger = mappingLedger.addFeatures(ledger, [{ slug, name: (raw && raw.name) || slug, domain: 'misc', risk_hint: 'medium' }]); ledger = mappingLedger.setFeature(ledger, slug, { status: 'blocked', note: 'invalid follow-up record (missing slug)' }) } })
       if (unresolved.length || invalid.length) { mappingLedger.save(outDir, ledger); log(`🔁 Reconcile close-out: ${unresolved.length} unresolved + ${invalid.length} invalid follow-up(s) → blocked (reported, not dropped)`) }
     }
-    // Completion gate (§13): any non-terminal feature is a coverage gap → 'blocked' (never a silent skip).
+    // M2: the gate must NOT close over rate-limit pauses — give any still-deferred features a final
+    // resume pass first (drainDeferred converts only the truly-exhausted ones to blocked_coverage_gap).
+    await drainDeferred('completion-gate')
+    // Completion gate (§13): any remaining non-terminal feature is a real coverage gap → 'blocked' (never a
+    // silent skip). Post-drain these are queued/in-progress features that never produced a map, not rate limits.
     const stuck = mappingLedger.pending(ledger)
     for (const f of stuck) ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked' })
     if (stuck.length) mappingLedger.save(outDir, ledger)

@@ -3219,6 +3219,12 @@ function spawnAgent(agentName, taskId, message, sessionSuffix, modelOverride, op
     }
     const rawModel = `anthropic/${effectiveModel}` // for quota check
 
+    // M2: a rate limit detected mid-call is surfaced on the resolve object (retryable/cooldownUntil), so a
+    // caller that opts into deferral (source-review mappers) can pause+resume a feature instead of the
+    // executor sleep-blocking. Default callers (pentest) are unaffected — they ignore the extra fields.
+    let _rateLimited = false
+    let _cooldownUntil = null
+
     // ── Quota Gate: check before spawning ──
     const modelToCheck = rawModel
     const quotaCheck = quotaManager.canDispatch(modelToCheck)
@@ -3227,7 +3233,12 @@ function spawnAgent(agentName, taskId, message, sessionSuffix, modelOverride, op
       logActivity(agentName.toUpperCase(), `⏸️ Rate limit active — waiting for reset at ${quotaCheck.resetAt || 'unknown'}`, {
         type: 'quota_wait', taskId, squad: 'system'
       })
-      // Wait for cooldown then retry
+      // M2: deferring caller → return a typed retryable result NOW (no sleep). The dispatcher marks the
+      // feature deferred_rate_limit and resumes it after cooldown, so a transient limit never blocks coverage.
+      if (opts.deferOnRateLimit) {
+        return resolve({ agentName, code: 429, cost: null, output: '', ok: false, retryable: true, reason: 'rate_limited', cooldownUntil: quotaCheck.resetAt || quotaCheck.cooldownUntil || null })
+      }
+      // Default: wait for cooldown then retry (unchanged — pentest specialist waves rely on this).
       const waitMs = quotaCheck.waitMs || 180000
       log(`   Waiting ${Math.ceil(waitMs/60000)} min for quota reset...`)
       setTimeout(() => {
@@ -3482,8 +3493,10 @@ function spawnAgent(agentName, taskId, message, sessionSuffix, modelOverride, op
         logEvent('AGENT_DONE', { taskId, agent: agentName.toUpperCase(), exitCode: code, cost: cost ? cost.totalCost : 0 })
       } else if (quotaManager.isRateLimitError(output)) {
         const limitInfo = quotaManager.reportLimit(modelToCheck, output)
+        _rateLimited = true // M2: surfaced on the resolve object below
+        _cooldownUntil = limitInfo.cooldownUntil || null
         log(`  ⚡ ${agentName.toUpperCase()} rate-limited — cooldown ${limitInfo.waitMinutes} min (source: ${limitInfo.source})`)
-        logActivity(agentName.toUpperCase(), 
+        logActivity(agentName.toUpperCase(),
           `⚡ Rate limit hit — pausing ${limitInfo.waitMinutes} min, auto-resume at ${limitInfo.cooldownUntil}`,
           { type: 'rate_limit', taskId, squad: 'system' })
       } else {
@@ -3608,7 +3621,8 @@ function spawnAgent(agentName, taskId, message, sessionSuffix, modelOverride, op
       } catch (_markerErr) { /* fail-soft: marker post-processor must never break the pipeline */ }
 
 
-      resolve({ agentName, code, cost, output })
+      // M2: extra fields are additive — default callers destructure {agentName,code,cost,output} and ignore them.
+      resolve({ agentName, code, cost, output, ok: !_rateLimited, retryable: _rateLimited, reason: _rateLimited ? 'rate_limited' : undefined, cooldownUntil: _cooldownUntil })
     }
     // NOTE: the old child.on('error') handler is gone — the bridge NEVER throws.
     // A spawn/exec error that the old handler caught now surfaces as a bridge
