@@ -413,21 +413,34 @@ function _absFile(file, sourceDir) {
 // runtime field — that is exactly what keeps deriveConfirmationStatus (finding-schema.js) at
 // SOURCE_CONFIRMED, so a source-only finding can never become RUNTIME_CONFIRMED. type='candidate'
 // passes isCandidate; cwe=cls gives canonicalKey a per-class dedup discriminator.
-function toLiveCandidate(c, cls, feature, agent, sourceDir) {
+// S3 (parity §7): a deterministic dedup key so the same source→sink flow reported twice collapses to one.
+function _dupKey(feature, cls, fileRel, c) {
+  const norm = s => String(s || '').toLowerCase().trim().replace(/\s+/g, '-').slice(0, 60)
+  return [norm(c.feature || feature.slug), norm(cls), norm(fileRel), norm(c.sink || c.source)].join(':')
+}
+
+function toLiveCandidate(c, cls, feature, agent, sourceDir, mode) {
   if (!c || typeof c !== 'object') return null
   const title = (String(c.hypothesis || c.pattern || c.title || '').split(/[\n.:]/)[0].trim().slice(0, 120))
     || `${cls} candidate in ${feature.name || feature.slug}`
   const status = (c.status === 'NEEDS_LIVE_VALIDATION' || c.status === 'DISPROVEN') ? c.status : 'SOURCE_CONFIRMED'
+  const fileRel = c.file || ''
+  // affected_files: an explicit array wins; else the single file. requires_runtime_validation is true for any
+  // source-substantiated finding that hasn't been live-proven (a DISPROVEN one needs nothing further).
+  const affected = Array.isArray(c.affected_files) && c.affected_files.length ? c.affected_files : (fileRel ? [fileRel] : [])
   return {
-    type: 'candidate', agent: String(agent).toUpperCase(), original_agent: String(agent),
-    severity: c.severity || 'Medium', cwe: c.cwe || c.vuln_class || cls, title,
+    type: 'candidate', mode: mode || 'static', agent: String(agent).toUpperCase(), original_agent: String(agent),
+    severity: c.severity || 'Medium', cwe: c.cwe || c.vuln_class || cls, vulnerability_class: cls, title,
     details: String(c.evidence || c.hypothesis || '').slice(0, 2000),
     feature: c.feature || feature.slug, pattern: c.pattern || '', pattern_id: c.pattern_id || '',
     // absolute so the TRIAGER (which runs from the daemon cwd) reads the right source file; file_rel keeps
     // the specialist's original relative path for display.
-    file: _absFile(c.file, sourceDir), file_rel: c.file || '', line: c.line ?? '', source: c.source || '', sink: c.sink || '',
-    endpoint: c.endpoint || '', confidence: c.confidence ?? '', hypothesis: c.hypothesis || '',
+    file: _absFile(c.file, sourceDir), file_rel: fileRel, affected_files: affected, line: c.line ?? '',
+    source: c.source || '', sink: c.sink || '', endpoint: c.endpoint || '', affected_endpoint: c.endpoint || c.affected_endpoint || '',
+    confidence: c.confidence ?? '', hypothesis: c.hypothesis || '', exploit_hypothesis: c.exploit_hypothesis || c.hypothesis || '',
     evidence: c.evidence || '', code_block: c.code_block || c.vulnerable_code || c.evidence || '',
+    recommendation: c.recommendation || '', duplicate_key: c.duplicate_key || _dupKey(feature, cls, fileRel, c),
+    requires_runtime_validation: c.requires_runtime_validation ?? (status !== 'DISPROVEN'),
     status, required_blackbox_proof: c.required_blackbox_proof || '',
     confirmation_status: status === 'NEEDS_LIVE_VALIDATION' ? 'NEEDS_LIVE_VALIDATION' : 'SOURCE_CONFIRMED',
   }
@@ -435,13 +448,13 @@ function toLiveCandidate(c, cls, feature, agent, sourceDir) {
 
 // Read a job's candidate JSONL + push each shaped record to the emit sink. Fail-soft: a missing file
 // (specialist wrote none) or malformed lines yield 0 without throwing.
-function emitCandidatesFromFile(candFile, cls, feature, agent, taskId, emitCandidate, log, sourceDir) {
+function emitCandidatesFromFile(candFile, cls, feature, agent, taskId, emitCandidate, log, sourceDir, mode) {
   let raw; try { raw = fs.readFileSync(candFile, 'utf8') } catch { return 0 }
   let n = 0
   for (const line of raw.split('\n')) {
     const s = line.trim(); if (!s) continue
     let c; try { c = JSON.parse(s) } catch { continue }
-    const rec = toLiveCandidate(c, cls, feature, agent, sourceDir)
+    const rec = toLiveCandidate(c, cls, feature, agent, sourceDir, mode)
     if (rec) { try { emitCandidate(taskId, rec); n++ } catch {} }
   }
   if (n && typeof log === 'function') log(`  📡 ${String(agent).toUpperCase()} → ${n} candidate(s) to the live board [${cls}/${feature.slug}]`)
@@ -630,6 +643,7 @@ async function runCodeReview(dispatch, deps) {
   const runPhase = (p) => !Array.isArray(meta.phasesOnly) || meta.phasesOnly.length === 0 || meta.phasesOnly.includes(p)
   const outDir = meta.outputDir || `${__roots.INTEL_ROOT}/code-review/${taskId}`
   const deployUrl = meta.deployUrl || null
+  const crMode = deployUrl ? 'white-box' : 'static' // S3: stamped on every streamed candidate (parity §7)
 
   // Phase 0 — validate
   updateProgress(4, 'Phase 0: sourceDir validation')
@@ -737,7 +751,7 @@ async function runCodeReview(dispatch, deps) {
           for (const fn of files) {
             if (!fn.endsWith('.candidates.jsonl')) continue
             const slug = fn.replace(/\.candidates\.jsonl$/, '')
-            try { emitCandidatesFromFile(`${base}/${cls}/${fn}`, cls, { slug, name: slug }, agent, taskId, emitCandidate, () => {}, sourceDir) } catch {}
+            try { emitCandidatesFromFile(`${base}/${cls}/${fn}`, cls, { slug, name: slug }, agent, taskId, emitCandidate, () => {}, sourceDir, crMode) } catch {}
           }
         }
       } catch {}
@@ -788,7 +802,7 @@ async function runCodeReview(dispatch, deps) {
         if (succeeded) {
           ok[j.feature.slug] = (ok[j.feature.slug] || 0) + 1
           const cf = candFileFor(outDir, j.cls, j.feature.slug)
-          if (fs.existsSync(cf) && typeof emitCandidate === 'function') { try { emitCandidatesFromFile(cf, j.cls, j.feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ candidate emit [${j.cls}/${j.feature.slug}]: ${e.message}`) } }
+          if (fs.existsSync(cf) && typeof emitCandidate === 'function') { try { emitCandidatesFromFile(cf, j.cls, j.feature, agent, taskId, emitCandidate, log, sourceDir, crMode) } catch (e) { log(`  ⚠️ candidate emit [${j.cls}/${j.feature.slug}]: ${e.message}`) } }
         }
         emitRuntimeEvent({ session_id: `review-${agent}`, owner: agent, phase: 'review', feature: j.feature.slug, cls: j.cls, status: succeeded ? 'reviewed' : 'failed', message: `${agent} ${succeeded ? 'reviewed' : 'failed'} ${j.feature.slug}/${j.cls}` })
         if (onProgress) onProgress()
@@ -995,7 +1009,7 @@ async function runCodeReview(dispatch, deps) {
         const more = await runWaves(extra, PHASE2_CONCURRENCY, async ({ cls, feature }) => {
           const agent = CLASS[cls].agent
           const r = await spawnAgent(agent, taskId, phase2Prompt(cls, agent, feature, taskId, sourceDir, outDir), `task-${taskId}-p2r-${cls}-${feature.slug}`, null)
-          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir) } catch {} }
+          if (typeof emitCandidate === 'function') { try { emitCandidatesFromFile(candFileFor(outDir, cls, feature.slug), cls, feature, agent, taskId, emitCandidate, log, sourceDir, crMode) } catch {} }
           return r
         })
         trackCosts(more)
@@ -1045,7 +1059,7 @@ async function runCodeReview(dispatch, deps) {
       const r = await spawnAgent(agent, taskId, freehandPrompt(agent, feature, taskId, sourceDir, outDir, fhDir), `task-${taskId}-fh-${feature.slug}`, null)
       // Freehand candidates stream to the live board too (M2), through the same sink as Phase 2.
       if (typeof emitCandidate === 'function') {
-        try { emitCandidatesFromFile(`${fhDir}/${feature.slug}.candidates.jsonl`, 'freehand', feature, agent, taskId, emitCandidate, log, sourceDir) } catch (e) { log(`  ⚠️ freehand candidate emit [${feature.slug}]: ${e.message}`) }
+        try { emitCandidatesFromFile(`${fhDir}/${feature.slug}.candidates.jsonl`, 'freehand', feature, agent, taskId, emitCandidate, log, sourceDir, crMode) } catch (e) { log(`  ⚠️ freehand candidate emit [${feature.slug}]: ${e.message}`) }
       }
       return r
     })
@@ -1174,6 +1188,7 @@ module.exports = {
   detectStack,
   buildInventories,
   selectVulnClasses,
+  toLiveCandidate,
   DEFAULT_CLASSES,
   CLASS,
   MAPPER_POOL,
