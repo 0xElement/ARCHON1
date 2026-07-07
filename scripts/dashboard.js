@@ -114,11 +114,15 @@ function sourceRuntimeForTask(taskId) {
   const judged = jsonlCount(path.join(INTEL, `JUDGED-FINDINGS-${taskId}.jsonl`))
   const validatedN = validation ? validation.total : 0
   const triageLadder = (n) => n <= 20 ? 1 : n <= 75 ? 2 : n <= 200 ? 3 : 4 // parity §6
+  // #5: prefer the REAL triage session count emitted by the triager (last triage_sessions event); fall back to
+  // the candidate-count estimate only if the triager hasn't reported yet.
+  const realTriage = events.filter(e => e.status === 'triage_sessions').slice(-1)[0]
   const pipeline = {
     candidates_emitted, in_triage: Math.max(0, candidates_emitted - validatedN), validated: validatedN, judged,
     needs_live: (validation && validation.needs_live) || 0, source_confirmed: (validation && validation.source_confirmed) || 0,
     runtime_confirmed: (validation && validation.runtime_confirmed) || 0, disproven: (validation && validation.disproven) || 0,
-    triage_sessions: candidates_emitted ? triageLadder(candidates_emitted) : 0,
+    triage_sessions: realTriage ? realTriage.session_count : (candidates_emitted ? triageLadder(candidates_emitted) : 0),
+    triage_sessions_source: realTriage ? 'actual' : 'estimated',
   }
   // parity §9.4: planned (from the plan) vs actually-active mapping sessions, so the UI can explain quota
   // backoff (e.g. planned 4, active 3 because quota was constrained). A mapping session is "active" once it

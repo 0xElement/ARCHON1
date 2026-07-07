@@ -9021,6 +9021,14 @@ function startStreamingTriage(taskId, squad, projectId, targetUrl) {
   const EX = `${agentPaths.AGENTS_ROOT}/common/reporting/templates/examples`
   const seen = new Set()
   let running = true, idn = 0, confirmed = 0
+  // #5: emit the ACTUAL triage session count to the Source Runtime timeline (code-review only) so the UI shows
+  // real sessions, not an estimate. Only on change, fail-soft — telemetry must never break triage.
+  let _lastTriageWorkers = -1
+  const emitTriageSessions = (workers, backlog) => {
+    if (!_isCodeReview || workers === _lastTriageWorkers) return
+    _lastTriageWorkers = workers
+    try { fs.appendFileSync(`${agentPaths.INTEL_ROOT}/source-runtime-${taskId}.jsonl`, JSON.stringify({ ts: new Date().toISOString(), taskId, phase: 'triage', status: 'triage_sessions', session_count: workers, backlog, message: `triage: ${workers} session(s) for ${backlog} candidate(s)` }) + '\n') } catch {}
+  }
   const flow = (agent, msg, details) => logActivity(agent, msg, { type: 'triage-flow', squad, taskId, projectId: projectId || '', details: details || '' })
 
   async function triageOne(f) {
@@ -9066,6 +9074,8 @@ function startStreamingTriage(taskId, squad, projectId, targetUrl) {
     const workers = _isCodeReview
       ? Math.min(triageSessions(fresh.length), _cap(squad, 'triageConcurrency', TRIAGE_MAX_WORKERS))
       : triageWorkers(_cap(squad, 'triageConcurrency', TRIAGE_MAX_WORKERS), _cap(squad, 'triageScaleStep', TRIAGE_SCALE_STEP), fresh.length, _cap(squad, 'triageMinWorkers', TRIAGE_MIN_WORKERS))
+    emitTriageSessions(workers, fresh.length) // #5: record the real triage session count on the timeline
+
     await runWithConcurrency(fresh, workers, triageOne)
   }
 
