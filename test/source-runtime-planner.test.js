@@ -7,14 +7,14 @@ const P = require('../src/dispatch/source-runtime-planner')
 
 const mk = (n, domain = 'misc') => Array.from({ length: n }, (_, i) => ({ slug: `${domain}-${i}`, domain }))
 
-test('session ladder by feature count', () => {
+test('session ladder by feature count (spec §1: 1-30→1, 31-90→3, 91-200→4, 201-500→5, 500+→6)', () => {
   assert.equal(P.baseSessions(0), 1)
-  assert.equal(P.baseSessions(20), 1)
-  assert.equal(P.baseSessions(21), 2)
-  assert.equal(P.baseSessions(60), 2)
-  assert.equal(P.baseSessions(61), 3)
-  assert.equal(P.baseSessions(120), 3)
-  assert.equal(P.baseSessions(250), 4)
+  assert.equal(P.baseSessions(30), 1)
+  assert.equal(P.baseSessions(31), 3)   // no 2-session tier: 1 jumps straight to 3
+  assert.equal(P.baseSessions(90), 3)
+  assert.equal(P.baseSessions(91), 4)
+  assert.equal(P.baseSessions(200), 4)
+  assert.equal(P.baseSessions(201), 5)
   assert.equal(P.baseSessions(500), 5)
   assert.equal(P.baseSessions(501), 6)
   assert.equal(P.baseSessions(100000), 6)

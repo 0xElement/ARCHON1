@@ -8,12 +8,13 @@
 // instead of many short-lived spawns. More sessions = more concurrent draw on the one subscription bucket, so
 // concurrency is capped hard and shrunk when quota is unhealthy.
 
-// Session ladder by feature count (spec §1). Index by how many features there are.
+// Session ladder by feature count (spec §1). Index by how many features there are. This is the CEILING when
+// quota is healthy; applyQuota() shrinks it under rate-limit pressure. No 2-session tier by design — the spec
+// jumps 1→3 so mid-size scans still parallelise, and the quota gate is what protects the rate limit.
 function baseSessions(total) {
-  if (total <= 20) return 1
-  if (total <= 60) return 2
-  if (total <= 120) return 3
-  if (total <= 250) return 4
+  if (total <= 30) return 1
+  if (total <= 90) return 3
+  if (total <= 200) return 4
   if (total <= 500) return 5
   return 6
 }
@@ -121,8 +122,8 @@ module.exports = { planSourceRuntime, baseSessions, applyQuota, shard, DEFAULT_M
 if (require.main === module) {
   const assert = require('node:assert')
   const mk = (n, domain = 'misc') => Array.from({ length: n }, (_, i) => ({ slug: `${domain}-${i}`, domain }))
-  assert.strictEqual(baseSessions(20), 1); assert.strictEqual(baseSessions(21), 2); assert.strictEqual(baseSessions(120), 3)
-  assert.strictEqual(baseSessions(250), 4); assert.strictEqual(baseSessions(500), 5); assert.strictEqual(baseSessions(9999), 6)
+  assert.strictEqual(baseSessions(30), 1); assert.strictEqual(baseSessions(31), 3); assert.strictEqual(baseSessions(90), 3)
+  assert.strictEqual(baseSessions(200), 4); assert.strictEqual(baseSessions(500), 5); assert.strictEqual(baseSessions(9999), 6)
   // 20 → single session
   let p = planSourceRuntime({ features: mk(20) })
   assert.strictEqual(p.mapping_sessions, 1); assert.strictEqual(p.strategy, 'single_persistent_worker')
