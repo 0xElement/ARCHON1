@@ -32,27 +32,43 @@ function applyQuota(base, quota) {
   }
 }
 
-// Greedy domain-aware sharding: keep a domain's features together, balance session sizes (bin-packing by
-// fewest-features-first). Related features (same domain) land in the same worker where possible.
+const riskRank = (f) => { const r = String((f && (f.risk_hint || f.risk)) || '').toLowerCase(); return r === 'high' ? 0 : r === 'medium' ? 1 : 2 }
+
+// Domain-aware balanced sharding. Keep a domain's features together WHERE POSSIBLE, but an oversized domain is
+// SPLIT into chunks of ~targetPerSession so a single broad domain (e.g. everything tagged "misc") still fans
+// out across all the sessions the feature-count ladder asked for — never collapses to one worker. Chunks are
+// greedily packed into the fewest-features bin so sessions stay balanced.
 function shard(features, sessions) {
-  const bins = Array.from({ length: sessions }, (_, i) => ({ session_id: `map-worker-${i + 1}`, feature_count: 0, domain_focus: [], features: [] }))
-  // group by domain, largest groups first so they seed the bins evenly
+  sessions = Math.max(1, Math.min(sessions, features.length || 1))
+  const targetPerSession = Math.max(1, Math.ceil(features.length / sessions))
+  // group by domain
   const byDomain = new Map()
   for (const f of features) {
     const d = (f && (f.domain || (f.batch && f.batch.domain))) || 'misc'
     if (!byDomain.has(d)) byDomain.set(d, [])
     byDomain.get(d).push(f)
   }
-  const groups = [...byDomain.entries()].sort((a, b) => b[1].length - a[1].length)
-  for (const [domain, feats] of groups) {
-    // place the whole domain group in the currently-smallest bin (ties → lowest index for determinism)
+  // build chunks: within a domain, order high-risk-first then by slug (keeps related features adjacent), then
+  // slice into ≤ targetPerSession pieces. A domain ≤ targetPerSession stays a single chunk (locality preserved).
+  const chunks = []
+  for (const [domain, feats] of byDomain) {
+    feats.sort((a, b) => riskRank(a) - riskRank(b) || String(a.slug).localeCompare(String(b.slug)))
+    for (let i = 0; i < feats.length; i += targetPerSession) {
+      const slice = feats.slice(i, i + targetPerSession)
+      chunks.push({ domain, feats: slice, highRisk: slice.some((f) => riskRank(f) === 0) })
+    }
+  }
+  // place high-risk + larger chunks first so greedy balancing has room to even out
+  chunks.sort((a, b) => (Number(b.highRisk) - Number(a.highRisk)) || (b.feats.length - a.feats.length))
+  const bins = Array.from({ length: sessions }, (_, i) => ({ session_id: `map-worker-${i + 1}`, feature_count: 0, domain_focus: [], features: [] }))
+  for (const ch of chunks) {
     let target = bins[0]
     for (const b of bins) if (b.feature_count < target.feature_count) target = b
-    if (!target.domain_focus.includes(domain)) target.domain_focus.push(domain)
-    for (const f of feats) target.features.push(f.slug)
-    target.feature_count += feats.length
+    if (!target.domain_focus.includes(ch.domain)) target.domain_focus.push(ch.domain)
+    for (const f of ch.feats) target.features.push(f.slug)
+    target.feature_count += ch.feats.length
   }
-  // drop empty bins (more sessions than domains) so we never report a worker with nothing to do
+  // drop only genuinely-empty bins (possible when features.length < sessions) — never a same-domain collapse
   return bins.filter((b) => b.feature_count > 0)
 }
 
@@ -67,12 +83,15 @@ function planSourceRuntime(input) {
   // operator override caps (never raises above what the ladder/quota chose)
   if (input && Number.isFinite(input.maxSessions)) mapping_sessions = Math.min(mapping_sessions, Math.max(1, input.maxSessions))
   mapping_sessions = Math.max(1, Math.min(mapping_sessions, HARD_MAX_SESSIONS))
+  // never ask for more sessions than there are features to map
+  mapping_sessions = Math.min(mapping_sessions, total)
   if (total === 0) mapping_sessions = 0
 
-  const max_concurrent_sessions = Math.min(mapping_sessions, DEFAULT_MAX_CONCURRENT)
+  // shard FIRST (splitting oversized domains into balanced chunks), then derive concurrency from what actually
+  // got built — so max_concurrent can never exceed the real session count (fixes {sessions:1, concurrent:3}).
   const sessions = mapping_sessions > 0 ? shard(features, mapping_sessions) : []
-  // the ladder may have wanted N sessions but sharding collapsed empty bins (fewer domains than N)
   const effective = sessions.length || mapping_sessions
+  const max_concurrent_sessions = Math.min(effective, DEFAULT_MAX_CONCURRENT)
 
   const strategy = quota === 'cooling' ? 'paused_rate_limit'
     : effective <= 1 ? 'single_persistent_worker'
@@ -114,6 +133,12 @@ if (require.main === module) {
   // 200 → 4 shards but only 3 concurrent
   p = planSourceRuntime({ features: [...mk(50, 'a'), ...mk(50, 'b'), ...mk(50, 'c'), ...mk(50, 'd')] })
   assert.strictEqual(p.mapping_sessions, 4); assert.strictEqual(p.max_concurrent_sessions, 3)
+  // single broad domain must STILL follow the ladder (the collapse bug): 200 misc → 4 balanced ~50 sessions
+  p = planSourceRuntime({ features: mk(200, 'misc') })
+  assert.strictEqual(p.mapping_sessions, 4); assert.strictEqual(p.sessions.length, 4)
+  assert.ok(p.sessions.every(s => s.feature_count >= 40 && s.feature_count <= 60), 'balanced ~50 each')
+  assert.ok(p.max_concurrent_sessions <= p.mapping_sessions)
+  assert.strictEqual(planSourceRuntime({ features: mk(1000, 'misc') }).mapping_sessions, 6)
   // quota cooling → 1 session, paused strategy
   p = planSourceRuntime({ features: mk(200, 'a'), quota: 'cooling' })
   assert.strictEqual(p.mapping_sessions, 1); assert.strictEqual(p.strategy, 'paused_rate_limit')
