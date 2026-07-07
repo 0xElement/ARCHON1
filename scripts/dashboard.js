@@ -58,11 +58,19 @@ function sourceRuntimeForTask(taskId) {
   try { ledger = JSON.parse(fs.readFileSync(path.join(crDir, 'phase1-maps', 'mapping-ledger.json'), 'utf-8')) } catch {}
   try { events = fs.readFileSync(path.join(INTEL, `source-runtime-${taskId}.jsonl`), 'utf-8').trim().split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean) } catch {}
   if (!plan && !ledger && !events.length) return null
+  // Live-honest mapping progress: the ledger only flips features to `done` when a whole worker session
+  // RETURNS, so mid-session it reads 0 mapped while dozens of feature maps already exist on disk. The map
+  // files ARE the real-time truth — count them and let them drive the displayed progress.
+  let mappedSlugs = new Set()
+  try { for (const f of fs.readdirSync(path.join(crDir, 'phase1-maps', 'features'))) if (f.endsWith('.md')) mappedSlugs.add(f.slice(0, -3)) } catch {}
   const counts = ledger ? {
-    total: ledger.features_total || 0, mapped: ledger.features_mapped || 0, in_progress: ledger.features_in_progress || 0,
+    total: ledger.features_total || 0,
+    mapped: Math.max(ledger.features_mapped || 0, mappedSlugs.size),
+    in_progress: 0, // recomputed below from the honest mapped count
     queued: ledger.features_queued || 0, deferred: ledger.features_deferred || 0, blocked: ledger.features_blocked || 0,
     reviewed: ledger.features_reviewed || 0, accounted: ledger.features_accounted || 0,
   } : {}
+  if (ledger) counts.in_progress = Math.max(0, counts.total - counts.mapped - counts.deferred - counts.blocked - (ledger.features_failed || 0) - counts.queued)
   // per-worker progress: fold the event stream by session_id (last-write-wins for current/last_event)
   const bySession = {}
   for (const e of events) {
@@ -73,6 +81,11 @@ function sourceRuntimeForTask(taskId) {
     if (e.feature) s.current = e.feature
     if (e.status === 'done') s.mapped++
     if (e.message) s.last_event = e.message
+  }
+  // Overlay live disk truth per worker: how many of this session's assigned features already have a map file.
+  for (const s of Object.values(bySession)) {
+    const ps = plan && Array.isArray(plan.sessions) ? plan.sessions.find(x => x.session_id === s.session_id) : null
+    if (ps && Array.isArray(ps.features)) s.mapped = Math.max(s.mapped, ps.features.filter(sl => mappedSlugs.has(sl)).length)
   }
   const last = events.length ? events[events.length - 1] : null
   const rateLimit = last && last.status === 'rate_limit_pause' ? 'cooling' : (plan && plan.quota) || 'healthy'
