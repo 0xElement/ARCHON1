@@ -93,7 +93,7 @@ test('Finding 1: a follow-up feature is mapped, reaches the return payload, and 
   fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })
 })
 
-test('Finding 3 (M6): a review SESSION failure blocks its features — recorded, not swallowed', async () => {
+test('Finding 3 (M6/S6): a review SESSION failure marks review_status=failed WITHOUT clobbering the done map', async () => {
   const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf3-'))
   fs.writeFileSync(path.join(srcDir, 'app.rb'), 'class A; def show; Order.find(params[:id]); end; end\n')
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crf3o-'))
@@ -115,11 +115,15 @@ test('Finding 3 (M6): a review SESSION failure blocks its features — recorded,
   const res = await cr.runCodeReview({ taskId: 'cr-f3', squad: 'code-review-squad', projectId: '',
     meta: { sourceDir: srcDir, vulnClasses: ['access-control'], outputDir: outDir } }, stub)
 
-  // alpha was mapped, but its only review session failed → the ledger marks it a review coverage gap (blocked),
-  // never silently counted as reviewed, and the failure is recorded in the audit trail.
+  // S6 (parity §4): alpha was MAPPED, but its only review session failed. The mapping status must stay `done`
+  // — a review failure is NOT a mapping coverage gap — while review_status records the failure, and the failed
+  // session is still captured in the audit trail. This is the "do not overwrite mapping_status: done" rule.
   const led = JSON.parse(fs.readFileSync(path.join(outDir, 'phase1-maps', 'mapping-ledger.json'), 'utf8'))
-  assert.equal(led.features.alpha.status, 'blocked', 'a failed review session → blocked coverage gap')
-  assert.ok(res.blockers >= 1, 'alpha reported as a blocker')
+  assert.equal(led.features.alpha.status, 'done', 'mapping status preserved — a failed review never clobbers a done map')
+  assert.equal(led.features.alpha.mapping_status, 'done')
+  assert.equal(led.features.alpha.review_status, 'failed', 'review failure recorded on the review dimension')
+  assert.equal(led.features_review_failed, 1)
+  assert.equal(led.features_blocked, 0, 'a review failure is not a mapping coverage gap')
   assert.ok(fs.existsSync(path.join(outDir, 'phase1-maps', 'phase2-failures.jsonl')), 'failed session recorded (audit trail)')
 
   fs.rmSync(srcDir, { recursive: true, force: true }); fs.rmSync(outDir, { recursive: true, force: true })

@@ -782,6 +782,8 @@ async function runCodeReview(dispatch, deps) {
     for (const j of jobs) { const a = CLASS[j.cls].agent; if (!byAgent.has(a)) byAgent.set(a, []); byAgent.get(a).push(j) }
     const sessions = [...byAgent.entries()]
     const ok = {}
+    const candidatesByFeature = {}   // slug → # candidates emitted (drives candidate_found vs reviewed_no_issue)
+    const agentsByFeature = {}        // slug → Set of agents that reviewed it (per-item assigned_agent)
     const reviewConcurrency = Math.max(1, Math.min(sessions.length, concurrency ? Math.min(concurrency, REVIEW_SESSION_CONCURRENCY) : REVIEW_SESSION_CONCURRENCY))
     const res = await runWaves(sessions, reviewConcurrency, async ([agent, ajobs]) => {
       if (cancelled()) return null
@@ -799,10 +801,11 @@ async function runCodeReview(dispatch, deps) {
       }
       const succeeded = !!(r && !r.retryable)
       for (const j of ajobs) {
+        (agentsByFeature[j.feature.slug] || (agentsByFeature[j.feature.slug] = new Set())).add(agent)
         if (succeeded) {
           ok[j.feature.slug] = (ok[j.feature.slug] || 0) + 1
           const cf = candFileFor(outDir, j.cls, j.feature.slug)
-          if (fs.existsSync(cf) && typeof emitCandidate === 'function') { try { emitCandidatesFromFile(cf, j.cls, j.feature, agent, taskId, emitCandidate, log, sourceDir, crMode) } catch (e) { log(`  ⚠️ candidate emit [${j.cls}/${j.feature.slug}]: ${e.message}`) } }
+          if (fs.existsSync(cf) && typeof emitCandidate === 'function') { try { const n = emitCandidatesFromFile(cf, j.cls, j.feature, agent, taskId, emitCandidate, log, sourceDir, crMode); if (n) candidatesByFeature[j.feature.slug] = (candidatesByFeature[j.feature.slug] || 0) + n } catch (e) { log(`  ⚠️ candidate emit [${j.cls}/${j.feature.slug}]: ${e.message}`) } }
         }
         emitRuntimeEvent({ session_id: `review-${agent}`, owner: agent, phase: 'review', feature: j.feature.slug, cls: j.cls, status: succeeded ? 'reviewed' : 'failed', message: `${agent} ${succeeded ? 'reviewed' : 'failed'} ${j.feature.slug}/${j.cls}` })
         if (onProgress) onProgress()
@@ -810,9 +813,20 @@ async function runCodeReview(dispatch, deps) {
       return r
     })
     trackCosts(res)
+    // S6 (parity §4): record the REVIEW dimension — NEVER the mapping status. A failed review stays a review
+    // failure; it must not clobber a `done` map. candidate_found vs reviewed_no_issue by whether any candidate
+    // streamed for the feature. Per-item fields: assigned_agent(s), finished_at, vulnerability_classes.
+    const _now = new Date().toISOString()
     for (const f of considered) {
-      if (ok[f.slug]) _assessedFeatures.add(f.slug)
-      else { ledger = mappingLedger.setFeature(ledger, f.slug, { status: 'blocked', note: 'all Phase 2 specialists failed' }); log(`⚠️ ${f.slug}: all Phase 2 jobs failed → blocked (review coverage gap)`) }
+      const agents = agentsByFeature[f.slug] ? [...agentsByFeature[f.slug]].join(',') : null
+      if (ok[f.slug]) {
+        _assessedFeatures.add(f.slug)
+        const rs = candidatesByFeature[f.slug] ? 'candidate_found' : 'reviewed_no_issue'
+        ledger = mappingLedger.setReview(ledger, f.slug, rs, { assigned_agent: agents, finished_at: _now, vulnerability_classes: vulnClasses })
+      } else {
+        ledger = mappingLedger.setReview(ledger, f.slug, 'failed', { assigned_agent: agents, finished_at: _now, error: 'all Phase 2 specialists failed' })
+        log(`⚠️ ${f.slug}: all Phase 2 jobs failed → review_status=failed (mapping preserved, not a coverage gap)`)
+      }
     }
     mappingLedger.save(outDir, ledger)
     return res
